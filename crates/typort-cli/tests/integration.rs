@@ -323,3 +323,124 @@ fn math_test_produces_omml() {
         "document.xml should contain math text '2'"
     );
 }
+
+#[test]
+fn docx_contains_core_properties() {
+    let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/hello.typ")).unwrap();
+    let doc = typort_core::convert_html(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+
+    // Verify docProps/core.xml exists
+    let names: Vec<String> = reader.file_names().map(String::from).collect();
+    assert!(
+        names.iter().any(|n| n == "docProps/core.xml"),
+        "docx should contain docProps/core.xml, got: {names:?}"
+    );
+
+    // Verify core.xml content
+    let core_xml = std::io::read_to_string(reader.by_name("docProps/core.xml").unwrap()).unwrap();
+    assert!(
+        core_xml.contains("cp:coreProperties"),
+        "core.xml should have cp:coreProperties root element"
+    );
+    assert!(
+        core_xml.contains("dc:title"),
+        "core.xml should contain dc:title element"
+    );
+    assert!(
+        core_xml.contains("Hello World"),
+        "dc:title should contain the first heading text"
+    );
+    assert!(
+        core_xml.contains("dcterms:created"),
+        "core.xml should contain dcterms:created element"
+    );
+
+    // Verify _rels/.rels references core properties
+    let rels_xml = std::io::read_to_string(reader.by_name("_rels/.rels").unwrap()).unwrap();
+    assert!(
+        rels_xml.contains("core-properties"),
+        "_rels/.rels should reference core-properties"
+    );
+
+    // Verify content types include core properties
+    let ct_xml = std::io::read_to_string(reader.by_name("[Content_Types].xml").unwrap()).unwrap();
+    assert!(
+        ct_xml.contains("core-properties"),
+        "content types should reference core-properties"
+    );
+}
+
+#[test]
+fn metadata_title_extracted_from_first_heading() {
+    let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/hello.typ")).unwrap();
+    let doc = typort_core::convert_html(&world).unwrap();
+
+    assert_eq!(
+        doc.metadata.title.as_deref(),
+        Some("Hello World"),
+        "metadata title should be extracted from first heading"
+    );
+}
+
+#[test]
+fn preset_overrides_page_margins() {
+    let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/hello.typ")).unwrap();
+    let mut doc = typort_core::convert_html(&world).unwrap();
+
+    // Load the built-in preset
+    let preset = typort_presets::load_preset(Path::new("../../presets"), "管理世界").unwrap();
+
+    // Apply preset page margins
+    if let Some(page) = &preset.page {
+        if let Some(top) = page.margin_top_cm {
+            doc.page_settings.margin_top = typort_presets::cm_to_twips(top);
+        }
+        if let Some(bottom) = page.margin_bottom_cm {
+            doc.page_settings.margin_bottom = typort_presets::cm_to_twips(bottom);
+        }
+        if let Some(left) = page.margin_left_cm {
+            doc.page_settings.margin_left = typort_presets::cm_to_twips(left);
+        }
+        if let Some(right) = page.margin_right_cm {
+            doc.page_settings.margin_right = typort_presets::cm_to_twips(right);
+        }
+    }
+
+    // Verify margins were overridden
+    assert_eq!(
+        doc.page_settings.margin_top, 1440,
+        "top margin should be 2.54cm = 1440 twips"
+    );
+    assert_eq!(
+        doc.page_settings.margin_bottom, 1440,
+        "bottom margin should be 2.54cm = 1440 twips"
+    );
+    assert_eq!(
+        doc.page_settings.margin_left, 1797,
+        "left margin should be 3.17cm = 1797 twips"
+    );
+    assert_eq!(
+        doc.page_settings.margin_right, 1797,
+        "right margin should be 3.17cm = 1797 twips"
+    );
+
+    // Write and verify margins appear in the XML
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    assert!(
+        doc_xml.contains("w:top=\"1440\""),
+        "page margins should reflect preset values"
+    );
+    assert!(
+        doc_xml.contains("w:left=\"1797\""),
+        "page margins should reflect preset values"
+    );
+}
