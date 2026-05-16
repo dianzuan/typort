@@ -47,91 +47,120 @@ Phase 2 (文档结构)    Phase 3 (数学公式)  [可并行]
 
 ---
 
-## Phase 0: 项目脚手架
+## Phase 0: 项目脚手架 ✅ 已完成 (2026-05-16)
 
-**工期**: 1-2 周
-**风险**: 低
-**前置依赖**: 无
+**工期**: 1 天（原估 1-2 周）
+**状态**: 已完成
 
-### 目标
+### 交付成果
 
-搭建项目基础设施，确保后续开发在可靠的工程环境中进行。
+- [x] Cargo workspace 结构（5 crates under `crates/`）
+- [x] CI 流水线（GitHub Actions：check / clippy / test / fmt）
+- [x] Typst 编译集成：`TyportWorld` 实现 `typst::World` trait
+- [x] 端到端管线：`.typ` → 编译 → 文本提取 → `.docx` ZIP
+- [x] 最小 .docx 生成：合法 ZIP + 完整 OOXML 部件
+- [x] 5 个测试通过，clippy 无 warning
 
-### 关键交付物
+### 🔴 关键发现（架构变更决策）
 
-- [ ] Cargo workspace 结构（顶层 workspace + 子 crate 划分）
-- [ ] CI 流水线（GitHub Actions：cargo check / clippy / test / fmt）
-- [ ] Typst 编译集成：自定义 `World` 实现，能编译 `.typ` 文件并获取 `Content` 内容树
-- [ ] 端到端测试骨架：输入 `.typ` -> 输出 `.docx` -> 解压验证 XML 内容
-- [ ] 最小 .docx 生成验证：能输出一个仅含“Hello World”的合法 .docx 文件
+Phase 0 验证暴露了一个**致命问题**：当前管线使用 `PagedDocument`（布局帧）提取渲染后的字形文本。这等同于 PDF → Word 的间接路径——**所有语义结构丢失**。
 
-### Cargo workspace 初步规划
+测试复杂论文（含标题、脚注、公式、表格）转换后发现 14 项检查全部不通过：无标题样式、无脚注、无表格、公式变为 Unicode 字形、无格式。
 
-```
-typort/
-  Cargo.toml              # workspace root
-  crates/
-    typort-cli/           # 命令行入口
-    typort-core/          # 内容树遍历 + 元素分发
-    typort-ooxml/         # OOXML 文档构建
-    typort-math/          # 数学公式转换 (Phase 3 启用)
-    typort-presets/       # 期刊预设加载 (Phase 5 启用)
-  tests/
-    fixtures/             # 测试用 .typ 文件
-    snapshots/            # 预期输出 XML 快照
-  presets/                # 期刊预设 TOML 文件
-```
-
-### 验收标准
-
-- `cargo build` 通过，无 warning
-- `cargo test` 通过基础集成测试
-- CI 流水线绿色
-- 能读取任意 `.typ` 文件，输出其 Content 树的元素类型列表
+**Phase 1 必须切换到 `HtmlDocument` 路径：**
+- `typst::compile::<HtmlDocument>(world)` 在 typst 0.14.2 中已存在
+- 需启用 `Feature::Html` + 添加 `typst-html` 依赖
+- 产出语义化 DOM 树：heading → `<h2>`-`<h6>`, par → `<p>`, footnote → link, table → `<table>` 等
+- Show rules 自动完成 Content → 语义元素的映射（`typst-html/src/rules.rs` 注册了全部转换规则）
+- 我们的工作简化为：遍历 DOM 树 → 映射到 OOXML XML
+- 这是目前所有 Typst → X 导出器（PDF、HTML、SVG）唯一验证过的正确路径
 
 ---
 
-## Phase 1: 核心文本管线
+## Phase 1: 语义管线（HtmlDocument → OOXML）
 
 **工期**: 4-6 周
-**风险**: 中
-**前置依赖**: Phase 0
+**风险**: 中（已通过 Phase 0 研究降低）
+**前置依赖**: Phase 0 ✅
 
 ### 目标
 
-打通从 Typst 编译到 .docx 输出的完整管线，实现基础文本和段落的正确转换。
+切换到 `HtmlDocument` 语义路径，实现 DOM 树到 OOXML 的结构化映射，产出具有正确段落、标题、格式和字体的 .docx。
+
+### 架构变更
+
+```
+旧路径（Phase 0，已废弃）:
+  .typ → compile::<PagedDocument> → 布局帧 → 扁平文本 → .docx
+  问题：所有语义丢失
+
+新路径（Phase 1）:
+  .typ → compile::<HtmlDocument> → 语义 DOM 树 → OOXML XML → .docx
+  优势：标题/段落/粗斜体/列表/表格/脚注 全部保留
+```
+
+### 关键技术步骤
+
+1. **启用 HTML 编译路径**
+   - `TyportWorld` 中启用 `Feature::Html`：
+     ```rust
+     let features: Features = [Feature::Html].into_iter().collect();
+     let library = Library::builder().with_features(features).build();
+     ```
+   - 添加 `typst-html` 依赖到 `typort-core`
+   - `typst::compile::<HtmlDocument>(world)` 产出 DOM 树
+
+2. **DOM → OOXML 转换器**（替换当前的 `convert.rs`）
+   - 遍历 `HtmlDocument.root: HtmlElement`
+   - 按 HTML tag 分发映射：
+
+   | HTML Tag | OOXML 映射 |
+   |----------|-----------|
+   | `<p>` | `w:p`（Normal 样式） |
+   | `<h2>`-`<h6>` | `w:p`（Heading 1-5 样式） |
+   | `<strong>` | `w:rPr > w:b` |
+   | `<em>` | `w:rPr > w:i` |
+   | `<ol>`, `<ul>` | `w:p` + `w:numPr` |
+   | `<table>` | `w:tbl > w:tr > w:tc` |
+   | text nodes | `w:r > w:t` |
+   | `<a>` (footnote) | `w:footnoteReference` + `footnotes.xml` |
+
+3. **CJK 字体处理**
+   - 生成 `styles.xml`：Normal 样式设定 `w:rFonts eastAsia="宋体" ascii="Times New Roman"`
+   - 生成 `fontTable.xml`：声明宋体、黑体、楷体、仿宋
+   - Heading 样式使用黑体
+
+4. **页面设置**
+   - `w:sectPr`：A4 纸张、页边距（从 Typst 文档属性读取或使用默认值）
+   - `w:spacing`：行距 1.5 倍
 
 ### 关键交付物
 
-- [ ] **Content 树遍历器**: 参照 `typst-html` 的 `Converter` 模式，实现元素类型分发（dispatch by element type）
-- [ ] **段落/Run 映射**: `ParElem` -> `w:p`，`TextElem` -> `w:r`，保留粗体（`StrongElem`）、斜体（`EmphElem`）、删除线（`StrikeElem`）等行内格式
-- [ ] **CJK 字体处理**: 生成正确的 `w:rFonts` 属性（`ascii` / `hAnsi` = Times New Roman, `eastAsia` = 宋体），生成 `fontTable.xml` 声明常用中文字体
-- [ ] **页面设置**: `PageElem` 的 size/margin 映射到 `w:sectPr`/`w:pgMar`，行距映射到 `w:spacing`
-- [ ] **基础样式**: 生成 `styles.xml`，定义 Normal、Heading 1-5、FootnoteText 等基础样式
-- [ ] **.docx 打包**: 使用 `zip` crate 将所有 XML 部件打包为合法 .docx
-
-### 技术要点
-
-- 基于 `docx-rs` (bokuweb) 生成段落、run、样式、页面设置
-- 使用 `quick-xml` 补充 `docx-rs` 不覆盖的 XML 片段
-- 实现 `TypstWorld` trait：文件读取、字体解析、时间戳等
+- [ ] `typst-html` 集成：能编译到 `HtmlDocument` 并打印 DOM 结构
+- [ ] DOM → OOXML 转换器：递归遍历 `HtmlElement` 树
+- [ ] 段落/Run 映射：text → `w:r`，保留粗体、斜体
+- [ ] 标题映射：`<h2>`-`<h6>` → Heading 1-5 样式（Word 导航窗格可识别）
+- [ ] CJK 字体：`styles.xml` + `fontTable.xml`
+- [ ] 页面设置：`w:sectPr` / `w:pgMar` / `w:spacing`
 
 ### 风险项
 
 | 风险 | 缓解措施 |
 |------|----------|
-| Typst `Content` API 与预期不符 | 参照 `typst-html` 源码，确保遍历方式一致 |
-| `docx-rs` CJK 字体 API 不完善 | 降级为 `quick-xml` 原生生成 `w:rFonts` |
-| Realization 管线理解偏差 | 先做最简路径（跳过 realization，直接遍历原始 Content 树），后续再优化 |
+| `HtmlDocument` API 为 internal/unstable | 已验证 0.14.2 中可用，锁定版本 |
+| 脚注在 HTML 导出中的表现形式未知 | 研究 `typst-html/src/rules.rs` 的 `FOOTNOTE_RULE` 实现 |
+| `HtmlElem` 可能不暴露所有信息 | 可同时保留 `PagedDocument` 路径作为降级方案（如页面设置） |
+| Show rules 可能改变元素结构 | 遵循 typst-html 的处理模式即可 |
 
 ### 验收标准
 
-- 输入一篇纯文本中文论文（无公式、无脚注），输出的 .docx 在 Word 中：
-  - 段落分割正确
+- 输入 `tests/fixtures/complex_paper.typ`（含标题、脚注、公式引用、表格），输出 .docx：
+  - Word 导航窗格正确显示标题层级
   - 粗体/斜体渲染正确
+  - 段落正确分割（非一页一段）
   - 中文显示为宋体，英文显示为 Times New Roman
-  - 页面大小为 A4，页边距符合设定值
-  - 行距符合设定值
+  - 页面大小为 A4，行距 1.5 倍
+  - 脚注为 Word 原生脚注（或至少作为独立段落保留）
 
 ---
 
