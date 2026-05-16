@@ -26,10 +26,13 @@ pub enum InlineElement {
 }
 
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct Run {
     pub text: String,
     pub bold: bool,
     pub italic: bool,
+    pub superscript: bool,
+    pub subscript: bool,
 }
 
 impl Run {
@@ -39,6 +42,8 @@ impl Run {
             text: text.into(),
             bold: false,
             italic: false,
+            superscript: false,
+            subscript: false,
         }
     }
 }
