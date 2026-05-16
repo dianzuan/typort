@@ -38,8 +38,8 @@ pub fn convert_html(world: &TyportWorld) -> Result<Document, Vec<String>> {
         doc.add_footnote(content.clone());
     }
 
-    let mut eq_counter = 0usize;
-    convert_block_children_with_math(&body.children, &mut doc, &equations, &mut eq_counter);
+    let mut eq_state = EquationState::default();
+    convert_block_children_with_math(&body.children, &mut doc, &equations, &mut eq_state);
 
     // Recovery: compile also to PagedDocument and recover content that was lost
     // (e.g. #align(center) content which has no HTML show rule)
@@ -66,6 +66,14 @@ fn find_body(root: &HtmlElement) -> Option<&HtmlElement> {
     None
 }
 
+#[derive(Default)]
+struct EquationState {
+    eq_index: usize,
+    chapter: u64,
+    eq_in_chapter: u64,
+    global_eq: u64,
+}
+
 fn tag_name(elem: &HtmlElement) -> String {
     let raw = format!("{}", elem.tag);
     raw.trim_matches('<').trim_matches('>').to_string()
@@ -76,7 +84,7 @@ fn convert_block_children_with_math(
     children: &[HtmlNode],
     doc: &mut Document,
     equations: &[Content],
-    eq_counter: &mut usize,
+    eq_state: &mut EquationState,
 ) {
     let mut i = 0;
     // Track whether the last item was an inline equation — if so, the next <p>
@@ -102,12 +110,12 @@ fn convert_block_children_with_math(
                     continue_paragraph = false;
                 } else {
                     continue_paragraph = false;
-                    convert_element_with_math(elem, doc, equations, eq_counter);
+                    convert_element_with_math(elem, doc, equations, eq_state);
                 }
             }
             HtmlNode::Tag(tag) => {
                 if is_tag_start(tag, "equation") {
-                    if let Some(eq_content) = equations.get(*eq_counter) {
+                    if let Some(eq_content) = equations.get(eq_state.eq_index) {
                         let omml = typort_math::equation_to_omml(eq_content);
 
                         let eq_packed = eq_content.to_packed::<EquationElem>();
@@ -115,18 +123,19 @@ fn convert_block_children_with_math(
                             .as_ref()
                             .is_some_and(|eq| *eq.block.as_option().as_ref().unwrap_or(&false));
 
-                        // Check if the equation has numbering
                         let eq_number = if is_block {
                             eq_packed.as_ref().and_then(|eq| {
-                                // numbering is Settable<Option<Numbering>>
                                 let numbering_opt = eq.numbering.as_option().as_ref()?.as_ref()?;
-                                // Only handle Pattern numbering (not Func, which needs Engine)
                                 if let Numbering::Pattern(pattern) = numbering_opt {
-                                    // Compute the equation number: we count block equations
-                                    // with numbering up to (and including) this one
-                                    let num =
-                                        count_numbered_block_equations(equations, *eq_counter);
-                                    Some(pattern.apply(&[num]).to_string())
+                                    eq_state.global_eq += 1;
+                                    eq_state.eq_in_chapter += 1;
+                                    let pieces = pattern.pieces();
+                                    let nums: Vec<u64> = if pieces >= 2 {
+                                        vec![eq_state.chapter, eq_state.eq_in_chapter]
+                                    } else {
+                                        vec![eq_state.global_eq]
+                                    };
+                                    Some(pattern.apply(&nums).to_string())
                                 } else {
                                     None
                                 }
@@ -156,7 +165,7 @@ fn convert_block_children_with_math(
                             continue_paragraph = true;
                         }
                     }
-                    *eq_counter += 1;
+                    eq_state.eq_index += 1;
                     let start_loc = tag.location();
                     i += 1;
                     while i < children.len() {
@@ -204,11 +213,15 @@ fn convert_element_with_math(
     elem: &HtmlElement,
     doc: &mut Document,
     equations: &[Content],
-    eq_counter: &mut usize,
+    eq_state: &mut EquationState,
 ) {
     let tag = tag_name(elem);
     match tag.as_str() {
-        "h2" => convert_heading(elem, doc, 1),
+        "h2" => {
+            eq_state.chapter += 1;
+            eq_state.eq_in_chapter = 0;
+            convert_heading(elem, doc, 1);
+        }
         "h3" => convert_heading(elem, doc, 2),
         "h4" => convert_heading(elem, doc, 3),
         "h5" => convert_heading(elem, doc, 4),
@@ -221,7 +234,7 @@ fn convert_element_with_math(
             if detect_alignment(elem).is_some() {
                 convert_paragraph(elem, doc);
             } else {
-                convert_block_children_with_math(&elem.children, doc, equations, eq_counter);
+                convert_block_children_with_math(&elem.children, doc, equations, eq_state);
             }
         }
         "section" => {
@@ -229,9 +242,9 @@ fn convert_element_with_math(
             if has_attr_value(elem, "role", "doc-endnotes") {
                 return;
             }
-            convert_block_children_with_math(&elem.children, doc, equations, eq_counter);
+            convert_block_children_with_math(&elem.children, doc, equations, eq_state);
         }
-        _ => convert_block_children_with_math(&elem.children, doc, equations, eq_counter),
+        _ => convert_block_children_with_math(&elem.children, doc, equations, eq_state),
     }
 }
 
@@ -456,27 +469,6 @@ fn collect_inlines_styled(
         }
         i += 1;
     }
-}
-
-/// Count the number of block equations with numbering up to and including `current_idx`.
-/// This gives us the 1-based equation number for the current equation.
-fn count_numbered_block_equations(equations: &[Content], current_idx: usize) -> u64 {
-    let mut count = 0u64;
-    for eq_content in equations.iter().take(current_idx + 1) {
-        if let Some(eq) = eq_content.to_packed::<EquationElem>() {
-            let is_block = *eq.block.as_option().as_ref().unwrap_or(&false);
-            let has_numbering = eq
-                .numbering
-                .as_option()
-                .as_ref()
-                .and_then(|o| o.as_ref())
-                .is_some();
-            if is_block && has_numbering {
-                count += 1;
-            }
-        }
-    }
-    count
 }
 
 /// Check if a `Tag` is a Start tag with the given element name.
