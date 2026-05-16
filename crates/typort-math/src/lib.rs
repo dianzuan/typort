@@ -71,7 +71,7 @@ fn convert_content<W: Write>(writer: &mut Writer<W>, content: &Content) -> std::
     } else if let Some(text) = content.to_packed::<TextElem>() {
         write_math_run(writer, &text.text)?;
     } else if content.to_packed::<SpaceElem>().is_some() {
-        write_math_run(writer, " ")?;
+        // OMML handles inter-element spacing automatically — don't emit explicit spaces
     } else {
         // For unknown elements, skip silently (styled wrappers, etc.)
     }
