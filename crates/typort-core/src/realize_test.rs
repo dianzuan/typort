@@ -80,8 +80,7 @@ mod tests {
 
     #[test]
     fn center_dom_structure() {
-        let world =
-            TyportWorld::new(Path::new("../../tests/fixtures/center_test.typ")).unwrap();
+        let world = TyportWorld::new(Path::new("../../tests/fixtures/center_test.typ")).unwrap();
         let result = typst::compile::<typst_html::HtmlDocument>(&world);
         let html_doc = result.output.unwrap();
         let root = &html_doc.root;
