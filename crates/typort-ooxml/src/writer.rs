@@ -320,7 +320,17 @@ fn write_paragraph<W: Write>(
         // Determine if we need to suppress the inherited first-line indent
         let suppress_indent =
             has_alignment && matches!(para.alignment, Some(Alignment::Center | Alignment::Right));
-        if has_style || has_list || has_alignment || suppress_indent {
+        // Check if this paragraph has a numbered equation (needs right tab stop)
+        let has_eq_number = para.inlines.iter().any(|i| {
+            matches!(
+                i,
+                InlineElement::Math {
+                    equation_number: Some(_),
+                    ..
+                }
+            )
+        });
+        if has_style || has_list || has_alignment || suppress_indent || has_eq_number {
             w.create_element("w:pPr").write_inner_content(|ppr| {
                 if let Some(style) = &para.style {
                     let style_id = match style {
@@ -344,13 +354,23 @@ fn write_paragraph<W: Write>(
                         Ok(())
                     })?;
                 }
+                // Emit tab stops for numbered equations (right-aligned at page width)
+                if has_eq_number {
+                    ppr.create_element("w:tabs").write_inner_content(|tabs| {
+                        tabs.create_element("w:tab")
+                            .with_attribute(("w:val", "right"))
+                            .with_attribute(("w:pos", "8306"))
+                            .write_empty()?;
+                        Ok(())
+                    })?;
+                }
                 // Emit indent: list indent or suppress first-line for center/right
                 if has_list {
                     ppr.create_element("w:ind")
                         .with_attribute(("w:left", "720"))
                         .with_attribute(("w:hanging", "360"))
                         .write_empty()?;
-                } else if suppress_indent {
+                } else if suppress_indent || has_eq_number {
                     ppr.create_element("w:ind")
                         .with_attribute(("w:firstLine", "0"))
                         .write_empty()?;
@@ -381,7 +401,15 @@ fn write_paragraph<W: Write>(
                 match inline {
                     InlineElement::Text(run) => write_run(w, run)?,
                     InlineElement::FootnoteRef(id) => write_footnote_ref(w, *id)?,
-                    InlineElement::Math { omml_xml } => write_math_inline(w, omml_xml)?,
+                    InlineElement::Math {
+                        omml_xml,
+                        equation_number,
+                    } => {
+                        write_math_inline(w, omml_xml)?;
+                        if let Some(num) = equation_number {
+                            write_equation_number(w, num)?;
+                        }
+                    }
                 }
             }
         }
@@ -455,6 +483,33 @@ fn write_table<W: Write>(writer: &mut Writer<W>, table: &Table) -> io::Result<()
             w.create_element("w:tr").write_inner_content(|tr_w| {
                 for cell in &row.cells {
                     tr_w.create_element("w:tc").write_inner_content(|tc_w| {
+                        // Emit cell properties if there are merges
+                        let has_colspan = cell.colspan > 1;
+                        let has_vmerge = cell.vmerge != crate::document::VMerge::None;
+                        if has_colspan || has_vmerge {
+                            tc_w.create_element("w:tcPr").write_inner_content(|tcpr| {
+                                if has_colspan {
+                                    let span_str = cell.colspan.to_string();
+                                    tcpr.create_element("w:gridSpan")
+                                        .with_attribute(("w:val", span_str.as_str()))
+                                        .write_empty()?;
+                                }
+                                if has_vmerge {
+                                    match &cell.vmerge {
+                                        crate::document::VMerge::Restart => {
+                                            tcpr.create_element("w:vMerge")
+                                                .with_attribute(("w:val", "restart"))
+                                                .write_empty()?;
+                                        }
+                                        crate::document::VMerge::Continue => {
+                                            tcpr.create_element("w:vMerge").write_empty()?;
+                                        }
+                                        crate::document::VMerge::None => {}
+                                    }
+                                }
+                                Ok(())
+                            })?;
+                        }
                         if cell.paragraphs.is_empty() {
                             // OOXML requires at least one paragraph per cell
                             tc_w.create_element("w:p").write_empty()?;
@@ -554,6 +609,25 @@ fn generate_numbering_xml(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<()> {
 fn write_math_inline<W: Write>(writer: &mut Writer<W>, omml_xml: &str) -> io::Result<()> {
     // Write the pre-serialized OMML XML directly into the stream
     writer.get_mut().write_all(omml_xml.as_bytes())?;
+    Ok(())
+}
+
+/// Write a right-aligned equation number after an OMML block equation.
+///
+/// This uses a right-aligned tab stop to position the number at the right margin,
+/// mimicking the standard Chinese journal equation numbering style.
+fn write_equation_number<W: Write>(writer: &mut Writer<W>, number: &str) -> io::Result<()> {
+    // Emit a run with a tab character followed by the equation number
+    writer.create_element("w:r").write_inner_content(|w| {
+        w.create_element("w:tab").write_empty()?;
+        Ok(())
+    })?;
+    writer.create_element("w:r").write_inner_content(|w| {
+        w.create_element("w:t")
+            .with_attribute(("xml:space", "preserve"))
+            .write_text_content(BytesText::new(number))?;
+        Ok(())
+    })?;
     Ok(())
 }
 

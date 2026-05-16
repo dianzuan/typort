@@ -444,3 +444,159 @@ fn preset_overrides_page_margins() {
         "page margins should reflect preset values"
     );
 }
+
+#[test]
+fn numbered_equation_has_right_aligned_number() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/numbered_eq.typ")).unwrap();
+    let doc = typort_core::convert_html(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    // Verify equation number "(1)" appears in the document
+    assert!(
+        doc_xml.contains("(1)"),
+        "document.xml should contain equation number (1)"
+    );
+    // Verify equation number "(2)" appears for the second equation
+    assert!(
+        doc_xml.contains("(2)"),
+        "document.xml should contain equation number (2)"
+    );
+    // Verify right-aligned tab stop is present
+    assert!(
+        doc_xml.contains("w:tab") && doc_xml.contains("right"),
+        "document.xml should have a right-aligned tab stop for equation numbering"
+    );
+    // Verify the OMML equation is still present
+    assert!(
+        doc_xml.contains("<m:oMathPara>"),
+        "document.xml should still contain the block equation"
+    );
+}
+
+#[test]
+fn numbered_equation_document_model_has_numbers() {
+    use typort_ooxml::document::{BlockElement, InlineElement};
+
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/numbered_eq.typ")).unwrap();
+    let doc = typort_core::convert_html(&world).unwrap();
+
+    // Find paragraphs with numbered equations
+    let numbered_eqs: Vec<&str> = doc
+        .body
+        .elements
+        .iter()
+        .filter_map(|e| {
+            if let BlockElement::Paragraph(p) = e {
+                for inline in &p.inlines {
+                    if let InlineElement::Math {
+                        equation_number: Some(num),
+                        ..
+                    } = inline
+                    {
+                        return Some(num.as_str());
+                    }
+                }
+            }
+            None
+        })
+        .collect();
+
+    assert_eq!(
+        numbered_eqs.len(),
+        2,
+        "should have 2 numbered equations, got {numbered_eqs:?}"
+    );
+    assert_eq!(numbered_eqs[0], "(1)");
+    assert_eq!(numbered_eqs[1], "(2)");
+}
+
+#[test]
+fn table_cell_supports_merged_cell_fields() {
+    use typort_ooxml::document::{Paragraph, TableCell, VMerge};
+
+    // Verify that the TableCell struct has the colspan/vmerge fields
+    let cell = TableCell {
+        paragraphs: vec![Paragraph::new()],
+        colspan: 2,
+        vmerge: VMerge::Restart,
+    };
+    assert_eq!(cell.colspan, 2);
+    assert_eq!(cell.vmerge, VMerge::Restart);
+
+    // Verify VMerge::Continue
+    let cont_cell = TableCell {
+        paragraphs: vec![Paragraph::new()],
+        colspan: 1,
+        vmerge: VMerge::Continue,
+    };
+    assert_eq!(cont_cell.vmerge, VMerge::Continue);
+}
+
+#[test]
+fn merged_cell_emits_grid_span_and_vmerge() {
+    use typort_ooxml::document::{Document, Paragraph, Table, TableCell, TableRow, VMerge};
+
+    let mut doc = Document::new();
+    let table = Table {
+        rows: vec![
+            TableRow {
+                cells: vec![
+                    TableCell {
+                        paragraphs: vec![Paragraph::new()],
+                        colspan: 2,
+                        vmerge: VMerge::Restart,
+                    },
+                    TableCell {
+                        paragraphs: vec![Paragraph::new()],
+                        colspan: 1,
+                        vmerge: VMerge::None,
+                    },
+                ],
+            },
+            TableRow {
+                cells: vec![
+                    TableCell {
+                        paragraphs: vec![Paragraph::new()],
+                        colspan: 2,
+                        vmerge: VMerge::Continue,
+                    },
+                    TableCell {
+                        paragraphs: vec![Paragraph::new()],
+                        colspan: 1,
+                        vmerge: VMerge::None,
+                    },
+                ],
+            },
+        ],
+    };
+    doc.add_table(table);
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    // Verify gridSpan is emitted
+    assert!(
+        doc_xml.contains("w:gridSpan") && doc_xml.contains("w:val=\"2\""),
+        "document.xml should contain w:gridSpan with val=2 for colspan=2 cell"
+    );
+    // Verify vMerge restart
+    assert!(
+        doc_xml.contains("<w:vMerge w:val=\"restart\"/>"),
+        "document.xml should contain w:vMerge val=restart for rowspan start"
+    );
+    // Verify vMerge continue (empty element)
+    assert!(
+        doc_xml.contains("<w:vMerge/>"),
+        "document.xml should contain w:vMerge (no val) for continuation cell"
+    );
+}
