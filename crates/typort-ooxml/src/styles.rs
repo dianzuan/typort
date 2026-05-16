@@ -1,7 +1,10 @@
 use quick_xml::Writer;
 use std::io::{self, Write};
 
-pub(crate) fn generate_styles(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<()> {
+pub(crate) fn generate_styles(
+    writer: &mut Writer<&mut Vec<u8>>,
+    has_footnotes: bool,
+) -> io::Result<()> {
     writer
         .create_element("w:styles")
         .with_attribute((
@@ -12,6 +15,10 @@ pub(crate) fn generate_styles(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<(
             write_style_normal(w)?;
             for level in 1..=5 {
                 write_style_heading(w, level)?;
+            }
+            if has_footnotes {
+                write_style_footnote_reference(w)?;
+                write_style_footnote_text(w)?;
             }
             Ok(())
         })?;
@@ -97,6 +104,50 @@ fn write_style_heading<W: Write>(w: &mut Writer<W>, level: u8) -> io::Result<()>
                     .write_empty()?;
                 rpr.create_element("w:szCs")
                     .with_attribute(("w:val", font_size))
+                    .write_empty()?;
+                Ok(())
+            })?;
+            Ok(())
+        })?;
+    Ok(())
+}
+
+fn write_style_footnote_reference<W: Write>(w: &mut Writer<W>) -> io::Result<()> {
+    w.create_element("w:style")
+        .with_attribute(("w:type", "character"))
+        .with_attribute(("w:styleId", "FootnoteReference"))
+        .write_inner_content(|s| {
+            s.create_element("w:name")
+                .with_attribute(("w:val", "footnote reference"))
+                .write_empty()?;
+            s.create_element("w:rPr").write_inner_content(|rpr| {
+                rpr.create_element("w:vertAlign")
+                    .with_attribute(("w:val", "superscript"))
+                    .write_empty()?;
+                Ok(())
+            })?;
+            Ok(())
+        })?;
+    Ok(())
+}
+
+fn write_style_footnote_text<W: Write>(w: &mut Writer<W>) -> io::Result<()> {
+    w.create_element("w:style")
+        .with_attribute(("w:type", "paragraph"))
+        .with_attribute(("w:styleId", "FootnoteText"))
+        .write_inner_content(|s| {
+            s.create_element("w:name")
+                .with_attribute(("w:val", "footnote text"))
+                .write_empty()?;
+            s.create_element("w:basedOn")
+                .with_attribute(("w:val", "Normal"))
+                .write_empty()?;
+            s.create_element("w:rPr").write_inner_content(|rpr| {
+                rpr.create_element("w:sz")
+                    .with_attribute(("w:val", "18"))
+                    .write_empty()?;
+                rpr.create_element("w:szCs")
+                    .with_attribute(("w:val", "18"))
                     .write_empty()?;
                 Ok(())
             })?;

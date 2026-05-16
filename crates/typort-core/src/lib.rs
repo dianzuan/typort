@@ -39,13 +39,10 @@ mod tests {
         );
 
         // First element should be a heading
-        if let BlockElement::Paragraph(p) = &doc.body.elements[0] {
-            assert_eq!(p.style, Some(ParagraphStyle::Heading(1)));
-            assert!(!p.runs.is_empty());
-            assert!(p.runs[0].text.contains("Hello"));
-        } else {
-            panic!("first element should be a paragraph with heading style");
-        }
+        let BlockElement::Paragraph(p) = &doc.body.elements[0];
+        assert_eq!(p.style, Some(ParagraphStyle::Heading(1)));
+        assert!(!p.runs.is_empty());
+        assert!(p.runs[0].text.contains("Hello"));
     }
 
     #[test]
