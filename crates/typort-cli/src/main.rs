@@ -13,6 +13,10 @@ struct Cli {
     /// Output .docx file
     #[arg(short, long)]
     output: Option<PathBuf>,
+
+    /// Journal preset name (loads from presets/ directory)
+    #[arg(long)]
+    preset: Option<String>,
 }
 
 fn main() {
@@ -27,13 +31,22 @@ fn main() {
         process::exit(1);
     });
 
-    let doc = typort_core::convert_html(&world).unwrap_or_else(|errors| {
+    let mut doc = typort_core::convert_html(&world).unwrap_or_else(|errors| {
         eprintln!("error: Typst compilation failed:");
         for msg in &errors {
             eprintln!("  {msg}");
         }
         process::exit(1);
     });
+
+    // Apply preset if specified
+    if let Some(preset_name) = &cli.preset {
+        let preset = typort_presets::load_builtin_preset(preset_name).unwrap_or_else(|e| {
+            eprintln!("error: {e}");
+            process::exit(1);
+        });
+        apply_preset(&mut doc, &preset);
+    }
 
     let file = File::create(&output_path).unwrap_or_else(|e| {
         eprintln!("error: cannot create output file: {e}");
@@ -46,4 +59,21 @@ fn main() {
     });
 
     println!("wrote {}", output_path.display());
+}
+
+fn apply_preset(doc: &mut typort_ooxml::Document, preset: &typort_presets::Preset) {
+    if let Some(page) = &preset.page {
+        if let Some(top) = page.margin_top_cm {
+            doc.page_settings.margin_top = typort_presets::cm_to_twips(top);
+        }
+        if let Some(bottom) = page.margin_bottom_cm {
+            doc.page_settings.margin_bottom = typort_presets::cm_to_twips(bottom);
+        }
+        if let Some(left) = page.margin_left_cm {
+            doc.page_settings.margin_left = typort_presets::cm_to_twips(left);
+        }
+        if let Some(right) = page.margin_right_cm {
+            doc.page_settings.margin_right = typort_presets::cm_to_twips(right);
+        }
+    }
 }

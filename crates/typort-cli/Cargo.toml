@@ -12,6 +12,8 @@ path = "src/main.rs"
 clap.workspace = true
 typort-core.workspace = true
 typort-ooxml.workspace = true
+typort-presets.workspace = true
 
 [dev-dependencies]
 zip.workspace = true
+typort-presets.workspace = true

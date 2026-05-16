@@ -54,6 +54,10 @@ pub fn write_docx<W: Write + Seek>(
         zip.write_all(&xml_part(generate_numbering_xml)?)?;
     }
 
+    // Always write docProps/core.xml with metadata
+    zip.start_file("docProps/core.xml", options)?;
+    zip.write_all(&xml_part(|w| generate_core_properties(w, doc))?)?;
+
     zip.finish()?;
     Ok(())
 }
@@ -121,6 +125,10 @@ fn generate_content_types(
                     .with_attribute(("ContentType", "application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"))
                     .write_empty()?;
             }
+            w.create_element("Override")
+                .with_attribute(("PartName", "/docProps/core.xml"))
+                .with_attribute(("ContentType", "application/vnd.openxmlformats-package.core-properties+xml"))
+                .write_empty()?;
             Ok(())
         })?;
     Ok(())
@@ -135,6 +143,11 @@ fn generate_rels(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<()> {
                 .with_attribute(("Id", "rId1"))
                 .with_attribute(("Type", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"))
                 .with_attribute(("Target", "word/document.xml"))
+                .write_empty()?;
+            w.create_element("Relationship")
+                .with_attribute(("Id", "rId2"))
+                .with_attribute(("Type", "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties"))
+                .with_attribute(("Target", "docProps/core.xml"))
                 .write_empty()?;
             Ok(())
         })?;
@@ -534,6 +547,33 @@ fn generate_footnotes_xml(writer: &mut Writer<&mut Vec<u8>>, doc: &Document) -> 
                         Ok(())
                     })?;
             }
+            Ok(())
+        })?;
+    Ok(())
+}
+
+fn generate_core_properties(writer: &mut Writer<&mut Vec<u8>>, doc: &Document) -> io::Result<()> {
+    writer
+        .create_element("cp:coreProperties")
+        .with_attribute((
+            "xmlns:cp",
+            "http://schemas.openxmlformats.org/package/2006/metadata/core-properties",
+        ))
+        .with_attribute(("xmlns:dc", "http://purl.org/dc/elements/1.1/"))
+        .with_attribute(("xmlns:dcterms", "http://purl.org/dc/terms/"))
+        .with_attribute(("xmlns:xsi", "http://www.w3.org/2001/XMLSchema-instance"))
+        .write_inner_content(|w| {
+            if let Some(title) = &doc.metadata.title {
+                w.create_element("dc:title")
+                    .write_text_content(BytesText::new(title))?;
+            }
+            if let Some(author) = &doc.metadata.author {
+                w.create_element("dc:creator")
+                    .write_text_content(BytesText::new(author))?;
+            }
+            w.create_element("dcterms:created")
+                .with_attribute(("xsi:type", "dcterms:W3CDTF"))
+                .write_text_content(BytesText::new(&doc.metadata.created_time()))?;
             Ok(())
         })?;
     Ok(())

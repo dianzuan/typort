@@ -35,6 +35,10 @@ pub fn convert_html(world: &TyportWorld) -> Result<Document, Vec<String>> {
 
     let mut eq_counter = 0usize;
     convert_block_children_with_math(&body.children, &mut doc, &equations, &mut eq_counter);
+
+    // Extract title from the first heading element
+    extract_title_from_first_heading(&mut doc);
+
     Ok(doc)
 }
 
@@ -445,6 +449,23 @@ fn collect_footnote_text(children: &[HtmlNode], runs: &mut Vec<Run>) {
                 collect_footnote_text(&elem.children, runs);
             }
             HtmlNode::Tag(_) | HtmlNode::Frame(_) => {}
+        }
+    }
+}
+
+/// Extract title from the first heading paragraph and set it as document metadata.
+fn extract_title_from_first_heading(doc: &mut Document) {
+    use typort_ooxml::document::{BlockElement, ParagraphStyle};
+
+    for element in &doc.body.elements {
+        if let BlockElement::Paragraph(p) = element
+            && matches!(p.style, Some(ParagraphStyle::Heading(_)))
+        {
+            let title: String = p.runs.iter().map(|r| r.text.as_str()).collect();
+            if !title.is_empty() {
+                doc.metadata.title = Some(title);
+            }
+            break;
         }
     }
 }

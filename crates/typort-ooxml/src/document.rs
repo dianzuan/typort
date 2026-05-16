@@ -138,11 +138,32 @@ impl Default for PageSettings {
 }
 
 #[derive(Debug, Clone, Default)]
+pub struct DocumentMetadata {
+    pub title: Option<String>,
+    pub author: Option<String>,
+    /// ISO 8601 timestamp for creation time. If not set, a default is used.
+    pub created: Option<String>,
+}
+
+impl DocumentMetadata {
+    /// Return the creation timestamp string (ISO 8601 / W3CDTF format).
+    /// Falls back to a compile-time default if not explicitly set.
+    #[must_use]
+    pub fn created_time(&self) -> String {
+        self.created
+            .clone()
+            .unwrap_or_else(|| "2026-01-01T00:00:00Z".to_string())
+    }
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct Document {
     pub body: Body,
     pub page_settings: PageSettings,
     /// Footnotes referenced by `FootnoteRef` inline elements.
     pub footnotes: Vec<Footnote>,
+    /// Document metadata (title, author) written to docProps/core.xml.
+    pub metadata: DocumentMetadata,
 }
 
 impl Document {
