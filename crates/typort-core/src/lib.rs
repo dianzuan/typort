@@ -14,8 +14,7 @@ mod tests {
 
     #[test]
     fn compile_hello_typ() {
-        let world =
-            TyportWorld::new(Path::new("../../tests/fixtures/hello.typ")).unwrap();
+        let world = TyportWorld::new(Path::new("../../tests/fixtures/hello.typ")).unwrap();
         let result = typst::compile::<typst::layout::PagedDocument>(&world);
         assert!(
             result.output.is_ok(),
@@ -26,8 +25,7 @@ mod tests {
 
     #[test]
     fn compile_and_convert_produces_document() {
-        let world =
-            TyportWorld::new(Path::new("../../tests/fixtures/hello.typ")).unwrap();
+        let world = TyportWorld::new(Path::new("../../tests/fixtures/hello.typ")).unwrap();
         let paged = compile(&world).unwrap();
         let doc = convert::convert_document(&paged);
         assert!(

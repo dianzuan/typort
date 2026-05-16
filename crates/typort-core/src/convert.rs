@@ -1,8 +1,8 @@
 //! Phase 0 content tree traversal: walks Typst `PagedDocument` frames and
 //! extracts visible text into an OOXML `Document`.
 
-use typst::layout::{Frame, FrameItem, PagedDocument};
 use typort_ooxml::document::{Document, Paragraph};
+use typst::layout::{Frame, FrameItem, PagedDocument};
 
 /// Convert a compiled Typst `PagedDocument` into an OOXML `Document` by
 /// extracting all visible text.
