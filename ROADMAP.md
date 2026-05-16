@@ -61,106 +61,120 @@ Phase 2 (文档结构)    Phase 3 (数学公式)  [可并行]
 - [x] 最小 .docx 生成：合法 ZIP + 完整 OOXML 部件
 - [x] 5 个测试通过，clippy 无 warning
 
-### 🔴 关键发现（架构变更决策）
+### 🔴 架构决策（经三轮调研确定）
 
-Phase 0 验证暴露了一个**致命问题**：当前管线使用 `PagedDocument`（布局帧）提取渲染后的字形文本。这等同于 PDF → Word 的间接路径——**所有语义结构丢失**。
+Phase 0 暴露致命问题：`PagedDocument` 帧遍历 = PDF→Word（语义全丢）。
+进一步研究发现 `HtmlDocument` 中转也有致命缺陷：数学变 SVG、格式信息丢失、编号 scheme 丢失。
 
-测试复杂论文（含标题、脚注、公式、表格）转换后发现 14 项检查全部不通过：无标题样式、无脚注、无表格、公式变为 Unicode 字形、无格式。
+**最终决策：直接调用 `typst_realize::realize`，拿 `Vec<Pair>` 做元素分发。**
 
-**Phase 1 必须切换到 `HtmlDocument` 路径：**
-- `typst::compile::<HtmlDocument>(world)` 在 typst 0.14.2 中已存在
-- 需启用 `Feature::Html` + 添加 `typst-html` 依赖
-- 产出语义化 DOM 树：heading → `<h2>`-`<h6>`, par → `<p>`, footnote → link, table → `<table>` 等
-- Show rules 自动完成 Content → 语义元素的映射（`typst-html/src/rules.rs` 注册了全部转换规则）
-- 我们的工作简化为：遍历 DOM 树 → 映射到 OOXML XML
-- 这是目前所有 Typst → X 导出器（PDF、HTML、SVG）唯一验证过的正确路径
+这是 PRD 原始设想的"自定义 Realization Pass"的正确实现：
+- `typst_realize::realize` 是 pub API，可从外部调用
+- 返回 `Vec<(&Content, StyleChain)>` —— 已展开 show rules 的元素列表
+- 每个元素可用 `content.to_packed::<HeadingElem>()` 做类型分发
+- **StyleChain 携带完整格式信息**（字体、字号、行距、缩进 —— 精确到 pt）
+- **EquationElem 在 realize 后原样保留**（数学不经过任何 show rule），`.body` 是完整语义树
+- **FootnoteElem 原始结构可用**
+
+**后备策略**：若 Typst 上游对 `typst_realize` 做破坏性变更堵死入口，我们自建 Content 树一一映射（硬遍历所有 Element 类型，自行展开 show rules）。
 
 ---
 
-## Phase 1: 语义管线（HtmlDocument → OOXML）
+## Phase 1: 直通语义管线（Realize → OOXML）
 
-**工期**: 4-6 周
-**风险**: 中（已通过 Phase 0 研究降低）
+**工期**: 3-4 周
+**风险**: 中
 **前置依赖**: Phase 0 ✅
 
 ### 目标
 
-切换到 `HtmlDocument` 语义路径，实现 DOM 树到 OOXML 的结构化映射，产出具有正确段落、标题、格式和字体的 .docx。
+搭建从 Content 树直接到 OOXML 的语义管线，不经过 HTML 或 PDF 任何中间格式。实现段落、标题、格式、字体的正确转换。
 
-### 架构变更
+### 核心架构
 
 ```
-旧路径（Phase 0，已废弃）:
-  .typ → compile::<PagedDocument> → 布局帧 → 扁平文本 → .docx
-  问题：所有语义丢失
-
-新路径（Phase 1）:
-  .typ → compile::<HtmlDocument> → 语义 DOM 树 → OOXML XML → .docx
-  优势：标题/段落/粗斜体/列表/表格/脚注 全部保留
+.typ 源文件
+    │
+    ▼
+typst eval → Content 内容树
+    │
+    ▼
+typst_realize::realize(RealizationKind::HtmlDocument, ...)
+    │
+    ▼
+Vec<Pair> = Vec<(&Content, StyleChain)>  ← 已展开 show rules
+    │
+    ▼
+元素分发器 (to_packed::<HeadingElem>, <ParElem>, <TextElem>, ...)
+    │
+    ├── HeadingElem + StyleChain → w:p + Heading样式 + numbering
+    ├── ParElem → w:p
+    ├── TextElem + StyleChain → w:r + w:rPr（字体/字号/粗斜体从 StyleChain 精确读取）
+    ├── EquationElem.body → OMML (m:oMath)  ← 完整语义数学树
+    ├── FootnoteElem → w:footnoteReference + footnotes.xml
+    ├── TableElem → w:tbl
+    ├── ListElem/EnumElem → w:p + w:numPr
+    └── StrongElem/EmphElem → w:b / w:i
+    │
+    ▼
+typort-ooxml (quick-xml) → ZIP → .docx
 ```
 
 ### 关键技术步骤
 
-1. **启用 HTML 编译路径**
-   - `TyportWorld` 中启用 `Feature::Html`：
-     ```rust
-     let features: Features = [Feature::Html].into_iter().collect();
-     let library = Library::builder().with_features(features).build();
-     ```
-   - 添加 `typst-html` 依赖到 `typort-core`
-   - `typst::compile::<HtmlDocument>(world)` 产出 DOM 树
+1. **接入 Realize API**
+   - 添加 `typst-realize`、`typst-html`（用其 `RealizationKind`）依赖
+   - 启用 `Feature::Html` 使 realize 按 HTML target 展开
+   - 构建 Engine（需 Routines、Introspector、Traced、Sink）
+   - 调用 `(engine.routines.realize)(kind, &mut engine, ...)` 获取 `Vec<Pair>`
 
-2. **DOM → OOXML 转换器**（替换当前的 `convert.rs`）
-   - 遍历 `HtmlDocument.root: HtmlElement`
-   - 按 HTML tag 分发映射：
+2. **元素分发器**（替换当前 `convert.rs`）
+   - 遍历 `Vec<Pair>`，对每个 `(content, styles)` 调用 `to_packed::<T>()`
+   - 从 `StyleChain` 读取精确格式值：
+     - `TextElem::font_in(styles)` → 字体名
+     - `TextElem::size_in(styles)` → Abs 字号
+     - `TextElem::weight_in(styles)` → 粗细
+     - `ParElem::leading_in(styles)` → 行距
+     - `ParElem::first_line_indent_in(styles)` → 首行缩进
 
-   | HTML Tag | OOXML 映射 |
-   |----------|-----------|
-   | `<p>` | `w:p`（Normal 样式） |
-   | `<h2>`-`<h6>` | `w:p`（Heading 1-5 样式） |
-   | `<strong>` | `w:rPr > w:b` |
-   | `<em>` | `w:rPr > w:i` |
-   | `<ol>`, `<ul>` | `w:p` + `w:numPr` |
-   | `<table>` | `w:tbl > w:tr > w:tc` |
-   | text nodes | `w:r > w:t` |
-   | `<a>` (footnote) | `w:footnoteReference` + `footnotes.xml` |
+3. **OOXML 文档模型扩展**
+   - `typort-ooxml` 的 Document 模型增加：标题级别、Run 格式属性、样式引用
+   - `writer.rs` 增加 `styles.xml`、`fontTable.xml` 生成
+   - `w:rPr` 支持：`w:rFonts`、`w:sz`、`w:b`、`w:i`
 
-3. **CJK 字体处理**
-   - 生成 `styles.xml`：Normal 样式设定 `w:rFonts eastAsia="宋体" ascii="Times New Roman"`
-   - 生成 `fontTable.xml`：声明宋体、黑体、楷体、仿宋
-   - Heading 样式使用黑体
-
-4. **页面设置**
-   - `w:sectPr`：A4 纸张、页边距（从 Typst 文档属性读取或使用默认值）
-   - `w:spacing`：行距 1.5 倍
+4. **CJK 字体 & 页面设置**
+   - `w:rFonts eastAsia="宋体" ascii="Times New Roman"` hAnsi="Times New Roman"`
+   - 页面设置从 Typst `#set page()` 的 Document metadata 读取
+   - `w:sectPr` / `w:pgMar` / `w:spacing`
 
 ### 关键交付物
 
-- [ ] `typst-html` 集成：能编译到 `HtmlDocument` 并打印 DOM 结构
-- [ ] DOM → OOXML 转换器：递归遍历 `HtmlElement` 树
-- [ ] 段落/Run 映射：text → `w:r`，保留粗体、斜体
-- [ ] 标题映射：`<h2>`-`<h6>` → Heading 1-5 样式（Word 导航窗格可识别）
-- [ ] CJK 字体：`styles.xml` + `fontTable.xml`
-- [ ] 页面设置：`w:sectPr` / `w:pgMar` / `w:spacing`
+- [ ] Realize API 接入：能调用 realize 并打印 Vec<Pair> 的元素类型列表
+- [ ] 元素分发器：HeadingElem、ParElem、TextElem、StrongElem、EmphElem
+- [ ] StyleChain 读取：精确字体、字号、粗细
+- [ ] OOXML 模型扩展：标题样式、Run 格式属性
+- [ ] styles.xml + fontTable.xml 生成
+- [ ] 页面设置：sectPr / pgMar
+- [ ] complex_paper.typ 通过验收测试
 
 ### 风险项
 
 | 风险 | 缓解措施 |
 |------|----------|
-| `HtmlDocument` API 为 internal/unstable | 已验证 0.14.2 中可用，锁定版本 |
-| 脚注在 HTML 导出中的表现形式未知 | 研究 `typst-html/src/rules.rs` 的 `FOOTNOTE_RULE` 实现 |
-| `HtmlElem` 可能不暴露所有信息 | 可同时保留 `PagedDocument` 路径作为降级方案（如页面设置） |
-| Show rules 可能改变元素结构 | 遵循 typst-html 的处理模式即可 |
+| `typst_realize` API 不稳定 | 锁定 0.14.2；在 typort-core 中用适配器 trait 隔离上游接口 |
+| Engine 构建需要多个内部组件 | 参照 `typst-html/src/document.rs` 的 79-90 行 |
+| Typst 上游删除/重命名 realize | 后备：自建 Content 树一一映射 |
+| RealizationKind 未来可能不接受 HtmlDocument | 后备：使用 PagedDocument + Introspector 查询语义元素 |
 
 ### 验收标准
 
-- 输入 `tests/fixtures/complex_paper.typ`（含标题、脚注、公式引用、表格），输出 .docx：
-  - Word 导航窗格正确显示标题层级
-  - 粗体/斜体渲染正确
-  - 段落正确分割（非一页一段）
-  - 中文显示为宋体，英文显示为 Times New Roman
-  - 页面大小为 A4，行距 1.5 倍
-  - 脚注为 Word 原生脚注（或至少作为独立段落保留）
+- 输入 `tests/fixtures/complex_paper.typ`，输出 .docx：
+  - Word 导航窗格正确显示标题层级（Heading 1-5 样式）
+  - 粗体/斜体渲染正确（从 StyleChain 读取）
+  - 段落正确分割（每个 ParElem 独立段落）
+  - 中文宋体 + 英文 Times New Roman（w:rFonts eastAsia）
+  - 页面 A4，行距 1.5 倍
+  - 至少 5 项结构检查通过（对比 Phase 0 的 0/14）
 
 ---
 
