@@ -12,6 +12,7 @@ pub(crate) fn generate_styles(
             "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
         ))
         .write_inner_content(|w| {
+            write_doc_defaults(w)?;
             write_style_normal(w)?;
             for level in 1..=5 {
                 write_style_heading(w, level)?;
@@ -22,6 +23,38 @@ pub(crate) fn generate_styles(
             }
             Ok(())
         })?;
+    Ok(())
+}
+
+fn write_doc_defaults<W: Write>(w: &mut Writer<W>) -> io::Result<()> {
+    w.create_element("w:docDefaults").write_inner_content(|d| {
+        d.create_element("w:rPrDefault")
+            .write_inner_content(|rprd| {
+                rprd.create_element("w:rPr").write_inner_content(|rpr| {
+                    rpr.create_element("w:rFonts")
+                        .with_attribute(("w:ascii", "Times New Roman"))
+                        .with_attribute(("w:hAnsi", "Times New Roman"))
+                        .with_attribute(("w:eastAsia", "\u{5b8b}\u{4f53}"))
+                        .write_empty()?;
+                    rpr.create_element("w:kern")
+                        .with_attribute(("w:val", "2"))
+                        .write_empty()?;
+                    rpr.create_element("w:sz")
+                        .with_attribute(("w:val", "21"))
+                        .write_empty()?;
+                    rpr.create_element("w:szCs")
+                        .with_attribute(("w:val", "21"))
+                        .write_empty()?;
+                    rpr.create_element("w:lang")
+                        .with_attribute(("w:val", "en-US"))
+                        .with_attribute(("w:eastAsia", "zh-CN"))
+                        .write_empty()?;
+                    Ok(())
+                })?;
+                Ok(())
+            })?;
+        Ok(())
+    })?;
     Ok(())
 }
 
@@ -45,6 +78,10 @@ fn write_style_normal<W: Write>(w: &mut Writer<W>) -> io::Result<()> {
                     .write_empty()?;
                 rpr.create_element("w:szCs")
                     .with_attribute(("w:val", "21"))
+                    .write_empty()?;
+                rpr.create_element("w:lang")
+                    .with_attribute(("w:val", "en-US"))
+                    .with_attribute(("w:eastAsia", "zh-CN"))
                     .write_empty()?;
                 Ok(())
             })?;
