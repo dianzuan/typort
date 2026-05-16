@@ -618,16 +618,12 @@ fn features_footnote_restart_and_font_hint() {
 
     let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
 
-    // Feature 1: Footnote per-page restart with chicago (circled) numbering
+    // Feature 1: Footnote per-page restart (matching Typst's default numbering)
     let settings_xml =
         std::io::read_to_string(reader.by_name("word/settings.xml").unwrap()).unwrap();
     assert!(
         settings_xml.contains("w:footnotePr"),
         "settings.xml should contain w:footnotePr"
-    );
-    assert!(
-        settings_xml.contains("chicago"),
-        "settings.xml should use chicago numFmt for circled numbers"
     );
     assert!(
         settings_xml.contains("eachPage"),
