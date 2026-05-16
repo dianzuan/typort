@@ -199,8 +199,28 @@ typort 深度依赖 Typst 编译器内部 crate（`typst`、`typst-syntax`、`ty
 | **依赖** | 无外部依赖 | 依赖 Pandoc + Adobe/pdf2docx | 依赖 Pandoc |
 | **期刊预设** | 内建 TOML 配置系统 | 无 | 无（需自制 reference.docx） |
 | **脚注** | Word 原生脚注 + 逐页重编号 | 丢失脚注结构 | 基础脚注（无逐页重编号） |
-| **成熟度** | 开发中 | 已发布（PyPI） | 已发布（Pandoc 内建） |
-| **许可证** | MIT/Apache-2.0（计划） | 待确认 | GPL-2.0 |
+| **成熟度** | 开发中 | 已发布（PyPI, v0.8.0, 77⭐） | 已发布（Pandoc 内建） |
+| **许可证** | MIT/Apache-2.0（计划） | MIT | GPL-2.0 |
+
+### 7.1 竞品深入分析（2026-05-16 调研）
+
+**typ2docx 架构解剖：**
+- 实际管线：Typst → PDF → pdf2docx/Adobe → .docx₁（结构，无数学） + Typst → 提取数学 → Pandoc → .docx₂（数学） → XSLT 合并 → 最终 .docx
+- 6 种语言混合：Python + Rust + XSLT + JavaScript + Haskell(Pandoc) + Shell
+- 已知问题：SVG 中文本变形、行内公式前后缺空格、样式保留不完整
+- **核心缺陷**：标题变为格式化文本（Word 导航窗格空）、脚注变为页底文本（非原生脚注）
+
+**typort 的独特优势（已验证可行）：**
+- `typst::compile::<HtmlDocument>()` 提供完整语义 DOM 树（typst 0.14.2 内建）
+- Show rules 自动完成 Content → 语义元素的转换（标题、段落、脚注、表格等）
+- 无中间格式损耗，直接 DOM → OOXML 一步映射
+- 单一 Rust 二进制，零外部依赖
+
+**关键竞争差异点：**
+1. Word 原生标题样式 → 导航窗格/目录可用（typ2docx 做不到）
+2. Word 原生脚注 → 逐页重编号（typ2docx 做不到）
+3. CJK 字体精确控制（typ2docx 继承 PDF 转换器的猜测）
+4. 数学直接映射 OMML（typ2docx 经过 Pandoc texmath，有损）
 
 ---
 
