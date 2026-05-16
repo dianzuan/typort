@@ -76,40 +76,57 @@ fn convert_block_children_with_math(
     eq_counter: &mut usize,
 ) {
     let mut i = 0;
+    // Track whether the last item was an inline equation — if so, the next <p>
+    // should merge into the current paragraph rather than starting a new one.
+    let mut continue_paragraph = false;
+
     while i < children.len() {
         match &children[i] {
             HtmlNode::Element(elem) => {
-                convert_element_with_math(elem, doc, equations, eq_counter);
+                let tag = tag_name(elem);
+                if tag == "p" && continue_paragraph {
+                    // Merge this <p>'s content into the current paragraph
+                    // (collect runs without doc reference to avoid borrow conflict)
+                    let mut tmp_runs = Vec::new();
+                    collect_runs_simple(&elem.children, &mut tmp_runs, false, false);
+                    if let Some(BlockElement::Paragraph(para)) = doc.body.elements.last_mut() {
+                        for run in tmp_runs {
+                            para.push_run(run);
+                        }
+                    }
+                    continue_paragraph = false;
+                } else {
+                    continue_paragraph = false;
+                    convert_element_with_math(elem, doc, equations, eq_counter);
+                }
             }
             HtmlNode::Tag(tag) => {
                 if is_tag_start(tag, "equation") {
-                    // Convert the equation using the introspector data
                     if let Some(eq_content) = equations.get(*eq_counter) {
                         let omml = typort_math::equation_to_omml(eq_content);
 
-                        // Check if this is a block equation
                         let is_block = eq_content
                             .to_packed::<EquationElem>()
                             .is_some_and(|eq| *eq.block.as_option().as_ref().unwrap_or(&false));
 
                         if is_block {
-                            // Block equation gets its own paragraph
                             let mut para = Paragraph::new();
                             para.add_math(omml);
                             doc.add_paragraph(para);
-                        } else if let Some(typort_ooxml::document::BlockElement::Paragraph(para)) =
+                            continue_paragraph = false;
+                        } else if let Some(BlockElement::Paragraph(para)) =
                             doc.body.elements.last_mut()
                         {
-                            // Inline equation: attach to the last paragraph
                             para.add_math(omml);
+                            continue_paragraph = true;
                         } else {
                             let mut para = Paragraph::new();
                             para.add_math(omml);
                             doc.add_paragraph(para);
+                            continue_paragraph = true;
                         }
                     }
                     *eq_counter += 1;
-                    // Skip to the matching End tag
                     let start_loc = tag.location();
                     i += 1;
                     while i < children.len() {
@@ -120,15 +137,23 @@ fn convert_block_children_with_math(
                         }
                         i += 1;
                     }
+                } else {
+                    // Non-equation tags don't reset continue_paragraph
                 }
             }
             HtmlNode::Frame(_) => {}
             HtmlNode::Text(text, _) => {
                 let trimmed = text.trim();
                 if !trimmed.is_empty() {
-                    let mut para = Paragraph::new();
-                    para.runs.push(Run::new(trimmed));
-                    doc.add_paragraph(para);
+                    if continue_paragraph {
+                        if let Some(BlockElement::Paragraph(para)) = doc.body.elements.last_mut() {
+                            para.push_run(Run::new(trimmed));
+                        }
+                    } else {
+                        let mut para = Paragraph::new();
+                        para.runs.push(Run::new(trimmed));
+                        doc.add_paragraph(para);
+                    }
                 }
             }
         }
@@ -783,6 +808,28 @@ fn insert_missing_at_position(doc: &mut Document, missing_lines: &[FrameLine]) {
         let tail = doc.body.elements.split_off(insert_idx);
         doc.body.elements.extend(paragraphs);
         doc.body.elements.extend(tail);
+    }
+}
+
+fn collect_runs_simple(children: &[HtmlNode], runs: &mut Vec<Run>, bold: bool, italic: bool) {
+    for child in children {
+        match child {
+            HtmlNode::Text(text, _) => {
+                if !text.is_empty() {
+                    let mut run = Run::new(text.as_str());
+                    run.bold = bold;
+                    run.italic = italic;
+                    runs.push(run);
+                }
+            }
+            HtmlNode::Element(elem) => {
+                let tag = tag_name(elem);
+                let new_bold = bold || tag == "strong" || tag == "b";
+                let new_italic = italic || tag == "em" || tag == "i";
+                collect_runs_simple(&elem.children, runs, new_bold, new_italic);
+            }
+            HtmlNode::Frame(_) | HtmlNode::Tag(_) => {}
+        }
     }
 }
 
