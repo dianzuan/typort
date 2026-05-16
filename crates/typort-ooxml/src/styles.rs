@@ -53,6 +53,9 @@ fn write_style_normal<W: Write>(w: &mut Writer<W>) -> io::Result<()> {
                     .with_attribute(("w:line", "360"))
                     .with_attribute(("w:lineRule", "auto"))
                     .write_empty()?;
+                ppr.create_element("w:ind")
+                    .with_attribute(("w:firstLine", "420"))
+                    .write_empty()?;
                 Ok(())
             })?;
             Ok(())
@@ -89,6 +92,9 @@ fn write_style_heading<W: Write>(w: &mut Writer<W>, level: u8) -> io::Result<()>
                 ppr.create_element("w:spacing")
                     .with_attribute(("w:before", "240"))
                     .with_attribute(("w:after", "120"))
+                    .write_empty()?;
+                ppr.create_element("w:ind")
+                    .with_attribute(("w:firstLine", "0"))
                     .write_empty()?;
                 Ok(())
             })?;
