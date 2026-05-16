@@ -39,7 +39,14 @@ pub fn convert_html(world: &TyportWorld) -> Result<Document, Vec<String>> {
     }
 
     let mut eq_state = EquationState::default();
-    convert_block_children_with_math(&body.children, &mut doc, &equations, &mut eq_state);
+    let mut para_ctx = ParagraphContext::default();
+    convert_block_children_with_math(
+        &body.children,
+        &mut doc,
+        &equations,
+        &mut eq_state,
+        &mut para_ctx,
+    );
 
     // Recovery: compile also to PagedDocument and recover content that was lost
     // (e.g. #align(center) content which has no HTML show rule)
@@ -74,6 +81,15 @@ struct EquationState {
     global_eq: u64,
 }
 
+/// Tracks context for paragraph formatting decisions.
+#[derive(Default)]
+struct ParagraphContext {
+    /// The next non-heading paragraph should suppress first-line indent.
+    after_heading: bool,
+    /// We are inside the bibliography section (after "参考文献" heading).
+    in_bibliography: bool,
+}
+
 fn tag_name(elem: &HtmlElement) -> String {
     let raw = format!("{}", elem.tag);
     raw.trim_matches('<').trim_matches('>').to_string()
@@ -85,6 +101,7 @@ fn convert_block_children_with_math(
     doc: &mut Document,
     equations: &[Content],
     eq_state: &mut EquationState,
+    para_ctx: &mut ParagraphContext,
 ) {
     let mut i = 0;
     // Track whether the last item was an inline equation — if so, the next <p>
@@ -110,7 +127,7 @@ fn convert_block_children_with_math(
                     continue_paragraph = false;
                 } else {
                     continue_paragraph = false;
-                    convert_element_with_math(elem, doc, equations, eq_state);
+                    convert_element_with_math(elem, doc, equations, eq_state, para_ctx);
                 }
             }
             HtmlNode::Tag(tag) => {
@@ -214,27 +231,34 @@ fn convert_element_with_math(
     doc: &mut Document,
     equations: &[Content],
     eq_state: &mut EquationState,
+    para_ctx: &mut ParagraphContext,
 ) {
     let tag = tag_name(elem);
     match tag.as_str() {
         "h2" => {
             eq_state.chapter += 1;
             eq_state.eq_in_chapter = 0;
-            convert_heading(elem, doc, 1);
+            convert_heading(elem, doc, 1, para_ctx);
         }
-        "h3" => convert_heading(elem, doc, 2),
-        "h4" => convert_heading(elem, doc, 3),
-        "h5" => convert_heading(elem, doc, 4),
-        "h6" => convert_heading(elem, doc, 5),
-        "p" => convert_paragraph(elem, doc),
+        "h3" => convert_heading(elem, doc, 2, para_ctx),
+        "h4" => convert_heading(elem, doc, 3, para_ctx),
+        "h5" => convert_heading(elem, doc, 4, para_ctx),
+        "h6" => convert_heading(elem, doc, 5, para_ctx),
+        "p" => convert_paragraph(elem, doc, para_ctx),
         "ol" | "ul" => convert_list(elem, doc),
         "table" => convert_table(elem, doc),
         "div" => {
             // Check if this div has alignment styling
             if detect_alignment(elem).is_some() {
-                convert_paragraph(elem, doc);
+                convert_paragraph(elem, doc, para_ctx);
             } else {
-                convert_block_children_with_math(&elem.children, doc, equations, eq_state);
+                convert_block_children_with_math(
+                    &elem.children,
+                    doc,
+                    equations,
+                    eq_state,
+                    para_ctx,
+                );
             }
         }
         "section" => {
@@ -242,24 +266,46 @@ fn convert_element_with_math(
             if has_attr_value(elem, "role", "doc-endnotes") {
                 return;
             }
-            convert_block_children_with_math(&elem.children, doc, equations, eq_state);
+            convert_block_children_with_math(&elem.children, doc, equations, eq_state, para_ctx);
         }
-        _ => convert_block_children_with_math(&elem.children, doc, equations, eq_state),
+        _ => convert_block_children_with_math(&elem.children, doc, equations, eq_state, para_ctx),
     }
 }
 
-fn convert_heading(elem: &HtmlElement, doc: &mut Document, level: u8) {
+fn convert_heading(
+    elem: &HtmlElement,
+    doc: &mut Document,
+    level: u8,
+    para_ctx: &mut ParagraphContext,
+) {
     let mut para = Paragraph::new();
     para.style = Some(ParagraphStyle::Heading(level));
     collect_inlines(&elem.children, &mut para, false, false);
+
+    // Detect bibliography section by heading text
+    let heading_text: String = para.runs.iter().map(|r| r.text.as_str()).collect();
+    if heading_text.contains("参考文献") {
+        para_ctx.in_bibliography = true;
+    }
+
     doc.add_paragraph(para);
+    para_ctx.after_heading = true;
 }
 
-fn convert_paragraph(elem: &HtmlElement, doc: &mut Document) {
+fn convert_paragraph(elem: &HtmlElement, doc: &mut Document, para_ctx: &mut ParagraphContext) {
     let mut para = Paragraph::new();
     para.alignment = detect_alignment(elem);
     collect_inlines(&elem.children, &mut para, false, false);
     if !para.runs.is_empty() {
+        // Feature 3: suppress indent on first paragraph after heading
+        if para_ctx.after_heading && para.style.is_none() {
+            para.suppress_indent = true;
+        }
+        // Feature 4: bibliography hanging indent
+        if para_ctx.in_bibliography && para.style.is_none() {
+            para.hanging_indent = true;
+        }
+        para_ctx.after_heading = false;
         doc.add_paragraph(para);
     }
 }
@@ -360,6 +406,7 @@ fn convert_table_row(tr: &HtmlElement, _doc: &Document) -> Option<TableRow> {
                     paragraphs: vec![para],
                     colspan,
                     vmerge,
+                    width_pct: None,
                 });
             }
         }

@@ -74,6 +74,10 @@ pub struct Paragraph {
     pub list_id: Option<u32>,
     /// Paragraph alignment (left, center, right, justify).
     pub alignment: Option<Alignment>,
+    /// Suppress first-line indent (e.g., first paragraph after a heading).
+    pub suppress_indent: bool,
+    /// Use hanging indent (e.g., bibliography entries).
+    pub hanging_indent: bool,
 }
 
 impl Paragraph {
@@ -124,6 +128,9 @@ pub struct TableCell {
     pub colspan: u32,
     /// Vertical merge state. Maps to `w:vMerge`.
     pub vmerge: VMerge,
+    /// Cell width as percentage of table width (in fiftieths of a percent, i.e. 5000 = 100%).
+    /// If None, width is auto-distributed.
+    pub width_pct: Option<u32>,
 }
 
 /// Vertical merge state for a table cell.

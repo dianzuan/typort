@@ -35,6 +35,7 @@ fn write_doc_defaults<W: Write>(w: &mut Writer<W>) -> io::Result<()> {
                         .with_attribute(("w:ascii", "Times New Roman"))
                         .with_attribute(("w:hAnsi", "Times New Roman"))
                         .with_attribute(("w:eastAsia", "\u{5b8b}\u{4f53}"))
+                        .with_attribute(("w:hint", "eastAsia"))
                         .write_empty()?;
                     rpr.create_element("w:kern")
                         .with_attribute(("w:val", "2"))
@@ -72,6 +73,7 @@ fn write_style_normal<W: Write>(w: &mut Writer<W>) -> io::Result<()> {
                     .with_attribute(("w:ascii", "Times New Roman"))
                     .with_attribute(("w:hAnsi", "Times New Roman"))
                     .with_attribute(("w:eastAsia", "\u{5b8b}\u{4f53}"))
+                    .with_attribute(("w:hint", "eastAsia"))
                     .write_empty()?;
                 rpr.create_element("w:sz")
                     .with_attribute(("w:val", "21"))
