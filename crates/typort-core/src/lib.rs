@@ -67,4 +67,55 @@ mod tests {
             doc.body.elements.len()
         );
     }
+
+    #[test]
+    fn center_test_recovers_aligned_content() {
+        use typort_ooxml::document::Alignment;
+
+        let world = TyportWorld::new(Path::new("../../tests/fixtures/center_test.typ")).unwrap();
+        let doc = convert_html(&world).unwrap();
+
+        // The centered text "张三  李四" should be recovered from PagedDocument
+        let has_centered_authors = doc.body.elements.iter().any(|e| {
+            if let BlockElement::Paragraph(p) = e {
+                let text: String = p.runs.iter().map(|r| r.text.as_str()).collect();
+                (text.contains("张三") || text.contains("李四"))
+                    && p.alignment == Some(Alignment::Center)
+            } else {
+                false
+            }
+        });
+        assert!(
+            has_centered_authors,
+            "center_test should recover centered author names"
+        );
+    }
+
+    #[test]
+    fn complex_paper_recovers_author_info() {
+        let world = TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
+        let doc = convert_html(&world).unwrap();
+
+        // The author names and institution info from #align(center) should be recovered
+        let has_author = doc.body.elements.iter().any(|e| {
+            if let BlockElement::Paragraph(p) = e {
+                p.runs.iter().any(|r| r.text.contains("张三") || r.text.contains("李四"))
+            } else {
+                false
+            }
+        });
+        assert!(has_author, "complex paper should recover author names from #align(center)");
+
+        let has_institution = doc.body.elements.iter().any(|e| {
+            if let BlockElement::Paragraph(p) = e {
+                p.runs.iter().any(|r| r.text.contains("某大学") || r.text.contains("经济学院"))
+            } else {
+                false
+            }
+        });
+        assert!(
+            has_institution,
+            "complex paper should recover institution info from #align(center)"
+        );
+    }
 }
