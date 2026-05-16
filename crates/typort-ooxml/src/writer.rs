@@ -238,11 +238,7 @@ fn generate_settings(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<()> {
             "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
         ))
         .write_inner_content(|w| {
-            // Footnote properties: circled numbers (chicago) with per-page restart
             w.create_element("w:footnotePr").write_inner_content(|fp| {
-                fp.create_element("w:numFmt")
-                    .with_attribute(("w:val", "chicago"))
-                    .write_empty()?;
                 fp.create_element("w:numRestart")
                     .with_attribute(("w:val", "eachPage"))
                     .write_empty()?;
@@ -306,11 +302,7 @@ fn write_section_properties<W: Write>(
     settings: &crate::document::PageSettings,
 ) -> io::Result<()> {
     writer.create_element("w:sectPr").write_inner_content(|w| {
-        // Footnote properties in section: circled numbers with per-page restart
         w.create_element("w:footnotePr").write_inner_content(|fp| {
-            fp.create_element("w:numFmt")
-                .with_attribute(("w:val", "chicago"))
-                .write_empty()?;
             fp.create_element("w:numRestart")
                 .with_attribute(("w:val", "eachPage"))
                 .write_empty()?;

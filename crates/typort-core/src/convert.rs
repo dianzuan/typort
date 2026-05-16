@@ -890,41 +890,75 @@ fn find_body_start_line(paged_lines: &[FrameLine], doc: &Document) -> usize {
 
 /// A text line extracted from a `PagedDocument` frame, with its Y position (for ordering).
 #[derive(Debug, Clone)]
+/// A recovered line with text runs that preserve superscript info.
 struct FrameLine {
     text: String,
+    runs: Vec<Run>,
 }
 
 /// Extract text lines from the first page of a `PagedDocument`.
 #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
 fn extract_lines_from_first_page(paged: &PagedDocument) -> Vec<FrameLine> {
     let mut all_lines = Vec::new();
+
+    let body_size = paged.pages.first().map_or(10.5, |p| {
+        let mut items = Vec::new();
+        collect_text_items_with_pos(&p.frame, Point::zero(), &mut items);
+        let mut sizes: HashMap<i32, usize> = HashMap::new();
+        for item in &items {
+            *sizes.entry((item.size_pt * 10.0) as i32).or_default() += item.text.len();
+        }
+        sizes
+            .into_iter()
+            .max_by_key(|(_, c)| *c)
+            .map_or(10.5, |(s, _)| f64::from(s) / 10.0)
+    });
+
     for page in paged.pages.iter().take(1) {
-        let mut text_items: Vec<(f64, f64, String)> = Vec::new(); // (y, x, text)
+        let mut text_items = Vec::new();
         collect_text_items_with_pos(&page.frame, Point::zero(), &mut text_items);
 
-        // Group by Y coordinate (tolerance of 2pt for same-line items)
-        let mut y_groups: BTreeMap<i64, Vec<(f64, String)>> = BTreeMap::new();
-        for (y, x, text) in text_items {
-            // Quantize Y to nearest 2pt for grouping
-            let y_key = (y / 2.0).round() as i64;
-            y_groups.entry(y_key).or_default().push((x, text));
+        let mut y_groups: BTreeMap<i64, Vec<&FrameTextItem>> = BTreeMap::new();
+        for item in &text_items {
+            // Use 5pt tolerance for Y-grouping so superscript text (offset ~3-4pt up)
+            // stays on the same line as its base text
+            let y_key = (item.y / 5.0).round() as i64;
+            y_groups.entry(y_key).or_default().push(item);
         }
 
-        // Sort each group by X and concatenate to form the line text
         for (_, mut items) in y_groups {
-            items.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-            let line_text: String = items.into_iter().map(|(_, t)| t).collect();
-            let trimmed = line_text.trim().to_string();
+            items.sort_by(|a, b| a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal));
+            let mut runs = Vec::new();
+            let mut full_text = String::new();
+            for item in &items {
+                let is_super = item.size_pt < body_size * 0.8;
+                let mut run = Run::new(&item.text);
+                run.superscript = is_super;
+                runs.push(run);
+                full_text.push_str(&item.text);
+            }
+            let trimmed = full_text.trim().to_string();
             if !trimmed.is_empty() {
-                all_lines.push(FrameLine { text: trimmed });
+                all_lines.push(FrameLine {
+                    text: trimmed,
+                    runs,
+                });
             }
         }
     }
     all_lines
 }
 
+/// A text fragment from a rendered frame with position and size info.
+struct FrameTextItem {
+    y: f64,
+    x: f64,
+    text: String,
+    size_pt: f64,
+}
+
 /// Recursively collect text items from a frame with their absolute positions.
-fn collect_text_items_with_pos(frame: &Frame, offset: Point, items: &mut Vec<(f64, f64, String)>) {
+fn collect_text_items_with_pos(frame: &Frame, offset: Point, items: &mut Vec<FrameTextItem>) {
     for (pos, item) in frame.items() {
         let abs_x = offset.x + pos.x;
         let abs_y = offset.y + pos.y;
@@ -932,7 +966,12 @@ fn collect_text_items_with_pos(frame: &Frame, offset: Point, items: &mut Vec<(f6
             FrameItem::Text(text_item) => {
                 let text = text_item.text.to_string();
                 if !text.is_empty() {
-                    items.push((abs_y.to_pt(), abs_x.to_pt(), text));
+                    items.push(FrameTextItem {
+                        y: abs_y.to_pt(),
+                        x: abs_x.to_pt(),
+                        text,
+                        size_pt: text_item.size.to_pt(),
+                    });
                 }
             }
             FrameItem::Group(group) => {
@@ -982,12 +1021,14 @@ fn extract_doc_text(doc: &Document) -> String {
 fn insert_missing_at_position(doc: &mut Document, missing_lines: &[FrameLine]) {
     let insert_idx = find_title_section_end(doc);
 
-    // Build centered paragraphs for each missing line
     let mut paragraphs: Vec<BlockElement> = Vec::new();
     for line in missing_lines {
         let mut para = Paragraph::new();
         para.alignment = Some(Alignment::Center);
-        para.add_run(&line.text);
+        para.suppress_indent = true;
+        for run in &line.runs {
+            para.push_run(run.clone());
+        }
         paragraphs.push(BlockElement::Paragraph(para));
     }
 
