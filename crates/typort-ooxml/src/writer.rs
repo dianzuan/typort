@@ -206,6 +206,10 @@ fn generate_document_xml(writer: &mut Writer<&mut Vec<u8>>, doc: &Document) -> i
             "xmlns:r",
             "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
         ))
+        .with_attribute((
+            "xmlns:m",
+            "http://schemas.openxmlformats.org/officeDocument/2006/math",
+        ))
         .write_inner_content(|w| {
             w.create_element("w:body").write_inner_content(|body_w| {
                 for element in &doc.body.elements {
@@ -291,6 +295,7 @@ fn write_paragraph<W: Write>(
                 match inline {
                     InlineElement::Text(run) => write_run(w, run)?,
                     InlineElement::FootnoteRef(id) => write_footnote_ref(w, *id)?,
+                    InlineElement::Math { omml_xml } => write_math_inline(w, omml_xml)?,
                 }
             }
         }
@@ -446,6 +451,12 @@ fn generate_numbering_xml(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<()> {
                 })?;
             Ok(())
         })?;
+    Ok(())
+}
+
+fn write_math_inline<W: Write>(writer: &mut Writer<W>, omml_xml: &str) -> io::Result<()> {
+    // Write the pre-serialized OMML XML directly into the stream
+    writer.get_mut().write_all(omml_xml.as_bytes())?;
     Ok(())
 }
 
