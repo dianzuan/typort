@@ -1,3 +1,5 @@
+#![warn(clippy::pedantic)]
+
 pub mod document;
 pub mod writer;
 
