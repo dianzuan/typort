@@ -920,9 +920,9 @@ fn extract_lines_from_first_page(paged: &PagedDocument) -> Vec<FrameLine> {
 
         let mut y_groups: BTreeMap<i64, Vec<&FrameTextItem>> = BTreeMap::new();
         for item in &text_items {
-            // Use 5pt tolerance for Y-grouping so superscript text (offset ~3-4pt up)
-            // stays on the same line as its base text
-            let y_key = (item.y / 5.0).round() as i64;
+            // Use 8pt tolerance so superscript text (offset ~3-5pt up) stays grouped
+            // with its base text on the same line
+            let y_key = (item.y / 8.0).round() as i64;
             y_groups.entry(y_key).or_default().push(item);
         }
 
