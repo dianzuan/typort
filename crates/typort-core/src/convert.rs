@@ -98,7 +98,7 @@ fn convert_block_children_with_math(
                 if tag == "p" && continue_paragraph {
                     // Merge into current paragraph using a temp Paragraph to avoid borrow conflict
                     let mut tmp = Paragraph::new();
-                    collect_inlines(&elem.children, &mut tmp, false, false, doc);
+                    collect_inlines(&elem.children, &mut tmp, false, false);
                     if let Some(BlockElement::Paragraph(para)) = doc.body.elements.last_mut() {
                         for inline in tmp.inlines {
                             if let InlineElement::Text(ref run) = inline {
@@ -251,14 +251,14 @@ fn convert_element_with_math(
 fn convert_heading(elem: &HtmlElement, doc: &mut Document, level: u8) {
     let mut para = Paragraph::new();
     para.style = Some(ParagraphStyle::Heading(level));
-    collect_inlines(&elem.children, &mut para, false, false, doc);
+    collect_inlines(&elem.children, &mut para, false, false);
     doc.add_paragraph(para);
 }
 
 fn convert_paragraph(elem: &HtmlElement, doc: &mut Document) {
     let mut para = Paragraph::new();
     para.alignment = detect_alignment(elem);
-    collect_inlines(&elem.children, &mut para, false, false, doc);
+    collect_inlines(&elem.children, &mut para, false, false);
     if !para.runs.is_empty() {
         doc.add_paragraph(para);
     }
@@ -299,7 +299,7 @@ fn convert_list(elem: &HtmlElement, doc: &mut Document) {
             let mut para = Paragraph::new();
             para.list_id = Some(list_id);
             para.list_level = Some(0);
-            collect_inlines(&li.children, &mut para, false, false, doc);
+            collect_inlines(&li.children, &mut para, false, false);
             if !para.runs.is_empty() {
                 doc.add_paragraph(para);
             }
@@ -333,14 +333,14 @@ fn convert_table(elem: &HtmlElement, doc: &mut Document) {
     }
 }
 
-fn convert_table_row(tr: &HtmlElement, doc: &Document) -> Option<TableRow> {
+fn convert_table_row(tr: &HtmlElement, _doc: &Document) -> Option<TableRow> {
     let mut cells = Vec::new();
     for cell in &tr.children {
         if let HtmlNode::Element(td) = cell {
             let tag = tag_name(td);
             if tag == "td" || tag == "th" {
                 let mut para = Paragraph::new();
-                collect_inlines(&td.children, &mut para, tag == "th", false, doc);
+                collect_inlines(&td.children, &mut para, tag == "th", false);
 
                 // Parse colspan and rowspan attributes
                 let colspan = get_attr_value(td, "colspan")
@@ -388,28 +388,16 @@ struct InlineStyle {
     subscript: bool,
 }
 
-fn collect_inlines(
-    children: &[HtmlNode],
-    para: &mut Paragraph,
-    bold: bool,
-    italic: bool,
-    doc: &Document,
-) {
+fn collect_inlines(children: &[HtmlNode], para: &mut Paragraph, bold: bool, italic: bool) {
     let style = InlineStyle {
         bold,
         italic,
         ..Default::default()
     };
-    collect_inlines_styled(children, para, style, doc);
+    collect_inlines_styled(children, para, style);
 }
 
-#[allow(clippy::only_used_in_recursion)]
-fn collect_inlines_styled(
-    children: &[HtmlNode],
-    para: &mut Paragraph,
-    style: InlineStyle,
-    doc: &Document,
-) {
+fn collect_inlines_styled(children: &[HtmlNode], para: &mut Paragraph, style: InlineStyle) {
     let mut i = 0;
     while i < children.len() {
         match &children[i] {
@@ -425,7 +413,7 @@ fn collect_inlines_styled(
             }
             HtmlNode::Element(elem) => {
                 let tag = tag_name(elem);
-                if tag.contains('a') && has_attr_value(elem, "role", "doc-noteref") {
+                if tag == "a" && has_attr_value(elem, "role", "doc-noteref") {
                     // Skip footnote reference links
                 } else {
                     let new_style = InlineStyle {
@@ -434,7 +422,7 @@ fn collect_inlines_styled(
                         superscript: style.superscript || tag == "sup",
                         subscript: style.subscript || tag == "sub",
                     };
-                    collect_inlines_styled(&elem.children, para, new_style, doc);
+                    collect_inlines_styled(&elem.children, para, new_style);
                 }
             }
             HtmlNode::Tag(tag) => {
@@ -491,11 +479,7 @@ fn is_tag_end_for(tag: &Tag, start_loc: typst::introspection::Location) -> bool 
 
 /// Check if an element has a specific attribute value.
 fn has_attr_value(elem: &HtmlElement, attr_name: &str, attr_value: &str) -> bool {
-    elem.attrs.0.iter().any(|(k, v)| {
-        let key_str = format!("{k}");
-        let val_str = format!("{v}");
-        key_str == attr_name && val_str == attr_value
-    })
+    get_attr_value(elem, attr_name).as_deref() == Some(attr_value)
 }
 
 /// Find the footnote number from the children starting at a TAG Start("footnote").
@@ -762,10 +746,6 @@ fn find_body_start_line(paged_lines: &[FrameLine], doc: &Document) -> usize {
 /// A text line extracted from a `PagedDocument` frame, with its Y position (for ordering).
 #[derive(Debug, Clone)]
 struct FrameLine {
-    /// The Y position on the page (in typographic points), used for ordering.
-    #[allow(dead_code)]
-    y_pos: f64,
-    /// The concatenated text of all runs on this line.
     text: String,
 }
 
@@ -786,15 +766,12 @@ fn extract_lines_from_first_page(paged: &PagedDocument) -> Vec<FrameLine> {
         }
 
         // Sort each group by X and concatenate to form the line text
-        for (y_key, mut items) in y_groups {
+        for (_, mut items) in y_groups {
             items.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
             let line_text: String = items.into_iter().map(|(_, t)| t).collect();
             let trimmed = line_text.trim().to_string();
             if !trimmed.is_empty() {
-                all_lines.push(FrameLine {
-                    y_pos: y_key as f64 * 2.0,
-                    text: trimmed,
-                });
+                all_lines.push(FrameLine { text: trimmed });
             }
         }
     }
@@ -858,19 +835,7 @@ fn extract_doc_text(doc: &Document) -> String {
 /// - Abstract paragraph
 /// - Body content
 fn insert_missing_at_position(doc: &mut Document, missing_lines: &[FrameLine]) {
-    // Find the insertion point: after the last consecutive heading at the start
-    let mut insert_idx = 0;
-    for (i, elem) in doc.body.elements.iter().enumerate() {
-        if let BlockElement::Paragraph(p) = elem {
-            if matches!(p.style, Some(ParagraphStyle::Heading(_))) {
-                insert_idx = i + 1;
-            } else {
-                break;
-            }
-        } else {
-            break;
-        }
-    }
+    let insert_idx = find_title_section_end(doc);
 
     // Build centered paragraphs for each missing line
     let mut paragraphs: Vec<BlockElement> = Vec::new();
