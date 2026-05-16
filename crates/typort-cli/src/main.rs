@@ -18,7 +18,9 @@ struct Cli {
 fn main() {
     let cli = Cli::parse();
 
-    let output_path = cli.output.unwrap_or_else(|| cli.input.with_extension("docx"));
+    let output_path = cli
+        .output
+        .unwrap_or_else(|| cli.input.with_extension("docx"));
 
     let world = typort_core::TyportWorld::new(&cli.input).unwrap_or_else(|e| {
         eprintln!("error: failed to read input: {e}");

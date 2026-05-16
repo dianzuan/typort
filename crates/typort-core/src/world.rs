@@ -1,10 +1,10 @@
 use std::path::Path;
 
+use typst::diag::FileResult;
 use typst::foundations::{Bytes, Datetime};
 use typst::layout::PagedDocument;
-use typst::text::{Font, FontBook};
-use typst::diag::FileResult;
 use typst::syntax::{FileId, Source};
+use typst::text::{Font, FontBook};
 use typst::utils::LazyHash;
 use typst::{Library, LibraryExt, World};
 use typst_kit::fonts::{FontSlot, Fonts};
@@ -30,9 +30,7 @@ impl TyportWorld {
         let content = std::fs::read_to_string(path)?;
         let source = Source::detached(content);
 
-        let Fonts { book, fonts } = Fonts::searcher()
-            .include_system_fonts(false)
-            .search();
+        let Fonts { book, fonts } = Fonts::searcher().include_system_fonts(false).search();
 
         Ok(Self {
             library: LazyHash::new(Library::default()),
@@ -60,12 +58,16 @@ impl World for TyportWorld {
         if id == self.source.id() {
             Ok(self.source.clone())
         } else {
-            Err(typst::diag::FileError::NotFound(id.vpath().as_rootless_path().into()))
+            Err(typst::diag::FileError::NotFound(
+                id.vpath().as_rootless_path().into(),
+            ))
         }
     }
 
     fn file(&self, id: FileId) -> FileResult<Bytes> {
-        Err(typst::diag::FileError::NotFound(id.vpath().as_rootless_path().into()))
+        Err(typst::diag::FileError::NotFound(
+            id.vpath().as_rootless_path().into(),
+        ))
     }
 
     fn font(&self, index: usize) -> Option<Font> {
@@ -85,9 +87,6 @@ pub fn compile(world: &TyportWorld) -> Result<PagedDocument, Vec<String>> {
     let result = typst::compile::<PagedDocument>(world);
     match result.output {
         Ok(doc) => Ok(doc),
-        Err(errors) => Err(errors
-            .iter()
-            .map(|e| e.message.to_string())
-            .collect()),
+        Err(errors) => Err(errors.iter().map(|e| e.message.to_string()).collect()),
     }
 }
