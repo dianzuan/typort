@@ -5,7 +5,7 @@ use quick_xml::events::{BytesDecl, BytesText, Event};
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
-use crate::document::{BlockElement, Document, InlineElement, ParagraphStyle};
+use crate::document::{BlockElement, Document, InlineElement, ParagraphStyle, Table};
 use crate::styles;
 
 /// Write a Document to a .docx file (ZIP archive) into the given writer.
@@ -17,18 +17,23 @@ pub fn write_docx<W: Write + Seek>(
     writer: W,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let has_footnotes = !doc.footnotes.is_empty();
+    let has_numbering = doc_has_lists(doc);
 
     let mut zip = ZipWriter::new(writer);
     let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
     zip.start_file("[Content_Types].xml", options)?;
-    zip.write_all(&xml_part(|w| generate_content_types(w, has_footnotes))?)?;
+    zip.write_all(&xml_part(|w| {
+        generate_content_types(w, has_footnotes, has_numbering)
+    })?)?;
 
     zip.start_file("_rels/.rels", options)?;
     zip.write_all(&xml_part(generate_rels)?)?;
 
     zip.start_file("word/_rels/document.xml.rels", options)?;
-    zip.write_all(&xml_part(|w| generate_document_rels(w, has_footnotes))?)?;
+    zip.write_all(&xml_part(|w| {
+        generate_document_rels(w, has_footnotes, has_numbering)
+    })?)?;
 
     zip.start_file("word/styles.xml", options)?;
     zip.write_all(&xml_part(|w| styles::generate_styles(w, has_footnotes))?)?;
@@ -44,8 +49,21 @@ pub fn write_docx<W: Write + Seek>(
         zip.write_all(&xml_part(|w| generate_footnotes_xml(w, doc))?)?;
     }
 
+    if has_numbering {
+        zip.start_file("word/numbering.xml", options)?;
+        zip.write_all(&xml_part(generate_numbering_xml)?)?;
+    }
+
     zip.finish()?;
     Ok(())
+}
+
+/// Check if the document contains any list items (paragraphs with `list_id` set).
+fn doc_has_lists(doc: &Document) -> bool {
+    doc.body.elements.iter().any(|el| match el {
+        BlockElement::Paragraph(p) => p.list_id.is_some(),
+        BlockElement::Table(_) => false,
+    })
 }
 
 pub(crate) fn xml_part(
@@ -65,6 +83,7 @@ pub(crate) fn xml_part(
 fn generate_content_types(
     writer: &mut Writer<&mut Vec<u8>>,
     has_footnotes: bool,
+    has_numbering: bool,
 ) -> io::Result<()> {
     writer
         .create_element("Types")
@@ -96,6 +115,12 @@ fn generate_content_types(
                     .with_attribute(("ContentType", "application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"))
                     .write_empty()?;
             }
+            if has_numbering {
+                w.create_element("Override")
+                    .with_attribute(("PartName", "/word/numbering.xml"))
+                    .with_attribute(("ContentType", "application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"))
+                    .write_empty()?;
+            }
             Ok(())
         })?;
     Ok(())
@@ -119,6 +144,7 @@ fn generate_rels(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<()> {
 fn generate_document_rels(
     writer: &mut Writer<&mut Vec<u8>>,
     has_footnotes: bool,
+    has_numbering: bool,
 ) -> io::Result<()> {
     writer
         .create_element("Relationships")
@@ -153,6 +179,17 @@ fn generate_document_rels(
                     .with_attribute(("Target", "footnotes.xml"))
                     .write_empty()?;
             }
+            if has_numbering {
+                let num_id = if has_footnotes { "rId4" } else { "rId3" };
+                w.create_element("Relationship")
+                    .with_attribute(("Id", num_id))
+                    .with_attribute((
+                        "Type",
+                        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering",
+                    ))
+                    .with_attribute(("Target", "numbering.xml"))
+                    .write_empty()?;
+            }
             Ok(())
         })?;
     Ok(())
@@ -175,6 +212,9 @@ fn generate_document_xml(writer: &mut Writer<&mut Vec<u8>>, doc: &Document) -> i
                     match element {
                         BlockElement::Paragraph(para) => {
                             write_paragraph(body_w, para)?;
+                        }
+                        BlockElement::Table(table) => {
+                            write_table(body_w, table)?;
                         }
                     }
                 }
@@ -211,15 +251,32 @@ fn write_paragraph<W: Write>(
     para: &crate::document::Paragraph,
 ) -> io::Result<()> {
     writer.create_element("w:p").write_inner_content(|w| {
-        if let Some(style) = &para.style {
+        let has_style = para.style.is_some();
+        let has_list = para.list_id.is_some();
+        if has_style || has_list {
             w.create_element("w:pPr").write_inner_content(|ppr| {
-                let style_id = match style {
-                    ParagraphStyle::Heading(n) => format!("Heading{n}"),
-                    ParagraphStyle::Normal => "Normal".to_string(),
-                };
-                ppr.create_element("w:pStyle")
-                    .with_attribute(("w:val", style_id.as_str()))
-                    .write_empty()?;
+                if let Some(style) = &para.style {
+                    let style_id = match style {
+                        ParagraphStyle::Heading(n) => format!("Heading{n}"),
+                        ParagraphStyle::Normal => "Normal".to_string(),
+                    };
+                    ppr.create_element("w:pStyle")
+                        .with_attribute(("w:val", style_id.as_str()))
+                        .write_empty()?;
+                }
+                if let (Some(list_id), Some(list_level)) = (para.list_id, para.list_level) {
+                    let id_str = list_id.to_string();
+                    let lvl_str = list_level.to_string();
+                    ppr.create_element("w:numPr").write_inner_content(|num| {
+                        num.create_element("w:ilvl")
+                            .with_attribute(("w:val", lvl_str.as_str()))
+                            .write_empty()?;
+                        num.create_element("w:numId")
+                            .with_attribute(("w:val", id_str.as_str()))
+                            .write_empty()?;
+                        Ok(())
+                    })?;
+                }
                 Ok(())
             })?;
         }
@@ -260,6 +317,135 @@ fn write_run<W: Write>(writer: &mut Writer<W>, run: &crate::document::Run) -> io
             .write_text_content(BytesText::new(&run.text))?;
         Ok(())
     })?;
+    Ok(())
+}
+
+fn write_table<W: Write>(writer: &mut Writer<W>, table: &Table) -> io::Result<()> {
+    writer.create_element("w:tbl").write_inner_content(|w| {
+        // Table properties with borders
+        w.create_element("w:tblPr").write_inner_content(|tpr| {
+            tpr.create_element("w:tblW")
+                .with_attribute(("w:w", "0"))
+                .with_attribute(("w:type", "auto"))
+                .write_empty()?;
+            tpr.create_element("w:tblBorders")
+                .write_inner_content(|bdr| {
+                    for side in [
+                        "w:top",
+                        "w:left",
+                        "w:bottom",
+                        "w:right",
+                        "w:insideH",
+                        "w:insideV",
+                    ] {
+                        bdr.create_element(side)
+                            .with_attribute(("w:val", "single"))
+                            .with_attribute(("w:sz", "4"))
+                            .with_attribute(("w:space", "0"))
+                            .write_empty()?;
+                    }
+                    Ok(())
+                })?;
+            Ok(())
+        })?;
+        // Table rows
+        for row in &table.rows {
+            w.create_element("w:tr").write_inner_content(|tr_w| {
+                for cell in &row.cells {
+                    tr_w.create_element("w:tc").write_inner_content(|tc_w| {
+                        if cell.paragraphs.is_empty() {
+                            // OOXML requires at least one paragraph per cell
+                            tc_w.create_element("w:p").write_empty()?;
+                        } else {
+                            for para in &cell.paragraphs {
+                                write_paragraph(tc_w, para)?;
+                            }
+                        }
+                        Ok(())
+                    })?;
+                }
+                Ok(())
+            })?;
+        }
+        Ok(())
+    })?;
+    Ok(())
+}
+
+fn generate_numbering_xml(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<()> {
+    writer
+        .create_element("w:numbering")
+        .with_attribute((
+            "xmlns:w",
+            "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+        ))
+        .write_inner_content(|w| {
+            // Abstract numbering 1: ordered list (decimal)
+            w.create_element("w:abstractNum")
+                .with_attribute(("w:abstractNumId", "1"))
+                .write_inner_content(|abs| {
+                    abs.create_element("w:lvl")
+                        .with_attribute(("w:ilvl", "0"))
+                        .write_inner_content(|lvl| {
+                            lvl.create_element("w:start")
+                                .with_attribute(("w:val", "1"))
+                                .write_empty()?;
+                            lvl.create_element("w:numFmt")
+                                .with_attribute(("w:val", "decimal"))
+                                .write_empty()?;
+                            lvl.create_element("w:lvlText")
+                                .with_attribute(("w:val", "%1."))
+                                .write_empty()?;
+                            lvl.create_element("w:lvlJc")
+                                .with_attribute(("w:val", "left"))
+                                .write_empty()?;
+                            Ok(())
+                        })?;
+                    Ok(())
+                })?;
+            // Abstract numbering 2: unordered list (bullet)
+            w.create_element("w:abstractNum")
+                .with_attribute(("w:abstractNumId", "2"))
+                .write_inner_content(|abs| {
+                    abs.create_element("w:lvl")
+                        .with_attribute(("w:ilvl", "0"))
+                        .write_inner_content(|lvl| {
+                            lvl.create_element("w:start")
+                                .with_attribute(("w:val", "1"))
+                                .write_empty()?;
+                            lvl.create_element("w:numFmt")
+                                .with_attribute(("w:val", "bullet"))
+                                .write_empty()?;
+                            lvl.create_element("w:lvlText")
+                                .with_attribute(("w:val", "\u{2022}"))
+                                .write_empty()?;
+                            lvl.create_element("w:lvlJc")
+                                .with_attribute(("w:val", "left"))
+                                .write_empty()?;
+                            Ok(())
+                        })?;
+                    Ok(())
+                })?;
+            // Numbering instance 1 -> abstractNum 1 (ordered)
+            w.create_element("w:num")
+                .with_attribute(("w:numId", "1"))
+                .write_inner_content(|num| {
+                    num.create_element("w:abstractNumId")
+                        .with_attribute(("w:val", "1"))
+                        .write_empty()?;
+                    Ok(())
+                })?;
+            // Numbering instance 2 -> abstractNum 2 (unordered)
+            w.create_element("w:num")
+                .with_attribute(("w:numId", "2"))
+                .write_inner_content(|num| {
+                    num.create_element("w:abstractNumId")
+                        .with_attribute(("w:val", "2"))
+                        .write_empty()?;
+                    Ok(())
+                })?;
+            Ok(())
+        })?;
     Ok(())
 }
 

@@ -2,6 +2,106 @@ use std::io::Cursor;
 use std::path::Path;
 
 #[test]
+fn complex_paper_has_table_structure() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
+    let doc = typort_core::convert_html(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    // Verify w:tbl structure is present
+    assert!(
+        doc_xml.contains("w:tbl"),
+        "document.xml should contain w:tbl element for the table"
+    );
+    assert!(
+        doc_xml.contains("w:tr"),
+        "document.xml should contain w:tr elements for table rows"
+    );
+    assert!(
+        doc_xml.contains("w:tc"),
+        "document.xml should contain w:tc elements for table cells"
+    );
+    assert!(
+        doc_xml.contains("w:tblBorders"),
+        "table should have borders defined"
+    );
+    // Check that table content is in cells
+    assert!(
+        doc_xml.contains("变量类型") || doc_xml.contains("变量名称"),
+        "table cells should contain the paper's table content"
+    );
+}
+
+#[test]
+fn complex_paper_has_list_numbering() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
+    let doc = typort_core::convert_html(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    // Verify w:numPr is present for list items
+    assert!(
+        doc_xml.contains("w:numPr"),
+        "document.xml should contain w:numPr for list items"
+    );
+    assert!(
+        doc_xml.contains("w:ilvl"),
+        "document.xml should contain w:ilvl for list level"
+    );
+    assert!(
+        doc_xml.contains("w:numId"),
+        "document.xml should contain w:numId for numbering instance"
+    );
+
+    // Verify numbering.xml exists
+    let names: Vec<String> = reader.file_names().map(String::from).collect();
+    assert!(
+        names.iter().any(|n| n == "word/numbering.xml"),
+        "docx should contain word/numbering.xml, got: {names:?}"
+    );
+
+    // Verify numbering.xml content
+    let num_xml = std::io::read_to_string(reader.by_name("word/numbering.xml").unwrap()).unwrap();
+    assert!(
+        num_xml.contains("w:numbering"),
+        "numbering.xml should have w:numbering root"
+    );
+    assert!(
+        num_xml.contains("w:abstractNum"),
+        "numbering.xml should contain abstract numbering definitions"
+    );
+    assert!(
+        num_xml.contains("w:numFmt"),
+        "numbering.xml should contain number format definitions"
+    );
+
+    // Verify content types include numbering
+    let ct_xml = std::io::read_to_string(reader.by_name("[Content_Types].xml").unwrap()).unwrap();
+    assert!(
+        ct_xml.contains("numbering"),
+        "content types should reference numbering"
+    );
+
+    // Verify document rels include numbering relationship
+    let rels_xml =
+        std::io::read_to_string(reader.by_name("word/_rels/document.xml.rels").unwrap()).unwrap();
+    assert!(
+        rels_xml.contains("numbering"),
+        "document rels should reference numbering"
+    );
+}
+
+#[test]
 fn end_to_end_hello_typ_to_docx() {
     let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/hello.typ")).unwrap();
     let doc = typort_core::convert_html(&world).unwrap();

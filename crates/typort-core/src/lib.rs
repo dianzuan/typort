@@ -39,7 +39,9 @@ mod tests {
         );
 
         // First element should be a heading
-        let BlockElement::Paragraph(p) = &doc.body.elements[0];
+        let BlockElement::Paragraph(p) = &doc.body.elements[0] else {
+            panic!("expected Paragraph, got Table");
+        };
         assert_eq!(p.style, Some(ParagraphStyle::Heading(1)));
         assert!(!p.runs.is_empty());
         assert!(p.runs[0].text.contains("Hello"));
