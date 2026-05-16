@@ -9,6 +9,7 @@ pub struct Preset {
     pub journal: JournalInfo,
     pub page: Option<PagePreset>,
     pub font: Option<FontPreset>,
+    pub footnote: Option<FootnotePreset>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -28,6 +29,12 @@ pub struct PagePreset {
 pub struct FontPreset {
     pub body_size_pt: Option<f64>,
     pub heading1_size_pt: Option<f64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct FootnotePreset {
+    /// "decimal" (1,2,3) or "circled" (①②③)
+    pub format: Option<String>,
 }
 
 /// Convert centimeters to OOXML twips (1 cm = 567 twips).

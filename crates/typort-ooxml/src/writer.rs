@@ -44,7 +44,7 @@ pub fn write_docx<W: Write + Seek>(
     zip.write_all(&xml_part(|w| styles::generate_font_table(w, &doc.style))?)?;
 
     zip.start_file("word/settings.xml", options)?;
-    zip.write_all(&xml_part(generate_settings)?)?;
+    zip.write_all(&xml_part(|w| generate_settings(w, &doc.style))?)?;
 
     zip.start_file("word/document.xml", options)?;
     zip.write_all(&xml_part(|w| generate_document_xml(w, doc))?)?;
@@ -230,7 +230,10 @@ fn generate_document_rels(
     Ok(())
 }
 
-fn generate_settings(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<()> {
+fn generate_settings(
+    writer: &mut Writer<&mut Vec<u8>>,
+    style: &crate::document::DocumentStyle,
+) -> io::Result<()> {
     writer
         .create_element("w:settings")
         .with_attribute((
@@ -239,6 +242,11 @@ fn generate_settings(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<()> {
         ))
         .write_inner_content(|w| {
             w.create_element("w:footnotePr").write_inner_content(|fp| {
+                if style.footnote_format == crate::document::FootnoteFormat::CircledNumber {
+                    fp.create_element("w:numFmt")
+                        .with_attribute(("w:val", "decimalEnclosedCircle"))
+                        .write_empty()?;
+                }
                 fp.create_element("w:numRestart")
                     .with_attribute(("w:val", "eachPage"))
                     .write_empty()?;
@@ -289,7 +297,7 @@ fn generate_document_xml(writer: &mut Writer<&mut Vec<u8>>, doc: &Document) -> i
                         }
                     }
                 }
-                write_section_properties(body_w, &doc.page_settings)?;
+                write_section_properties(body_w, &doc.page_settings, &doc.style)?;
                 Ok(())
             })?;
             Ok(())
@@ -300,9 +308,15 @@ fn generate_document_xml(writer: &mut Writer<&mut Vec<u8>>, doc: &Document) -> i
 fn write_section_properties<W: Write>(
     writer: &mut Writer<W>,
     settings: &crate::document::PageSettings,
+    style: &crate::document::DocumentStyle,
 ) -> io::Result<()> {
     writer.create_element("w:sectPr").write_inner_content(|w| {
         w.create_element("w:footnotePr").write_inner_content(|fp| {
+            if style.footnote_format == crate::document::FootnoteFormat::CircledNumber {
+                fp.create_element("w:numFmt")
+                    .with_attribute(("w:val", "decimalEnclosedCircle"))
+                    .write_empty()?;
+            }
             fp.create_element("w:numRestart")
                 .with_attribute(("w:val", "eachPage"))
                 .write_empty()?;
