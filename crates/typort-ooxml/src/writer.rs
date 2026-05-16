@@ -329,6 +329,7 @@ fn write_section_properties<W: Write>(
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 fn write_paragraph<W: Write>(
     writer: &mut Writer<W>,
     para: &crate::document::Paragraph,
@@ -337,6 +338,8 @@ fn write_paragraph<W: Write>(
         let has_style = para.style.is_some();
         let has_list = para.list_id.is_some();
         let has_alignment = para.alignment.is_some();
+        let has_left_indent = para.left_indent.is_some();
+        let has_code_block = para.code_block;
         // Determine if we need to suppress the inherited first-line indent
         let suppress_indent = para.suppress_indent
             || (has_alignment
@@ -352,10 +355,21 @@ fn write_paragraph<W: Write>(
             )
         });
         let has_hanging = para.hanging_indent;
-        if has_style || has_list || has_alignment || suppress_indent || has_eq_number || has_hanging
+        if has_style
+            || has_list
+            || has_alignment
+            || suppress_indent
+            || has_eq_number
+            || has_hanging
+            || has_left_indent
+            || has_code_block
         {
             w.create_element("w:pPr").write_inner_content(|ppr| {
-                if let Some(style) = &para.style {
+                if has_code_block {
+                    ppr.create_element("w:pStyle")
+                        .with_attribute(("w:val", "CodeBlock"))
+                        .write_empty()?;
+                } else if let Some(style) = &para.style {
                     let style_id = match style {
                         ParagraphStyle::Heading(n) => format!("Heading{n}"),
                         ParagraphStyle::Normal => "Normal".to_string(),
@@ -387,8 +401,14 @@ fn write_paragraph<W: Write>(
                         Ok(())
                     })?;
                 }
-                // Emit indent: hanging (bibliography), list, or suppress first-line
-                if has_hanging {
+                // Emit indent: left indent (blockquote), hanging (bibliography), list, or suppress first-line
+                if let Some(left) = para.left_indent {
+                    let left_str = left.to_string();
+                    ppr.create_element("w:ind")
+                        .with_attribute(("w:left", left_str.as_str()))
+                        .with_attribute(("w:firstLine", "0"))
+                        .write_empty()?;
+                } else if has_hanging {
                     ppr.create_element("w:ind")
                         .with_attribute(("w:left", "420"))
                         .with_attribute(("w:hanging", "420"))
@@ -449,9 +469,16 @@ fn write_paragraph<W: Write>(
 
 fn write_run<W: Write>(writer: &mut Writer<W>, run: &crate::document::Run) -> io::Result<()> {
     writer.create_element("w:r").write_inner_content(|w| {
-        let has_rpr = run.bold || run.italic || run.superscript || run.subscript;
+        let has_rpr = run.bold || run.italic || run.superscript || run.subscript || run.monospace;
         if has_rpr {
             w.create_element("w:rPr").write_inner_content(|rpr| {
+                if run.monospace {
+                    rpr.create_element("w:rFonts")
+                        .with_attribute(("w:ascii", "Courier New"))
+                        .with_attribute(("w:hAnsi", "Courier New"))
+                        .with_attribute(("w:eastAsia", "\u{7b49}\u{7ebf}"))
+                        .write_empty()?;
+                }
                 if run.bold {
                     rpr.create_element("w:b").write_empty()?;
                 }
@@ -572,6 +599,7 @@ fn write_table<W: Write>(writer: &mut Writer<W>, table: &Table) -> io::Result<()
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 fn generate_numbering_xml(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<()> {
     writer
         .create_element("w:numbering")
