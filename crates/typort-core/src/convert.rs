@@ -85,13 +85,15 @@ fn convert_block_children_with_math(
             HtmlNode::Element(elem) => {
                 let tag = tag_name(elem);
                 if tag == "p" && continue_paragraph {
-                    // Merge this <p>'s content into the current paragraph
-                    // (collect runs without doc reference to avoid borrow conflict)
-                    let mut tmp_runs = Vec::new();
-                    collect_runs_simple(&elem.children, &mut tmp_runs, false, false);
+                    // Merge into current paragraph using a temp Paragraph to avoid borrow conflict
+                    let mut tmp = Paragraph::new();
+                    collect_inlines(&elem.children, &mut tmp, false, false, doc);
                     if let Some(BlockElement::Paragraph(para)) = doc.body.elements.last_mut() {
-                        for run in tmp_runs {
+                        for run in tmp.runs {
                             para.push_run(run);
+                        }
+                        for inline in tmp.inlines {
+                            para.inlines.push(inline);
                         }
                     }
                     continue_paragraph = false;
@@ -595,6 +597,7 @@ fn recover_missing_content(world: &TyportWorld, doc: &mut Document) {
     // 3. Look like author/institution info (heuristic: positioned after title, before body)
     let title_line_count = count_title_lines(&first_page_lines, doc);
     let body_start_line = find_body_start_line(&first_page_lines, doc);
+    let full_doc_text = extract_doc_text(doc);
 
     let mut missing = Vec::new();
     for (i, line) in first_page_lines.iter().enumerate() {
@@ -604,7 +607,7 @@ fn recover_missing_content(world: &TyportWorld, doc: &mut Document) {
         if line.text.chars().count() < 2 {
             continue;
         }
-        if !title_section_text.contains(&line.text) && !extract_doc_text(doc).contains(&line.text) {
+        if !title_section_text.contains(&line.text) && !full_doc_text.contains(&line.text) {
             missing.push(line.clone());
         }
     }
@@ -673,8 +676,9 @@ fn find_body_start_line(paged_lines: &[FrameLine], doc: &Document) -> usize {
     });
 
     if let Some(body_text) = first_body_text {
+        let search_prefix: String = body_text.chars().take(10).collect();
         for (i, line) in paged_lines.iter().enumerate() {
-            if line.text.contains(&body_text[..body_text.len().min(10)]) {
+            if line.text.contains(&search_prefix) {
                 return i;
             }
         }
@@ -809,58 +813,5 @@ fn insert_missing_at_position(doc: &mut Document, missing_lines: &[FrameLine]) {
         let tail = doc.body.elements.split_off(insert_idx);
         doc.body.elements.extend(paragraphs);
         doc.body.elements.extend(tail);
-    }
-}
-
-fn collect_runs_simple(children: &[HtmlNode], runs: &mut Vec<Run>, bold: bool, italic: bool) {
-    for child in children {
-        match child {
-            HtmlNode::Text(text, _) => {
-                if !text.is_empty() {
-                    let mut run = Run::new(text.as_str());
-                    run.bold = bold;
-                    run.italic = italic;
-                    runs.push(run);
-                }
-            }
-            HtmlNode::Element(elem) => {
-                let tag = tag_name(elem);
-                let new_bold = bold || tag == "strong" || tag == "b";
-                let new_italic = italic || tag == "em" || tag == "i";
-                collect_runs_simple(&elem.children, runs, new_bold, new_italic);
-            }
-            HtmlNode::Frame(_) | HtmlNode::Tag(_) => {}
-        }
-    }
-}
-
-/// Legacy Phase 0 converter (frame-based text extraction).
-pub mod legacy {
-    use typort_ooxml::document::{Document, Paragraph};
-    use typst::layout::{Frame, FrameItem, PagedDocument};
-
-    #[must_use]
-    pub fn convert_document(paged: &PagedDocument) -> Document {
-        let mut doc = Document::new();
-        for page in &paged.pages {
-            let mut text_buf = String::new();
-            extract_text_from_frame(&page.frame, &mut text_buf);
-            if !text_buf.is_empty() {
-                let mut para = Paragraph::new();
-                para.add_run(&text_buf);
-                doc.add_paragraph(para);
-            }
-        }
-        doc
-    }
-
-    fn extract_text_from_frame(frame: &Frame, buf: &mut String) {
-        for (_, item) in frame.items() {
-            match item {
-                FrameItem::Text(text_item) => buf.push_str(&text_item.text),
-                FrameItem::Group(group) => extract_text_from_frame(&group.frame, buf),
-                _ => {}
-            }
-        }
     }
 }
