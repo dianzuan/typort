@@ -1,8 +1,11 @@
+use std::collections::BTreeMap;
+
 use typort_ooxml::document::{
-    Alignment, Document, Paragraph, ParagraphStyle, Run, Table, TableCell, TableRow,
+    Alignment, BlockElement, Document, Paragraph, ParagraphStyle, Run, Table, TableCell, TableRow,
 };
 use typst::foundations::{Content, NativeElement};
 use typst::introspection::Tag;
+use typst::layout::{Frame, FrameItem, PagedDocument, Point};
 use typst_html::{HtmlDocument, HtmlElement, HtmlNode};
 use typst_library::math::EquationElem;
 
@@ -35,6 +38,10 @@ pub fn convert_html(world: &TyportWorld) -> Result<Document, Vec<String>> {
 
     let mut eq_counter = 0usize;
     convert_block_children_with_math(&body.children, &mut doc, &equations, &mut eq_counter);
+
+    // Recovery: compile also to PagedDocument and recover content that was lost
+    // (e.g. #align(center) content which has no HTML show rule)
+    recover_missing_content(world, &mut doc);
 
     // Extract title from the first heading element
     extract_title_from_first_heading(&mut doc);
@@ -500,6 +507,198 @@ fn extract_title_from_first_heading(doc: &mut Document) {
             }
             break;
         }
+    }
+}
+
+/// Recover content that exists in the `PagedDocument` but was lost from the `HtmlDocument` DOM.
+///
+/// This handles the case where `#align(center)[...]` content completely vanishes from the
+/// HTML semantic output (no show rule exists for `AlignElem` in Typst's HTML target). We detect
+/// the missing text by comparing the paged output with our converted document, then insert
+/// the missing lines as centered paragraphs at the appropriate position.
+fn recover_missing_content(world: &TyportWorld, doc: &mut Document) {
+    // Compile to PagedDocument to get frame-based text
+    let paged_result = typst::compile::<PagedDocument>(world);
+    let Ok(paged) = paged_result.output else {
+        return;
+    };
+
+    // Extract text lines from the first page, grouped by Y coordinate
+    let paged_lines = extract_lines_from_pages(&paged);
+    if paged_lines.is_empty() {
+        return;
+    }
+
+    // Extract all text from our converted document (normalized, whitespace-collapsed)
+    let doc_text = extract_doc_text(doc);
+
+    // Find lines from paged output that are NOT present in our document text
+    let missing_lines = find_missing_lines(&paged_lines, &doc_text);
+    if missing_lines.is_empty() {
+        return;
+    }
+
+    // Insert missing lines as centered paragraphs after the last heading
+    // before the first non-heading paragraph at the start of the document.
+    insert_missing_at_position(doc, &missing_lines);
+}
+
+/// A text line extracted from a `PagedDocument` frame, with its Y position (for ordering).
+#[derive(Debug, Clone)]
+struct FrameLine {
+    /// The Y position on the page (in typographic points), used for ordering.
+    #[allow(dead_code)]
+    y_pos: f64,
+    /// The concatenated text of all runs on this line.
+    text: String,
+}
+
+/// Extract text lines from all pages of a `PagedDocument`.
+/// Lines are determined by grouping text items by their Y coordinate (within a small tolerance).
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+fn extract_lines_from_pages(paged: &PagedDocument) -> Vec<FrameLine> {
+    let mut all_lines = Vec::new();
+    for page in &paged.pages {
+        let mut text_items: Vec<(f64, f64, String)> = Vec::new(); // (y, x, text)
+        collect_text_items_with_pos(&page.frame, Point::zero(), &mut text_items);
+
+        // Group by Y coordinate (tolerance of 2pt for same-line items)
+        let mut y_groups: BTreeMap<i64, Vec<(f64, String)>> = BTreeMap::new();
+        for (y, x, text) in text_items {
+            // Quantize Y to nearest 2pt for grouping
+            let y_key = (y / 2.0).round() as i64;
+            y_groups.entry(y_key).or_default().push((x, text));
+        }
+
+        // Sort each group by X and concatenate to form the line text
+        for (y_key, mut items) in y_groups {
+            items.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+            let line_text: String = items.into_iter().map(|(_, t)| t).collect();
+            let trimmed = line_text.trim().to_string();
+            if !trimmed.is_empty() {
+                all_lines.push(FrameLine {
+                    y_pos: y_key as f64 * 2.0,
+                    text: trimmed,
+                });
+            }
+        }
+    }
+    all_lines
+}
+
+/// Recursively collect text items from a frame with their absolute positions.
+fn collect_text_items_with_pos(
+    frame: &Frame,
+    offset: Point,
+    items: &mut Vec<(f64, f64, String)>,
+) {
+    for (pos, item) in frame.items() {
+        let abs_x = offset.x + pos.x;
+        let abs_y = offset.y + pos.y;
+        match item {
+            FrameItem::Text(text_item) => {
+                let text = text_item.text.to_string();
+                if !text.is_empty() {
+                    items.push((abs_y.to_pt(), abs_x.to_pt(), text));
+                }
+            }
+            FrameItem::Group(group) => {
+                let new_offset = Point::new(abs_x, abs_y);
+                collect_text_items_with_pos(&group.frame, new_offset, items);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Extract all text from the Document model as a single normalized string.
+fn extract_doc_text(doc: &Document) -> String {
+    let mut text = String::new();
+    for elem in &doc.body.elements {
+        match elem {
+            BlockElement::Paragraph(p) => {
+                for run in &p.runs {
+                    text.push_str(&run.text);
+                }
+            }
+            BlockElement::Table(t) => {
+                for row in &t.rows {
+                    for cell in &row.cells {
+                        for para in &cell.paragraphs {
+                            for run in &para.runs {
+                                text.push_str(&run.text);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    text
+}
+
+/// Find lines from the paged output that are not represented in the document text.
+/// A line is "missing" if none of its significant substrings appear in the doc text.
+fn find_missing_lines(paged_lines: &[FrameLine], doc_text: &str) -> Vec<FrameLine> {
+    let mut missing = Vec::new();
+    for line in paged_lines {
+        // Skip very short lines (page numbers, single characters, etc.)
+        if line.text.chars().count() < 2 {
+            continue;
+        }
+        // Check if any significant substring of this line is present in the doc
+        // Use a search string that's at least 4 chars to avoid false positives
+        let search_str = if line.text.chars().count() > 6 {
+            // Use the first 6+ chars as search key
+            &line.text
+        } else {
+            &line.text
+        };
+        if !doc_text.contains(search_str) {
+            missing.push(line.clone());
+        }
+    }
+    missing
+}
+
+/// Insert missing lines as centered paragraphs at the correct position in the document.
+///
+/// The insertion point is after the last consecutive heading at the start of the document,
+/// before the first non-heading paragraph. This matches the typical academic paper structure:
+/// - Title heading
+/// - Subtitle heading (optional)
+/// - [INSERT HERE: author/institution info]
+/// - Abstract paragraph
+/// - Body content
+fn insert_missing_at_position(doc: &mut Document, missing_lines: &[FrameLine]) {
+    // Find the insertion point: after the last consecutive heading at the start
+    let mut insert_idx = 0;
+    for (i, elem) in doc.body.elements.iter().enumerate() {
+        if let BlockElement::Paragraph(p) = elem {
+            if matches!(p.style, Some(ParagraphStyle::Heading(_))) {
+                insert_idx = i + 1;
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    // Build centered paragraphs for each missing line
+    let mut paragraphs: Vec<BlockElement> = Vec::new();
+    for line in missing_lines {
+        let mut para = Paragraph::new();
+        para.alignment = Some(Alignment::Center);
+        para.add_run(&line.text);
+        paragraphs.push(BlockElement::Paragraph(para));
+    }
+
+    // Insert at the computed position
+    if !paragraphs.is_empty() {
+        let tail = doc.body.elements.split_off(insert_idx);
+        doc.body.elements.extend(paragraphs);
+        doc.body.elements.extend(tail);
     }
 }
 

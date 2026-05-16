@@ -79,6 +79,34 @@ mod tests {
     }
 
     #[test]
+    fn center_dom_structure() {
+        let world =
+            TyportWorld::new(Path::new("../../tests/fixtures/center_test.typ")).unwrap();
+        let result = typst::compile::<typst_html::HtmlDocument>(&world);
+        let html_doc = result.output.unwrap();
+        let root = &html_doc.root;
+        let body = find_element_by_tag(&root.children, "body").unwrap_or(root);
+        println!("\n=== CENTER TEST ({} children) ===", body.children.len());
+        for (i, child) in body.children.iter().enumerate() {
+            match child {
+                typst_html::HtmlNode::Element(e) => {
+                    println!("[{i}] ELEM <{}> children={}", e.tag, e.children.len());
+                    print_deep(&e.children, 1);
+                }
+                typst_html::HtmlNode::Text(t, _) => {
+                    println!("[{i}] TEXT: {:?}", &t[..t.len().min(30)]);
+                }
+                typst_html::HtmlNode::Frame(f) => {
+                    println!("[{i}] FRAME (items={})", f.inner.items().count());
+                }
+                typst_html::HtmlNode::Tag(t) => {
+                    println!("[{i}] TAG: {t:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn complex_paper_dom_structure() {
         let world = TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
         let result = typst::compile::<typst_html::HtmlDocument>(&world);
