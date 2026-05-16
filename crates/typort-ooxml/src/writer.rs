@@ -290,10 +290,10 @@ fn generate_document_xml(writer: &mut Writer<&mut Vec<u8>>, doc: &Document) -> i
                 for element in &doc.body.elements {
                     match element {
                         BlockElement::Paragraph(para) => {
-                            write_paragraph(body_w, para)?;
+                            write_paragraph(body_w, para, &doc.style.footnote_format)?;
                         }
                         BlockElement::Table(table) => {
-                            write_table(body_w, table)?;
+                            write_table(body_w, table, &doc.style.footnote_format)?;
                         }
                     }
                 }
@@ -341,6 +341,7 @@ fn write_section_properties<W: Write>(
 fn write_paragraph<W: Write>(
     writer: &mut Writer<W>,
     para: &crate::document::Paragraph,
+    fn_format: &crate::document::FootnoteFormat,
 ) -> io::Result<()> {
     writer.create_element("w:p").write_inner_content(|w| {
         let has_style = para.style.is_some();
@@ -457,7 +458,7 @@ fn write_paragraph<W: Write>(
             for inline in &para.inlines {
                 match inline {
                     InlineElement::Text(run) => write_run(w, run)?,
-                    InlineElement::FootnoteRef(id) => write_footnote_ref(w, *id)?,
+                    InlineElement::FootnoteRef(id) => write_footnote_ref(w, *id, fn_format)?,
                     InlineElement::Math {
                         omml_xml,
                         equation_number,
@@ -514,7 +515,11 @@ fn write_run<W: Write>(writer: &mut Writer<W>, run: &crate::document::Run) -> io
     Ok(())
 }
 
-fn write_table<W: Write>(writer: &mut Writer<W>, table: &Table) -> io::Result<()> {
+fn write_table<W: Write>(
+    writer: &mut Writer<W>,
+    table: &Table,
+    fn_format: &crate::document::FootnoteFormat,
+) -> io::Result<()> {
     // Determine number of columns from the first row for equal-width distribution
     let num_cols = table
         .rows
@@ -593,7 +598,7 @@ fn write_table<W: Write>(writer: &mut Writer<W>, table: &Table) -> io::Result<()
                             tc_w.create_element("w:p").write_empty()?;
                         } else {
                             for para in &cell.paragraphs {
-                                write_paragraph(tc_w, para)?;
+                                write_paragraph(tc_w, para, fn_format)?;
                             }
                         }
                         Ok(())
@@ -787,8 +792,14 @@ fn write_equation_number<W: Write>(writer: &mut Writer<W>, number: &str) -> io::
     Ok(())
 }
 
-fn write_footnote_ref<W: Write>(writer: &mut Writer<W>, id: u32) -> io::Result<()> {
+fn write_footnote_ref<W: Write>(
+    writer: &mut Writer<W>,
+    id: u32,
+    footnote_format: &crate::document::FootnoteFormat,
+) -> io::Result<()> {
     let id_str = id.to_string();
+    let use_custom = *footnote_format == crate::document::FootnoteFormat::CircledNumber;
+
     writer.create_element("w:r").write_inner_content(|w| {
         w.create_element("w:rPr").write_inner_content(|rpr| {
             rpr.create_element("w:rStyle")
@@ -796,12 +807,46 @@ fn write_footnote_ref<W: Write>(writer: &mut Writer<W>, id: u32) -> io::Result<(
                 .write_empty()?;
             Ok(())
         })?;
-        w.create_element("w:footnoteReference")
-            .with_attribute(("w:id", id_str.as_str()))
-            .write_empty()?;
+        if use_custom {
+            w.create_element("w:footnoteReference")
+                .with_attribute(("w:customMarkFollows", "1"))
+                .with_attribute(("w:id", id_str.as_str()))
+                .write_empty()?;
+        } else {
+            w.create_element("w:footnoteReference")
+                .with_attribute(("w:id", id_str.as_str()))
+                .write_empty()?;
+        }
         Ok(())
     })?;
+
+    if use_custom {
+        let seq_num = id - 1; // id starts at 2, so fn 1 = id 2
+        let mark = circled_number_char(seq_num);
+        writer.create_element("w:r").write_inner_content(|w| {
+            w.create_element("w:rPr").write_inner_content(|rpr| {
+                rpr.create_element("w:rStyle")
+                    .with_attribute(("w:val", "FootnoteReference"))
+                    .write_empty()?;
+                Ok(())
+            })?;
+            w.create_element("w:t")
+                .with_attribute(("xml:space", "preserve"))
+                .write_text_content(BytesText::new(&mark))?;
+            Ok(())
+        })?;
+    }
+
     Ok(())
+}
+
+fn circled_number_char(n: u32) -> String {
+    let c = match n {
+        1..=20 => char::from_u32(0x2460 + n - 1),   // ① to ⑳
+        21..=50 => char::from_u32(0x3251 + n - 21), // ㉑ to ㊿
+        _ => None,
+    };
+    c.map_or_else(|| n.to_string(), |c| c.to_string())
 }
 
 fn generate_footnotes_xml(writer: &mut Writer<&mut Vec<u8>>, doc: &Document) -> io::Result<()> {
@@ -834,17 +879,34 @@ fn generate_footnotes_xml(writer: &mut Writer<&mut Vec<u8>>, doc: &Document) -> 
                                     .write_empty()?;
                                 Ok(())
                             })?;
-                            // Footnote reference mark at the start
-                            p_w.create_element("w:r").write_inner_content(|r_w| {
-                                r_w.create_element("w:rPr").write_inner_content(|rpr| {
-                                    rpr.create_element("w:rStyle")
-                                        .with_attribute(("w:val", "FootnoteReference"))
-                                        .write_empty()?;
+                            let use_custom = doc.style.footnote_format
+                                == crate::document::FootnoteFormat::CircledNumber;
+                            if use_custom {
+                                let seq = footnote.id - 1;
+                                let mark = circled_number_char(seq);
+                                p_w.create_element("w:r").write_inner_content(|r_w| {
+                                    r_w.create_element("w:rPr").write_inner_content(|rpr| {
+                                        rpr.create_element("w:rStyle")
+                                            .with_attribute(("w:val", "FootnoteReference"))
+                                            .write_empty()?;
+                                        Ok(())
+                                    })?;
+                                    r_w.create_element("w:t")
+                                        .write_text_content(BytesText::new(&mark))?;
                                     Ok(())
                                 })?;
-                                r_w.create_element("w:footnoteRef").write_empty()?;
-                                Ok(())
-                            })?;
+                            } else {
+                                p_w.create_element("w:r").write_inner_content(|r_w| {
+                                    r_w.create_element("w:rPr").write_inner_content(|rpr| {
+                                        rpr.create_element("w:rStyle")
+                                            .with_attribute(("w:val", "FootnoteReference"))
+                                            .write_empty()?;
+                                        Ok(())
+                                    })?;
+                                    r_w.create_element("w:footnoteRef").write_empty()?;
+                                    Ok(())
+                                })?;
+                            }
                             // Space after reference mark
                             p_w.create_element("w:r").write_inner_content(|r_w| {
                                 r_w.create_element("w:t")
