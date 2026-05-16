@@ -47,6 +47,11 @@ pub struct Paragraph {
     /// Inline elements including text runs and footnote references.
     pub inlines: Vec<InlineElement>,
     pub style: Option<ParagraphStyle>,
+    /// If this paragraph is a list item, the nesting level (0-based).
+    pub list_level: Option<u32>,
+    /// If this paragraph is a list item, the numbering definition ID.
+    /// Use 1 for ordered lists, 2 for unordered lists.
+    pub list_id: Option<u32>,
 }
 
 impl Paragraph {
@@ -73,9 +78,28 @@ impl Paragraph {
     }
 }
 
+/// A table cell containing paragraphs.
+#[derive(Debug, Clone)]
+pub struct TableCell {
+    pub paragraphs: Vec<Paragraph>,
+}
+
+/// A table row containing cells.
+#[derive(Debug, Clone)]
+pub struct TableRow {
+    pub cells: Vec<TableCell>,
+}
+
+/// A table with rows and cells.
+#[derive(Debug, Clone)]
+pub struct Table {
+    pub rows: Vec<TableRow>,
+}
+
 #[derive(Debug, Clone)]
 pub enum BlockElement {
     Paragraph(Paragraph),
+    Table(Table),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -122,6 +146,10 @@ impl Document {
 
     pub fn add_paragraph(&mut self, para: Paragraph) {
         self.body.elements.push(BlockElement::Paragraph(para));
+    }
+
+    pub fn add_table(&mut self, table: Table) {
+        self.body.elements.push(BlockElement::Table(table));
     }
 
     /// Add a footnote and return its 1-based ID.

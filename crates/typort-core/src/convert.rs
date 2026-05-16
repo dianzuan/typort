@@ -1,4 +1,6 @@
-use typort_ooxml::document::{Document, Paragraph, ParagraphStyle, Run};
+use typort_ooxml::document::{
+    Document, Paragraph, ParagraphStyle, Run, Table, TableCell, TableRow,
+};
 use typst::introspection::Tag;
 use typst_html::{HtmlDocument, HtmlElement, HtmlNode};
 
@@ -105,11 +107,16 @@ fn convert_paragraph(elem: &HtmlElement, doc: &mut Document) {
 }
 
 fn convert_list(elem: &HtmlElement, doc: &mut Document) {
+    let tag = tag_name(elem);
+    // list_id: 1 for ordered, 2 for unordered
+    let list_id = if tag == "ol" { 1 } else { 2 };
     for child in &elem.children {
         if let HtmlNode::Element(li) = child
             && tag_name(li) == "li"
         {
             let mut para = Paragraph::new();
+            para.list_id = Some(list_id);
+            para.list_level = Some(0);
             collect_inlines(&li.children, &mut para, false, false, doc);
             if !para.runs.is_empty() {
                 doc.add_paragraph(para);
@@ -119,39 +126,49 @@ fn convert_list(elem: &HtmlElement, doc: &mut Document) {
 }
 
 fn convert_table(elem: &HtmlElement, doc: &mut Document) {
+    let mut table = Table { rows: Vec::new() };
     for child in &elem.children {
         if let HtmlNode::Element(row_or_section) = child {
             let tag = tag_name(row_or_section);
             if tag == "tr" {
-                convert_table_row(row_or_section, doc);
+                if let Some(row) = convert_table_row(row_or_section, doc) {
+                    table.rows.push(row);
+                }
             } else if tag == "thead" || tag == "tbody" || tag == "tfoot" {
                 for inner in &row_or_section.children {
                     if let HtmlNode::Element(tr) = inner
                         && tag_name(tr) == "tr"
+                        && let Some(row) = convert_table_row(tr, doc)
                     {
-                        convert_table_row(tr, doc);
+                        table.rows.push(row);
                     }
                 }
             }
         }
     }
+    if !table.rows.is_empty() {
+        doc.add_table(table);
+    }
 }
 
-fn convert_table_row(tr: &HtmlElement, doc: &mut Document) {
-    let mut para = Paragraph::new();
-    for (i, cell) in tr.children.iter().enumerate() {
+fn convert_table_row(tr: &HtmlElement, doc: &Document) -> Option<TableRow> {
+    let mut cells = Vec::new();
+    for cell in &tr.children {
         if let HtmlNode::Element(td) = cell {
             let tag = tag_name(td);
             if tag == "td" || tag == "th" {
-                if i > 0 {
-                    para.push_run(Run::new("\t"));
-                }
+                let mut para = Paragraph::new();
                 collect_inlines(&td.children, &mut para, tag == "th", false, doc);
+                cells.push(TableCell {
+                    paragraphs: vec![para],
+                });
             }
         }
     }
-    if !para.runs.is_empty() {
-        doc.add_paragraph(para);
+    if cells.is_empty() {
+        None
+    } else {
+        Some(TableRow { cells })
     }
 }
 
