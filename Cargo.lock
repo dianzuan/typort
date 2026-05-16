@@ -2132,6 +2132,7 @@ dependencies = [
  "clap",
  "typort-core",
  "typort-ooxml",
+ "zip",
 ]
 
 [[package]]
