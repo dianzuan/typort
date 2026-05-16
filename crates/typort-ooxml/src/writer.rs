@@ -41,6 +41,9 @@ pub fn write_docx<W: Write + Seek>(
     zip.start_file("word/fontTable.xml", options)?;
     zip.write_all(&xml_part(styles::generate_font_table)?)?;
 
+    zip.start_file("word/settings.xml", options)?;
+    zip.write_all(&xml_part(generate_settings)?)?;
+
     zip.start_file("word/document.xml", options)?;
     zip.write_all(&xml_part(|w| generate_document_xml(w, doc))?)?;
 
@@ -126,6 +129,10 @@ fn generate_content_types(
                     .write_empty()?;
             }
             w.create_element("Override")
+                .with_attribute(("PartName", "/word/settings.xml"))
+                .with_attribute(("ContentType", "application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"))
+                .write_empty()?;
+            w.create_element("Override")
                 .with_attribute(("PartName", "/docProps/core.xml"))
                 .with_attribute(("ContentType", "application/vnd.openxmlformats-package.core-properties+xml"))
                 .write_empty()?;
@@ -203,6 +210,45 @@ fn generate_document_rels(
                     .with_attribute(("Target", "numbering.xml"))
                     .write_empty()?;
             }
+            let settings_id = match (has_footnotes, has_numbering) {
+                (true, true) => "rId5",
+                (true, false) | (false, true) => "rId4",
+                (false, false) => "rId3",
+            };
+            w.create_element("Relationship")
+                .with_attribute(("Id", settings_id))
+                .with_attribute((
+                    "Type",
+                    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings",
+                ))
+                .with_attribute(("Target", "settings.xml"))
+                .write_empty()?;
+            Ok(())
+        })?;
+    Ok(())
+}
+
+fn generate_settings(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<()> {
+    writer
+        .create_element("w:settings")
+        .with_attribute((
+            "xmlns:w",
+            "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+        ))
+        .write_inner_content(|w| {
+            w.create_element("w:compat").write_inner_content(|c| {
+                c.create_element("w:useFELayout").write_empty()?;
+                c.create_element("w:compatSetting")
+                    .with_attribute(("w:name", "compatibilityMode"))
+                    .with_attribute(("w:uri", "http://schemas.microsoft.com/office/word"))
+                    .with_attribute(("w:val", "15"))
+                    .write_empty()?;
+                Ok(())
+            })?;
+            w.create_element("w:themeFontLang")
+                .with_attribute(("w:val", "en-US"))
+                .with_attribute(("w:eastAsia", "zh-CN"))
+                .write_empty()?;
             Ok(())
         })?;
     Ok(())
