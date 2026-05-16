@@ -375,7 +375,8 @@ fn collect_inlines_styled(
                     // Find the footnote number by looking at the next children.
                     let footnote_id = find_footnote_id_in_range(&children[i..]);
                     if let Some(id) = footnote_id {
-                        para.add_footnote_ref(id);
+                        // Offset by +1 because OOXML reserves ids 0,1 for separators
+                        para.add_footnote_ref(id + 1);
                     }
                     // Skip ahead past the matching TAG End (same location)
                     i += 1;
