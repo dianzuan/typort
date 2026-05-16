@@ -4,6 +4,16 @@ pub enum ParagraphStyle {
     Heading(u8),
 }
 
+/// A single inline element within a paragraph.
+#[derive(Debug, Clone)]
+pub enum InlineElement {
+    /// Normal text run.
+    Text(Run),
+    /// A footnote reference (rendered as superscript number in the document).
+    /// The `id` corresponds to the footnote in the `Document::footnotes` list.
+    FootnoteRef(u32),
+}
+
 #[derive(Debug, Clone)]
 pub struct Run {
     pub text: String,
@@ -22,9 +32,20 @@ impl Run {
     }
 }
 
+/// A footnote with its content paragraphs.
+#[derive(Debug, Clone)]
+pub struct Footnote {
+    /// 1-based footnote ID.
+    pub id: u32,
+    /// The text content of the footnote (collected as paragraph runs).
+    pub content: Vec<Run>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Paragraph {
     pub runs: Vec<Run>,
+    /// Inline elements including text runs and footnote references.
+    pub inlines: Vec<InlineElement>,
     pub style: Option<ParagraphStyle>,
 }
 
@@ -35,7 +56,20 @@ impl Paragraph {
     }
 
     pub fn add_run(&mut self, text: &str) {
-        self.runs.push(Run::new(text));
+        let run = Run::new(text);
+        self.inlines.push(InlineElement::Text(run.clone()));
+        self.runs.push(run);
+    }
+
+    /// Add a pre-built run to this paragraph.
+    pub fn push_run(&mut self, run: Run) {
+        self.inlines.push(InlineElement::Text(run.clone()));
+        self.runs.push(run);
+    }
+
+    /// Add a footnote reference to this paragraph.
+    pub fn add_footnote_ref(&mut self, id: u32) {
+        self.inlines.push(InlineElement::FootnoteRef(id));
     }
 }
 
@@ -76,6 +110,8 @@ impl Default for PageSettings {
 pub struct Document {
     pub body: Body,
     pub page_settings: PageSettings,
+    /// Footnotes referenced by `FootnoteRef` inline elements.
+    pub footnotes: Vec<Footnote>,
 }
 
 impl Document {
@@ -86,5 +122,12 @@ impl Document {
 
     pub fn add_paragraph(&mut self, para: Paragraph) {
         self.body.elements.push(BlockElement::Paragraph(para));
+    }
+
+    /// Add a footnote and return its 1-based ID.
+    pub fn add_footnote(&mut self, content: Vec<Run>) -> u32 {
+        let id = u32::try_from(self.footnotes.len()).unwrap_or(u32::MAX - 1) + 1;
+        self.footnotes.push(Footnote { id, content });
+        id
     }
 }

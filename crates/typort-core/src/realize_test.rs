@@ -143,4 +143,126 @@ mod tests {
         }
         None
     }
+
+    fn print_deep(children: &[typst_html::HtmlNode], depth: usize) {
+        let indent = "  ".repeat(depth);
+        for (i, child) in children.iter().enumerate() {
+            match child {
+                typst_html::HtmlNode::Element(elem) => {
+                    let attrs: Vec<String> = elem
+                        .attrs
+                        .0
+                        .iter()
+                        .map(|(k, v)| format!("{k}=\"{v}\""))
+                        .collect();
+                    let attr_str = if attrs.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" {}", attrs.join(" "))
+                    };
+                    println!(
+                        "{indent}[{i}] <{}{}> ({} children)",
+                        elem.tag,
+                        attr_str,
+                        elem.children.len()
+                    );
+                    print_deep(&elem.children, depth + 1);
+                }
+                typst_html::HtmlNode::Text(text, _) => {
+                    let preview: String = text.chars().take(80).collect();
+                    println!("{indent}[{i}] TEXT: \"{preview}\"");
+                }
+                typst_html::HtmlNode::Frame(_) => {
+                    println!("{indent}[{i}] FRAME");
+                }
+                typst_html::HtmlNode::Tag(tag) => {
+                    println!("{indent}[{i}] TAG: {tag:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn complex_paper_footnote_structure() {
+        let world = TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
+        let result = typst::compile::<typst_html::HtmlDocument>(&world);
+        let html_doc = result.output.unwrap();
+        let root = &html_doc.root;
+        let body = find_element_by_tag(&root.children, "body").unwrap_or(root);
+
+        // Look for elements with role=doc-footnote or similar footnote-content structures
+        println!("\n=== ALL ELEMENTS (looking for footnote content) ===");
+        for (i, child) in body.children.iter().enumerate() {
+            match child {
+                typst_html::HtmlNode::Element(elem) => {
+                    let tag_str = format!("{}", elem.tag);
+                    // Print all elements with their attrs
+                    let attrs: Vec<String> = elem
+                        .attrs
+                        .0
+                        .iter()
+                        .map(|(k, v)| format!("{k}=\"{v}\""))
+                        .collect();
+                    if !attrs.is_empty()
+                        || tag_str.contains("aside")
+                        || tag_str.contains("section")
+                        || tag_str.contains("footer")
+                    {
+                        println!(
+                            "[{i}] <{tag_str} {}> ({} children)",
+                            attrs.join(" "),
+                            elem.children.len()
+                        );
+                        if elem.children.len() <= 10 {
+                            print_deep(&elem.children, 1);
+                        }
+                    }
+                }
+                typst_html::HtmlNode::Tag(tag) => {
+                    let tag_str = format!("{tag:?}");
+                    if tag_str.contains("footnote") || tag_str.contains("note") {
+                        println!("[{i}] TAG: {tag_str}");
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Also look at the very end of body children - footnotes might be there
+        println!("\n=== LAST 40 children of body ===");
+        let start = body.children.len().saturating_sub(40);
+        for (i, child) in body.children.iter().enumerate().skip(start) {
+            match child {
+                typst_html::HtmlNode::Element(elem) => {
+                    let attrs: Vec<String> = elem
+                        .attrs
+                        .0
+                        .iter()
+                        .map(|(k, v)| format!("{k}=\"{v}\""))
+                        .collect();
+                    println!(
+                        "[{i}] <{}{}> ({} children)",
+                        elem.tag,
+                        if attrs.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" {}", attrs.join(" "))
+                        },
+                        elem.children.len()
+                    );
+                    if elem.children.len() <= 6 {
+                        print_deep(&elem.children, 1);
+                    }
+                }
+                typst_html::HtmlNode::Text(text, _) => {
+                    let preview: String = text.chars().take(60).collect();
+                    println!("[{i}] TEXT: \"{preview}\"");
+                }
+                typst_html::HtmlNode::Tag(tag) => {
+                    println!("[{i}] TAG: {tag:?}");
+                }
+                typst_html::HtmlNode::Frame(_) => {}
+            }
+        }
+    }
 }
