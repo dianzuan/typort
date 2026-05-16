@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use typort_ooxml::document::{
-    Alignment, BlockElement, Document, Paragraph, ParagraphStyle, Run, Table, TableCell, TableRow,
-    VMerge,
+    Alignment, BlockElement, Document, InlineElement, Paragraph, ParagraphStyle, Run, Table,
+    TableCell, TableRow, VMerge,
 };
 use typst::foundations::{Content, NativeElement};
 use typst::introspection::Tag;
@@ -92,10 +92,10 @@ fn convert_block_children_with_math(
                     let mut tmp = Paragraph::new();
                     collect_inlines(&elem.children, &mut tmp, false, false, doc);
                     if let Some(BlockElement::Paragraph(para)) = doc.body.elements.last_mut() {
-                        for run in tmp.runs {
-                            para.push_run(run);
-                        }
                         for inline in tmp.inlines {
+                            if let InlineElement::Text(ref run) = inline {
+                                para.runs.push(run.clone());
+                            }
                             para.inlines.push(inline);
                         }
                     }
