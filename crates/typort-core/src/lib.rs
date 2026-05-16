@@ -2,6 +2,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 pub mod convert;
+pub mod realize_test;
 pub mod world;
 
 pub use world::{TyportWorld, compile};
