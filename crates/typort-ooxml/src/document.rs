@@ -196,9 +196,9 @@ impl Document {
         self.body.elements.push(BlockElement::Table(table));
     }
 
-    /// Add a footnote and return its 1-based ID.
+    /// Add a footnote and return its ID (starting from 2, since 0 and 1 are reserved by OOXML).
     pub fn add_footnote(&mut self, content: Vec<Run>) -> u32 {
-        let id = u32::try_from(self.footnotes.len()).unwrap_or(u32::MAX - 1) + 1;
+        let id = u32::try_from(self.footnotes.len()).unwrap_or(u32::MAX - 3) + 2;
         self.footnotes.push(Footnote { id, content });
         id
     }
