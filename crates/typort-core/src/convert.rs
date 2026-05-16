@@ -1,5 +1,5 @@
 use typort_ooxml::document::{
-    Document, Paragraph, ParagraphStyle, Run, Table, TableCell, TableRow,
+    Alignment, Document, Paragraph, ParagraphStyle, Run, Table, TableCell, TableRow,
 };
 use typst::foundations::{Content, NativeElement};
 use typst::introspection::Tag;
@@ -145,6 +145,14 @@ fn convert_element_with_math(
         "p" => convert_paragraph(elem, doc),
         "ol" | "ul" => convert_list(elem, doc),
         "table" => convert_table(elem, doc),
+        "div" => {
+            // Check if this div has alignment styling
+            if detect_alignment(elem).is_some() {
+                convert_paragraph(elem, doc);
+            } else {
+                convert_block_children_with_math(&elem.children, doc, equations, eq_counter);
+            }
+        }
         "section" => {
             // Skip the doc-endnotes section (already extracted)
             if has_attr_value(elem, "role", "doc-endnotes") {
@@ -165,10 +173,35 @@ fn convert_heading(elem: &HtmlElement, doc: &mut Document, level: u8) {
 
 fn convert_paragraph(elem: &HtmlElement, doc: &mut Document) {
     let mut para = Paragraph::new();
+    para.alignment = detect_alignment(elem);
     collect_inlines(&elem.children, &mut para, false, false, doc);
     if !para.runs.is_empty() {
         doc.add_paragraph(para);
     }
+}
+
+/// Detect text alignment from the `style` attribute of an element.
+/// Typst's `#align(center)` produces elements with style containing "text-align: center".
+fn detect_alignment(elem: &HtmlElement) -> Option<Alignment> {
+    let style_val = get_attr_value(elem, "style")?;
+    if style_val.contains("text-align: center") || style_val.contains("text-align:center") {
+        Some(Alignment::Center)
+    } else if style_val.contains("text-align: right") || style_val.contains("text-align:right") {
+        Some(Alignment::Right)
+    } else {
+        None
+    }
+}
+
+/// Get the value of an attribute by name.
+fn get_attr_value(elem: &HtmlElement, attr_name: &str) -> Option<String> {
+    for (k, v) in &elem.attrs.0 {
+        let key_str = format!("{k}");
+        if key_str == attr_name {
+            return Some(format!("{v}"));
+        }
+    }
+    None
 }
 
 fn convert_list(elem: &HtmlElement, doc: &mut Document) {

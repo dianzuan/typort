@@ -5,7 +5,7 @@ use quick_xml::events::{BytesDecl, BytesText, Event};
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
-use crate::document::{BlockElement, Document, InlineElement, ParagraphStyle, Table};
+use crate::document::{Alignment, BlockElement, Document, InlineElement, ParagraphStyle, Table};
 use crate::styles;
 
 /// Write a Document to a .docx file (ZIP archive) into the given writer.
@@ -270,7 +270,14 @@ fn write_paragraph<W: Write>(
     writer.create_element("w:p").write_inner_content(|w| {
         let has_style = para.style.is_some();
         let has_list = para.list_id.is_some();
-        if has_style || has_list {
+        let has_alignment = para.alignment.is_some();
+        // Determine if we need to suppress the inherited first-line indent
+        let suppress_indent = has_alignment
+            && matches!(
+                para.alignment,
+                Some(Alignment::Center | Alignment::Right)
+            );
+        if has_style || has_list || has_alignment || suppress_indent {
             w.create_element("w:pPr").write_inner_content(|ppr| {
                 if let Some(style) = &para.style {
                     let style_id = match style {
@@ -293,6 +300,29 @@ fn write_paragraph<W: Write>(
                             .write_empty()?;
                         Ok(())
                     })?;
+                }
+                // Emit indent: list indent or suppress first-line for center/right
+                if has_list {
+                    ppr.create_element("w:ind")
+                        .with_attribute(("w:left", "720"))
+                        .with_attribute(("w:hanging", "360"))
+                        .write_empty()?;
+                } else if suppress_indent {
+                    ppr.create_element("w:ind")
+                        .with_attribute(("w:firstLine", "0"))
+                        .write_empty()?;
+                }
+                // Emit alignment
+                if let Some(alignment) = &para.alignment {
+                    let val = match alignment {
+                        Alignment::Left => "left",
+                        Alignment::Center => "center",
+                        Alignment::Right => "right",
+                        Alignment::Justify => "both",
+                    };
+                    ppr.create_element("w:jc")
+                        .with_attribute(("w:val", val))
+                        .write_empty()?;
                 }
                 Ok(())
             })?;

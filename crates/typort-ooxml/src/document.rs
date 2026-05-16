@@ -4,6 +4,15 @@ pub enum ParagraphStyle {
     Heading(u8),
 }
 
+/// Paragraph alignment / justification.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Alignment {
+    Left,
+    Center,
+    Right,
+    Justify,
+}
+
 /// A single inline element within a paragraph.
 #[derive(Debug, Clone)]
 pub enum InlineElement {
@@ -54,6 +63,8 @@ pub struct Paragraph {
     /// If this paragraph is a list item, the numbering definition ID.
     /// Use 1 for ordered lists, 2 for unordered lists.
     pub list_id: Option<u32>,
+    /// Paragraph alignment (left, center, right, justify).
+    pub alignment: Option<Alignment>,
 }
 
 impl Paragraph {
