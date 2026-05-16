@@ -86,6 +86,9 @@ fn write_style_normal<W: Write>(w: &mut Writer<W>) -> io::Result<()> {
                 Ok(())
             })?;
             s.create_element("w:pPr").write_inner_content(|ppr| {
+                ppr.create_element("w:jc")
+                    .with_attribute(("w:val", "both"))
+                    .write_empty()?;
                 ppr.create_element("w:spacing")
                     .with_attribute(("w:line", "360"))
                     .with_attribute(("w:lineRule", "auto"))

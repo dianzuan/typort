@@ -392,13 +392,24 @@ fn write_paragraph<W: Write>(
 
 fn write_run<W: Write>(writer: &mut Writer<W>, run: &crate::document::Run) -> io::Result<()> {
     writer.create_element("w:r").write_inner_content(|w| {
-        if run.bold || run.italic {
+        let has_rpr = run.bold || run.italic || run.superscript || run.subscript;
+        if has_rpr {
             w.create_element("w:rPr").write_inner_content(|rpr| {
                 if run.bold {
                     rpr.create_element("w:b").write_empty()?;
                 }
                 if run.italic {
                     rpr.create_element("w:i").write_empty()?;
+                }
+                if run.superscript {
+                    rpr.create_element("w:vertAlign")
+                        .with_attribute(("w:val", "superscript"))
+                        .write_empty()?;
+                }
+                if run.subscript {
+                    rpr.create_element("w:vertAlign")
+                        .with_attribute(("w:val", "subscript"))
+                        .write_empty()?;
                 }
                 Ok(())
             })?;

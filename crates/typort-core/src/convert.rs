@@ -285,11 +285,35 @@ fn convert_table_row(tr: &HtmlElement, doc: &Document) -> Option<TableRow> {
 /// We detect the footnote start tag and skip the inline content of the reference
 /// (since Word handles rendering the superscript number), inserting a `FootnoteRef` instead.
 #[allow(clippy::only_used_in_recursion)]
+#[derive(Clone, Copy, Default)]
+#[allow(clippy::struct_excessive_bools)]
+struct InlineStyle {
+    bold: bool,
+    italic: bool,
+    superscript: bool,
+    subscript: bool,
+}
+
 fn collect_inlines(
     children: &[HtmlNode],
     para: &mut Paragraph,
     bold: bool,
     italic: bool,
+    doc: &Document,
+) {
+    let style = InlineStyle {
+        bold,
+        italic,
+        ..Default::default()
+    };
+    collect_inlines_styled(children, para, style, doc);
+}
+
+#[allow(clippy::only_used_in_recursion)]
+fn collect_inlines_styled(
+    children: &[HtmlNode],
+    para: &mut Paragraph,
+    style: InlineStyle,
     doc: &Document,
 ) {
     let mut i = 0;
@@ -298,21 +322,25 @@ fn collect_inlines(
             HtmlNode::Text(text, _) => {
                 if !text.is_empty() {
                     let mut run = Run::new(text.as_str());
-                    run.bold = bold;
-                    run.italic = italic;
+                    run.bold = style.bold;
+                    run.italic = style.italic;
+                    run.superscript = style.superscript;
+                    run.subscript = style.subscript;
                     para.push_run(run);
                 }
             }
             HtmlNode::Element(elem) => {
                 let tag = tag_name(elem);
-                // Skip the doc-noteref anchor (footnote reference link) - we handle
-                // footnotes via the Tag markers instead.
                 if tag.contains('a') && has_attr_value(elem, "role", "doc-noteref") {
-                    // Skip - handled by the Tag("footnote") marker
+                    // Skip footnote reference links
                 } else {
-                    let new_bold = bold || tag == "strong" || tag == "b";
-                    let new_italic = italic || tag == "em" || tag == "i";
-                    collect_inlines(&elem.children, para, new_bold, new_italic, doc);
+                    let new_style = InlineStyle {
+                        bold: style.bold || tag == "strong" || tag == "b",
+                        italic: style.italic || tag == "em" || tag == "i",
+                        superscript: style.superscript || tag == "sup",
+                        subscript: style.subscript || tag == "sub",
+                    };
+                    collect_inlines_styled(&elem.children, para, new_style, doc);
                 }
             }
             HtmlNode::Tag(tag) => {
