@@ -2,9 +2,11 @@
 #![allow(clippy::module_name_repetitions)]
 
 pub mod convert;
-pub mod realize_test;
 pub mod world;
 
+mod realize_test;
+
+pub use convert::convert_html;
 pub use world::{TyportWorld, compile};
 
 #[cfg(test)]
@@ -12,6 +14,7 @@ mod tests {
     use std::path::Path;
 
     use super::*;
+    use typort_ooxml::document::{BlockElement, ParagraphStyle};
 
     #[test]
     fn compile_hello_typ() {
@@ -25,13 +28,44 @@ mod tests {
     }
 
     #[test]
-    fn compile_and_convert_produces_document() {
+    fn convert_html_produces_heading_and_paragraphs() {
         let world = TyportWorld::new(Path::new("../../tests/fixtures/hello.typ")).unwrap();
-        let paged = compile(&world).unwrap();
-        let doc = convert::convert_document(&paged);
+        let doc = convert_html(&world).unwrap();
+
         assert!(
-            !doc.body.elements.is_empty(),
-            "document should have at least one element"
+            doc.body.elements.len() >= 3,
+            "should have heading + 2 paragraphs, got {}",
+            doc.body.elements.len()
+        );
+
+        // First element should be a heading
+        if let BlockElement::Paragraph(p) = &doc.body.elements[0] {
+            assert_eq!(p.style, Some(ParagraphStyle::Heading(1)));
+            assert!(!p.runs.is_empty());
+            assert!(p.runs[0].text.contains("Hello"));
+        } else {
+            panic!("first element should be a paragraph with heading style");
+        }
+    }
+
+    #[test]
+    fn complex_paper_has_multiple_headings() {
+        let world = TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
+        let doc = convert_html(&world).unwrap();
+
+        let heading_count = doc.body.elements.iter().filter(|e| {
+            matches!(e, BlockElement::Paragraph(p) if matches!(p.style, Some(ParagraphStyle::Heading(_))))
+        }).count();
+
+        assert!(
+            heading_count >= 5,
+            "complex paper should have at least 5 headings, got {heading_count}"
+        );
+
+        assert!(
+            doc.body.elements.len() >= 20,
+            "complex paper should have many elements, got {}",
+            doc.body.elements.len()
         );
     }
 }
