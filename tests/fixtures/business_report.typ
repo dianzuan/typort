@@ -1,4 +1,4 @@
-#set text(font: ("New Computer Modern", "Noto Serif CJK SC"), size: 11pt)
+#set text(font: ("New Computer Modern", "Noto Serif SC"), size: 11pt)
 #set page(margin: 2cm)
 
 = Q1 2026 业务报告

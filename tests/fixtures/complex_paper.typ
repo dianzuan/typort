@@ -1,5 +1,5 @@
 #set page(margin: (top: 2.54cm, bottom: 2.54cm, left: 3.17cm, right: 3.17cm))
-#set text(font: ("New Computer Modern", "Noto Serif CJK SC"), size: 10.5pt)
+#set text(font: ("New Computer Modern", "Noto Serif SC"), size: 10.5pt)
 #set par(leading: 1.5em, first-line-indent: 2em)
 
 = 数字经济对区域创新效率的影响研究

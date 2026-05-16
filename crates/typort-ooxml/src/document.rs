@@ -216,6 +216,36 @@ impl DocumentMetadata {
     }
 }
 
+/// Extracted document style from the Typst `PagedDocument`.
+///
+/// These values describe how the document actually renders (fonts, sizes)
+/// and are used to generate matching OOXML styles instead of hardcoded defaults.
+#[derive(Debug, Clone)]
+pub struct DocumentStyle {
+    /// Body font family name (e.g. "Noto Serif CJK SC", "Times New Roman").
+    pub body_font_ascii: String,
+    /// East-Asian body font family (same as `body_font_ascii` if not separable).
+    pub body_font_east_asia: String,
+    /// Body font size in OOXML half-points (e.g. 21 = 10.5pt).
+    pub body_size_half_pt: u32,
+    /// Line spacing in 240ths of a line (e.g. 360 = 1.5 line spacing, 240 = single).
+    pub line_spacing: u32,
+    /// First-line indent in twips (e.g. 420 = 2em at 10.5pt CJK).
+    pub first_line_indent_twips: u32,
+}
+
+impl Default for DocumentStyle {
+    fn default() -> Self {
+        Self {
+            body_font_ascii: "Times New Roman".to_string(),
+            body_font_east_asia: "\u{5b8b}\u{4f53}".to_string(), // 宋体
+            body_size_half_pt: 21,                               // 10.5pt
+            line_spacing: 360,                                   // 1.5x
+            first_line_indent_twips: 420,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Document {
     pub body: Body,
@@ -224,6 +254,8 @@ pub struct Document {
     pub footnotes: Vec<Footnote>,
     /// Document metadata (title, author) written to docProps/core.xml.
     pub metadata: DocumentMetadata,
+    /// Style information extracted from the Typst document rendering.
+    pub style: DocumentStyle,
 }
 
 impl Document {
