@@ -99,16 +99,23 @@ mod tests {
         // The author names and institution info from #align(center) should be recovered
         let has_author = doc.body.elements.iter().any(|e| {
             if let BlockElement::Paragraph(p) = e {
-                p.runs.iter().any(|r| r.text.contains("张三") || r.text.contains("李四"))
+                p.runs
+                    .iter()
+                    .any(|r| r.text.contains("张三") || r.text.contains("李四"))
             } else {
                 false
             }
         });
-        assert!(has_author, "complex paper should recover author names from #align(center)");
+        assert!(
+            has_author,
+            "complex paper should recover author names from #align(center)"
+        );
 
         let has_institution = doc.body.elements.iter().any(|e| {
             if let BlockElement::Paragraph(p) = e {
-                p.runs.iter().any(|r| r.text.contains("某大学") || r.text.contains("经济学院"))
+                p.runs
+                    .iter()
+                    .any(|r| r.text.contains("某大学") || r.text.contains("经济学院"))
             } else {
                 false
             }

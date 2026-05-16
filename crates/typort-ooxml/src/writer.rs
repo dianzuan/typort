@@ -272,11 +272,8 @@ fn write_paragraph<W: Write>(
         let has_list = para.list_id.is_some();
         let has_alignment = para.alignment.is_some();
         // Determine if we need to suppress the inherited first-line indent
-        let suppress_indent = has_alignment
-            && matches!(
-                para.alignment,
-                Some(Alignment::Center | Alignment::Right)
-            );
+        let suppress_indent =
+            has_alignment && matches!(para.alignment, Some(Alignment::Center | Alignment::Right));
         if has_style || has_list || has_alignment || suppress_indent {
             w.create_element("w:pPr").write_inner_content(|ppr| {
                 if let Some(style) = &para.style {

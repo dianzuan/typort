@@ -517,30 +517,115 @@ fn extract_title_from_first_heading(doc: &mut Document) {
 /// the missing text by comparing the paged output with our converted document, then insert
 /// the missing lines as centered paragraphs at the appropriate position.
 fn recover_missing_content(world: &TyportWorld, doc: &mut Document) {
-    // Compile to PagedDocument to get frame-based text
     let paged_result = typst::compile::<PagedDocument>(world);
     let Ok(paged) = paged_result.output else {
         return;
     };
 
-    // Extract text lines from the first page, grouped by Y coordinate
-    let paged_lines = extract_lines_from_pages(&paged);
-    if paged_lines.is_empty() {
+    // Only look at the FIRST PAGE for title-area recovery (author/institution info).
+    // Other pages' differences (math as OMML, footnotes in footnotes.xml) are NOT missing.
+    let first_page_lines = extract_lines_from_first_page(&paged);
+    if first_page_lines.is_empty() {
         return;
     }
 
-    // Extract all text from our converted document (normalized, whitespace-collapsed)
-    let doc_text = extract_doc_text(doc);
+    // Find where the title headings end in the document
+    let title_end_idx = find_title_section_end(doc);
 
-    // Find lines from paged output that are NOT present in our document text
-    let missing_lines = find_missing_lines(&paged_lines, &doc_text);
-    if missing_lines.is_empty() {
-        return;
+    // Extract text that appears in our document's title section
+    let title_section_text = extract_text_around_title(doc, title_end_idx);
+
+    // Only recover lines that:
+    // 1. Appear BETWEEN the title and the first body content on page 1
+    // 2. Are NOT already in our document
+    // 3. Look like author/institution info (heuristic: positioned after title, before body)
+    let title_line_count = count_title_lines(&first_page_lines, doc);
+    let body_start_line = find_body_start_line(&first_page_lines, doc);
+
+    let mut missing = Vec::new();
+    for (i, line) in first_page_lines.iter().enumerate() {
+        if i < title_line_count || i >= body_start_line {
+            continue;
+        }
+        if line.text.chars().count() < 2 {
+            continue;
+        }
+        if !title_section_text.contains(&line.text) && !extract_doc_text(doc).contains(&line.text) {
+            missing.push(line.clone());
+        }
     }
 
-    // Insert missing lines as centered paragraphs after the last heading
-    // before the first non-heading paragraph at the start of the document.
-    insert_missing_at_position(doc, &missing_lines);
+    if !missing.is_empty() {
+        insert_missing_at_position(doc, &missing);
+    }
+}
+
+fn find_title_section_end(doc: &Document) -> usize {
+    for (i, elem) in doc.body.elements.iter().enumerate() {
+        if let BlockElement::Paragraph(p) = elem {
+            if !matches!(p.style, Some(ParagraphStyle::Heading(_))) {
+                return i;
+            }
+        } else {
+            return i;
+        }
+    }
+    doc.body.elements.len()
+}
+
+fn extract_text_around_title(doc: &Document, title_end: usize) -> String {
+    let mut text = String::new();
+    let end = (title_end + 3).min(doc.body.elements.len());
+    for elem in &doc.body.elements[..end] {
+        if let BlockElement::Paragraph(p) = elem {
+            for run in &p.runs {
+                text.push_str(&run.text);
+            }
+        }
+    }
+    text
+}
+
+fn count_title_lines(paged_lines: &[FrameLine], doc: &Document) -> usize {
+    let mut count = 0;
+    for line in paged_lines {
+        let is_heading = doc.body.elements.iter().any(|e| {
+            if let BlockElement::Paragraph(p) = e
+                && matches!(p.style, Some(ParagraphStyle::Heading(_)))
+            {
+                p.runs.iter().any(|r| line.text.contains(&r.text))
+            } else {
+                false
+            }
+        });
+        if is_heading {
+            count += 1;
+        } else {
+            break;
+        }
+    }
+    count
+}
+
+fn find_body_start_line(paged_lines: &[FrameLine], doc: &Document) -> usize {
+    let first_body_text = doc.body.elements.iter().find_map(|e| {
+        if let BlockElement::Paragraph(p) = e
+            && !matches!(p.style, Some(ParagraphStyle::Heading(_)))
+        {
+            p.runs.first().map(|r| r.text.clone())
+        } else {
+            None
+        }
+    });
+
+    if let Some(body_text) = first_body_text {
+        for (i, line) in paged_lines.iter().enumerate() {
+            if line.text.contains(&body_text[..body_text.len().min(10)]) {
+                return i;
+            }
+        }
+    }
+    paged_lines.len()
 }
 
 /// A text line extracted from a `PagedDocument` frame, with its Y position (for ordering).
@@ -553,12 +638,11 @@ struct FrameLine {
     text: String,
 }
 
-/// Extract text lines from all pages of a `PagedDocument`.
-/// Lines are determined by grouping text items by their Y coordinate (within a small tolerance).
+/// Extract text lines from the first page of a `PagedDocument`.
 #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
-fn extract_lines_from_pages(paged: &PagedDocument) -> Vec<FrameLine> {
+fn extract_lines_from_first_page(paged: &PagedDocument) -> Vec<FrameLine> {
     let mut all_lines = Vec::new();
-    for page in &paged.pages {
+    for page in paged.pages.iter().take(1) {
         let mut text_items: Vec<(f64, f64, String)> = Vec::new(); // (y, x, text)
         collect_text_items_with_pos(&page.frame, Point::zero(), &mut text_items);
 
@@ -587,11 +671,7 @@ fn extract_lines_from_pages(paged: &PagedDocument) -> Vec<FrameLine> {
 }
 
 /// Recursively collect text items from a frame with their absolute positions.
-fn collect_text_items_with_pos(
-    frame: &Frame,
-    offset: Point,
-    items: &mut Vec<(f64, f64, String)>,
-) {
+fn collect_text_items_with_pos(frame: &Frame, offset: Point, items: &mut Vec<(f64, f64, String)>) {
     for (pos, item) in frame.items() {
         let abs_x = offset.x + pos.x;
         let abs_y = offset.y + pos.y;
@@ -635,30 +715,6 @@ fn extract_doc_text(doc: &Document) -> String {
         }
     }
     text
-}
-
-/// Find lines from the paged output that are not represented in the document text.
-/// A line is "missing" if none of its significant substrings appear in the doc text.
-fn find_missing_lines(paged_lines: &[FrameLine], doc_text: &str) -> Vec<FrameLine> {
-    let mut missing = Vec::new();
-    for line in paged_lines {
-        // Skip very short lines (page numbers, single characters, etc.)
-        if line.text.chars().count() < 2 {
-            continue;
-        }
-        // Check if any significant substring of this line is present in the doc
-        // Use a search string that's at least 4 chars to avoid false positives
-        let search_str = if line.text.chars().count() > 6 {
-            // Use the first 6+ chars as search key
-            &line.text
-        } else {
-            &line.text
-        };
-        if !doc_text.contains(search_str) {
-            missing.push(line.clone());
-        }
-    }
-    missing
 }
 
 /// Insert missing lines as centered paragraphs at the correct position in the document.
