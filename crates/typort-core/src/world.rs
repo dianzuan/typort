@@ -6,7 +6,7 @@ use typst::layout::PagedDocument;
 use typst::syntax::{FileId, Source};
 use typst::text::{Font, FontBook};
 use typst::utils::LazyHash;
-use typst::{Library, LibraryExt, World};
+use typst::{Feature, Library, LibraryExt, World};
 use typst_kit::fonts::{FontSlot, Fonts};
 
 pub struct TyportWorld {
@@ -27,8 +27,12 @@ impl TyportWorld {
 
         let Fonts { book, fonts } = Fonts::searcher().include_system_fonts(false).search();
 
+        let library = Library::builder()
+            .with_features([Feature::Html].into_iter().collect())
+            .build();
+
         Ok(Self {
-            library: LazyHash::new(Library::default()),
+            library: LazyHash::new(library),
             book: LazyHash::new(book),
             fonts,
             source,

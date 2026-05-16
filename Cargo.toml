@@ -19,6 +19,8 @@ typst-library = "0.14.2"
 typst-syntax = "0.14.2"
 typst-kit = { version = "0.14.2", default-features = false, features = ["fonts", "embed-fonts"] }
 typst-utils = "0.14.2"
+typst-realize = "0.14.2"
+typst-html = "0.14.2"
 
 # OOXML generation
 quick-xml = "0.37"
