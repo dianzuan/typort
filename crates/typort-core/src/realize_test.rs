@@ -265,4 +265,26 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn math_via_introspector() {
+        use typst::foundations::NativeElement;
+        use typst_library::math::EquationElem;
+
+        let world = TyportWorld::new(Path::new("../../tests/fixtures/math_test.typ")).unwrap();
+        let result = typst::compile::<typst_html::HtmlDocument>(&world);
+        let html_doc = result.output.unwrap();
+
+        let equations = html_doc.introspector.query(&EquationElem::ELEM.select());
+        println!("\n=== EQUATIONS FOUND: {} ===", equations.len());
+        assert!(equations.len() >= 2, "should find at least 2 equations");
+
+        for (i, eq_content) in equations.iter().enumerate() {
+            let eq = eq_content.to_packed::<EquationElem>().unwrap();
+            println!("[{i}] block={:?}", eq.block);
+            println!("    body func: {}", eq.body.func().name());
+            // Print the math tree using Debug
+            println!("    body debug: {:?}", eq.body);
+        }
+    }
 }
