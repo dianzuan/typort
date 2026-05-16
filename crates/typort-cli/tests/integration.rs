@@ -526,6 +526,7 @@ fn table_cell_supports_merged_cell_fields() {
         paragraphs: vec![Paragraph::new()],
         colspan: 2,
         vmerge: VMerge::Restart,
+        width_pct: None,
     };
     assert_eq!(cell.colspan, 2);
     assert_eq!(cell.vmerge, VMerge::Restart);
@@ -535,6 +536,7 @@ fn table_cell_supports_merged_cell_fields() {
         paragraphs: vec![Paragraph::new()],
         colspan: 1,
         vmerge: VMerge::Continue,
+        width_pct: None,
     };
     assert_eq!(cont_cell.vmerge, VMerge::Continue);
 }
@@ -552,11 +554,13 @@ fn merged_cell_emits_grid_span_and_vmerge() {
                         paragraphs: vec![Paragraph::new()],
                         colspan: 2,
                         vmerge: VMerge::Restart,
+                        width_pct: None,
                     },
                     TableCell {
                         paragraphs: vec![Paragraph::new()],
                         colspan: 1,
                         vmerge: VMerge::None,
+                        width_pct: None,
                     },
                 ],
             },
@@ -566,11 +570,13 @@ fn merged_cell_emits_grid_span_and_vmerge() {
                         paragraphs: vec![Paragraph::new()],
                         colspan: 2,
                         vmerge: VMerge::Continue,
+                        width_pct: None,
                     },
                     TableCell {
                         paragraphs: vec![Paragraph::new()],
                         colspan: 1,
                         vmerge: VMerge::None,
+                        width_pct: None,
                     },
                 ],
             },
@@ -598,5 +604,131 @@ fn merged_cell_emits_grid_span_and_vmerge() {
     assert!(
         doc_xml.contains("<w:vMerge/>"),
         "document.xml should contain w:vMerge (no val) for continuation cell"
+    );
+}
+
+#[test]
+fn features_footnote_restart_and_font_hint() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
+    let doc = typort_core::convert_html(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+
+    // Feature 1: Footnote per-page restart with chicago (circled) numbering
+    let settings_xml =
+        std::io::read_to_string(reader.by_name("word/settings.xml").unwrap()).unwrap();
+    assert!(
+        settings_xml.contains("w:footnotePr"),
+        "settings.xml should contain w:footnotePr"
+    );
+    assert!(
+        settings_xml.contains("chicago"),
+        "settings.xml should use chicago numFmt for circled numbers"
+    );
+    assert!(
+        settings_xml.contains("eachPage"),
+        "settings.xml should restart numbering each page"
+    );
+
+    // Feature 1: sectPr also has footnote properties
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    // The sectPr should contain footnotePr
+    let sect_pr_pos = doc_xml.find("w:sectPr").expect("should have sectPr");
+    let after_sect = &doc_xml[sect_pr_pos..];
+    assert!(
+        after_sect.contains("w:footnotePr"),
+        "sectPr should contain w:footnotePr for per-section footnote restart"
+    );
+
+    // Feature 9: East Asian font hint
+    let styles_xml = std::io::read_to_string(reader.by_name("word/styles.xml").unwrap()).unwrap();
+    assert!(
+        styles_xml.contains("w:hint=\"eastAsia\""),
+        "styles.xml should contain w:hint=\"eastAsia\" for proper font selection"
+    );
+}
+
+#[test]
+fn features_suppress_indent_and_bibliography() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
+    let doc = typort_core::convert_html(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    // Feature 3: First paragraph after heading has firstLine="0" (suppress indent)
+    // The Normal style has firstLine="420", so paragraphs after headings should override
+    assert!(
+        doc_xml.contains("w:firstLine=\"0\""),
+        "document.xml should have firstLine=\"0\" for paragraphs after headings"
+    );
+
+    // Feature 4: Bibliography paragraphs have hanging indent
+    assert!(
+        doc_xml.contains("w:hanging=\"420\"") && doc_xml.contains("w:left=\"420\""),
+        "document.xml should have hanging indent for bibliography entries"
+    );
+}
+
+#[test]
+fn features_table_width_percentage() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
+    let doc = typort_core::convert_html(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    // Feature 6: Table uses percentage width (100%)
+    assert!(
+        doc_xml.contains("<w:tblW w:w=\"5000\" w:type=\"pct\"/>"),
+        "table should have 100% width via pct type"
+    );
+    // Feature 6: Cells have width defined
+    assert!(
+        doc_xml.contains("w:tcW"),
+        "table cells should have w:tcW width elements"
+    );
+}
+
+#[test]
+fn features_chinese_heading_numbering_definition() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
+    let doc = typort_core::convert_html(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let num_xml = std::io::read_to_string(reader.by_name("word/numbering.xml").unwrap()).unwrap();
+
+    // Feature 2: Chinese heading numbering abstract definition exists
+    assert!(
+        num_xml.contains("chineseCountingThousand"),
+        "numbering.xml should contain chineseCountingThousand format"
+    );
+    assert!(
+        num_xml.contains("decimalEnclosedCircleChinese"),
+        "numbering.xml should contain decimalEnclosedCircleChinese for level 4"
+    );
+    assert!(
+        num_xml.contains("w:abstractNumId=\"3\""),
+        "numbering.xml should have abstractNumId 3 for Chinese headings"
+    );
+    assert!(
+        num_xml.contains("w:numId=\"3\""),
+        "numbering.xml should have numId 3 instance for Chinese headings"
     );
 }

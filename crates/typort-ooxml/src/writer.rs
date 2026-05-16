@@ -236,6 +236,16 @@ fn generate_settings(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<()> {
             "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
         ))
         .write_inner_content(|w| {
+            // Footnote properties: circled numbers (chicago) with per-page restart
+            w.create_element("w:footnotePr").write_inner_content(|fp| {
+                fp.create_element("w:numFmt")
+                    .with_attribute(("w:val", "chicago"))
+                    .write_empty()?;
+                fp.create_element("w:numRestart")
+                    .with_attribute(("w:val", "eachPage"))
+                    .write_empty()?;
+                Ok(())
+            })?;
             w.create_element("w:compat").write_inner_content(|c| {
                 c.create_element("w:useFELayout").write_empty()?;
                 c.create_element("w:compatSetting")
@@ -294,6 +304,16 @@ fn write_section_properties<W: Write>(
     settings: &crate::document::PageSettings,
 ) -> io::Result<()> {
     writer.create_element("w:sectPr").write_inner_content(|w| {
+        // Footnote properties in section: circled numbers with per-page restart
+        w.create_element("w:footnotePr").write_inner_content(|fp| {
+            fp.create_element("w:numFmt")
+                .with_attribute(("w:val", "chicago"))
+                .write_empty()?;
+            fp.create_element("w:numRestart")
+                .with_attribute(("w:val", "eachPage"))
+                .write_empty()?;
+            Ok(())
+        })?;
         w.create_element("w:pgSz")
             .with_attribute(("w:w", settings.width_twips.to_string().as_str()))
             .with_attribute(("w:h", settings.height_twips.to_string().as_str()))
@@ -318,8 +338,9 @@ fn write_paragraph<W: Write>(
         let has_list = para.list_id.is_some();
         let has_alignment = para.alignment.is_some();
         // Determine if we need to suppress the inherited first-line indent
-        let suppress_indent =
-            has_alignment && matches!(para.alignment, Some(Alignment::Center | Alignment::Right));
+        let suppress_indent = para.suppress_indent
+            || (has_alignment
+                && matches!(para.alignment, Some(Alignment::Center | Alignment::Right)));
         // Check if this paragraph has a numbered equation (needs right tab stop)
         let has_eq_number = para.inlines.iter().any(|i| {
             matches!(
@@ -330,7 +351,9 @@ fn write_paragraph<W: Write>(
                 }
             )
         });
-        if has_style || has_list || has_alignment || suppress_indent || has_eq_number {
+        let has_hanging = para.hanging_indent;
+        if has_style || has_list || has_alignment || suppress_indent || has_eq_number || has_hanging
+        {
             w.create_element("w:pPr").write_inner_content(|ppr| {
                 if let Some(style) = &para.style {
                     let style_id = match style {
@@ -364,8 +387,14 @@ fn write_paragraph<W: Write>(
                         Ok(())
                     })?;
                 }
-                // Emit indent: list indent or suppress first-line for center/right
-                if has_list {
+                // Emit indent: hanging (bibliography), list, or suppress first-line
+                if has_hanging {
+                    ppr.create_element("w:ind")
+                        .with_attribute(("w:left", "420"))
+                        .with_attribute(("w:hanging", "420"))
+                        .with_attribute(("w:firstLine", "0"))
+                        .write_empty()?;
+                } else if has_list {
                     ppr.create_element("w:ind")
                         .with_attribute(("w:left", "720"))
                         .with_attribute(("w:hanging", "360"))
@@ -451,12 +480,18 @@ fn write_run<W: Write>(writer: &mut Writer<W>, run: &crate::document::Run) -> io
 }
 
 fn write_table<W: Write>(writer: &mut Writer<W>, table: &Table) -> io::Result<()> {
+    // Determine number of columns from the first row for equal-width distribution
+    let num_cols = table
+        .rows
+        .first()
+        .map_or(1, |r| r.cells.iter().map(|c| c.colspan).sum::<u32>());
+
     writer.create_element("w:tbl").write_inner_content(|w| {
         // Table properties with borders
         w.create_element("w:tblPr").write_inner_content(|tpr| {
             tpr.create_element("w:tblW")
-                .with_attribute(("w:w", "0"))
-                .with_attribute(("w:type", "auto"))
+                .with_attribute(("w:w", "5000"))
+                .with_attribute(("w:type", "pct"))
                 .write_empty()?;
             tpr.create_element("w:tblBorders")
                 .write_inner_content(|bdr| {
@@ -483,33 +518,41 @@ fn write_table<W: Write>(writer: &mut Writer<W>, table: &Table) -> io::Result<()
             w.create_element("w:tr").write_inner_content(|tr_w| {
                 for cell in &row.cells {
                     tr_w.create_element("w:tc").write_inner_content(|tc_w| {
-                        // Emit cell properties if there are merges
+                        // Emit cell properties (width, merges)
                         let has_colspan = cell.colspan > 1;
                         let has_vmerge = cell.vmerge != crate::document::VMerge::None;
-                        if has_colspan || has_vmerge {
-                            tc_w.create_element("w:tcPr").write_inner_content(|tcpr| {
-                                if has_colspan {
-                                    let span_str = cell.colspan.to_string();
-                                    tcpr.create_element("w:gridSpan")
-                                        .with_attribute(("w:val", span_str.as_str()))
-                                        .write_empty()?;
-                                }
-                                if has_vmerge {
-                                    match &cell.vmerge {
-                                        crate::document::VMerge::Restart => {
-                                            tcpr.create_element("w:vMerge")
-                                                .with_attribute(("w:val", "restart"))
-                                                .write_empty()?;
-                                        }
-                                        crate::document::VMerge::Continue => {
-                                            tcpr.create_element("w:vMerge").write_empty()?;
-                                        }
-                                        crate::document::VMerge::None => {}
+                        // Always emit tcPr to set cell width
+                        tc_w.create_element("w:tcPr").write_inner_content(|tcpr| {
+                            // Cell width: use explicit value or equal distribution
+                            let cell_width = cell
+                                .width_pct
+                                .unwrap_or_else(|| (5000 / num_cols) * cell.colspan);
+                            let width_str = cell_width.to_string();
+                            tcpr.create_element("w:tcW")
+                                .with_attribute(("w:w", width_str.as_str()))
+                                .with_attribute(("w:type", "pct"))
+                                .write_empty()?;
+                            if has_colspan {
+                                let span_str = cell.colspan.to_string();
+                                tcpr.create_element("w:gridSpan")
+                                    .with_attribute(("w:val", span_str.as_str()))
+                                    .write_empty()?;
+                            }
+                            if has_vmerge {
+                                match &cell.vmerge {
+                                    crate::document::VMerge::Restart => {
+                                        tcpr.create_element("w:vMerge")
+                                            .with_attribute(("w:val", "restart"))
+                                            .write_empty()?;
                                     }
+                                    crate::document::VMerge::Continue => {
+                                        tcpr.create_element("w:vMerge").write_empty()?;
+                                    }
+                                    crate::document::VMerge::None => {}
                                 }
-                                Ok(())
-                            })?;
-                        }
+                            }
+                            Ok(())
+                        })?;
                         if cell.paragraphs.is_empty() {
                             // OOXML requires at least one paragraph per cell
                             tc_w.create_element("w:p").write_empty()?;
@@ -583,6 +626,44 @@ fn generate_numbering_xml(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<()> {
                         })?;
                     Ok(())
                 })?;
+            // Abstract numbering 3: Chinese five-level heading numbering
+            // Available for opt-in use; not auto-linked to heading styles.
+            w.create_element("w:abstractNum")
+                .with_attribute(("w:abstractNumId", "3"))
+                .write_inner_content(|abs| {
+                    // Level 0: 一、二、三、 (chineseCountingThousand)
+                    write_numbering_level(
+                        abs,
+                        "0",
+                        "1",
+                        "chineseCountingThousand",
+                        "%1\u{3001}",
+                        "left",
+                    )?;
+                    // Level 1: （一）（二）（三）
+                    write_numbering_level(
+                        abs,
+                        "1",
+                        "1",
+                        "chineseCountingThousand",
+                        "\u{ff08}%2\u{ff09}",
+                        "left",
+                    )?;
+                    // Level 2: 1. 2. 3.
+                    write_numbering_level(abs, "2", "1", "decimal", "%3.", "left")?;
+                    // Level 3: （1）（2）（3）
+                    write_numbering_level(abs, "3", "1", "decimal", "\u{ff08}%4\u{ff09}", "left")?;
+                    // Level 4: ① ② ③
+                    write_numbering_level(
+                        abs,
+                        "4",
+                        "1",
+                        "decimalEnclosedCircleChinese",
+                        "%5",
+                        "left",
+                    )?;
+                    Ok(())
+                })?;
             // Numbering instance 1 -> abstractNum 1 (ordered)
             w.create_element("w:num")
                 .with_attribute(("w:numId", "1"))
@@ -601,6 +682,45 @@ fn generate_numbering_xml(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<()> {
                         .write_empty()?;
                     Ok(())
                 })?;
+            // Numbering instance 3 -> abstractNum 3 (Chinese headings, opt-in)
+            w.create_element("w:num")
+                .with_attribute(("w:numId", "3"))
+                .write_inner_content(|num| {
+                    num.create_element("w:abstractNumId")
+                        .with_attribute(("w:val", "3"))
+                        .write_empty()?;
+                    Ok(())
+                })?;
+            Ok(())
+        })?;
+    Ok(())
+}
+
+/// Helper to write a single numbering level definition.
+fn write_numbering_level(
+    writer: &mut Writer<&mut Vec<u8>>,
+    ilvl: &str,
+    start: &str,
+    num_fmt: &str,
+    lvl_text: &str,
+    jc: &str,
+) -> io::Result<()> {
+    writer
+        .create_element("w:lvl")
+        .with_attribute(("w:ilvl", ilvl))
+        .write_inner_content(|lvl| {
+            lvl.create_element("w:start")
+                .with_attribute(("w:val", start))
+                .write_empty()?;
+            lvl.create_element("w:numFmt")
+                .with_attribute(("w:val", num_fmt))
+                .write_empty()?;
+            lvl.create_element("w:lvlText")
+                .with_attribute(("w:val", lvl_text))
+                .write_empty()?;
+            lvl.create_element("w:lvlJc")
+                .with_attribute(("w:val", jc))
+                .write_empty()?;
             Ok(())
         })?;
     Ok(())
