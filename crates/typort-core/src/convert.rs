@@ -423,11 +423,20 @@ fn convert_term_list(elem: &HtmlElement, doc: &mut Document) {
 /// Recursively collect all text content from a node tree.
 fn collect_all_text(children: &[HtmlNode]) -> String {
     let mut text = String::new();
+    let mut line_started = false;
     for child in children {
         match child {
             HtmlNode::Text(t, _) => text.push_str(t),
             HtmlNode::Element(elem) => text.push_str(&collect_all_text(&elem.children)),
-            _ => {}
+            HtmlNode::Tag(tag) => {
+                if is_tag_start(tag, "line") {
+                    if line_started {
+                        text.push('\n');
+                    }
+                    line_started = true;
+                }
+            }
+            HtmlNode::Frame(_) => {}
         }
     }
     text
