@@ -17,6 +17,7 @@ pub(crate) fn generate_styles(
             for level in 1..=5 {
                 write_style_heading(w, level)?;
             }
+            write_style_code_block(w)?;
             if has_footnotes {
                 write_style_footnote_reference(w)?;
                 write_style_footnote_text(w)?;
@@ -160,6 +161,53 @@ fn write_style_heading<W: Write>(w: &mut Writer<W>, level: u8) -> io::Result<()>
     Ok(())
 }
 
+fn write_style_code_block<W: Write>(w: &mut Writer<W>) -> io::Result<()> {
+    w.create_element("w:style")
+        .with_attribute(("w:type", "paragraph"))
+        .with_attribute(("w:styleId", "CodeBlock"))
+        .write_inner_content(|s| {
+            s.create_element("w:name")
+                .with_attribute(("w:val", "Code Block"))
+                .write_empty()?;
+            s.create_element("w:basedOn")
+                .with_attribute(("w:val", "Normal"))
+                .write_empty()?;
+            s.create_element("w:pPr").write_inner_content(|ppr| {
+                ppr.create_element("w:ind")
+                    .with_attribute(("w:firstLine", "0"))
+                    .write_empty()?;
+                ppr.create_element("w:spacing")
+                    .with_attribute(("w:line", "240"))
+                    .with_attribute(("w:lineRule", "auto"))
+                    .with_attribute(("w:before", "0"))
+                    .with_attribute(("w:after", "0"))
+                    .write_empty()?;
+                ppr.create_element("w:shd")
+                    .with_attribute(("w:val", "clear"))
+                    .with_attribute(("w:color", "auto"))
+                    .with_attribute(("w:fill", "F2F2F2"))
+                    .write_empty()?;
+                Ok(())
+            })?;
+            s.create_element("w:rPr").write_inner_content(|rpr| {
+                rpr.create_element("w:rFonts")
+                    .with_attribute(("w:ascii", "Courier New"))
+                    .with_attribute(("w:hAnsi", "Courier New"))
+                    .with_attribute(("w:eastAsia", "\u{7b49}\u{7ebf}"))
+                    .write_empty()?;
+                rpr.create_element("w:sz")
+                    .with_attribute(("w:val", "18"))
+                    .write_empty()?;
+                rpr.create_element("w:szCs")
+                    .with_attribute(("w:val", "18"))
+                    .write_empty()?;
+                Ok(())
+            })?;
+            Ok(())
+        })?;
+    Ok(())
+}
+
 fn write_style_footnote_reference<W: Write>(w: &mut Writer<W>) -> io::Result<()> {
     w.create_element("w:style")
         .with_attribute(("w:type", "character"))
@@ -214,10 +262,12 @@ pub(crate) fn generate_font_table(writer: &mut Writer<&mut Vec<u8>>) -> io::Resu
         .write_inner_content(|w| {
             for (name, charset) in [
                 ("Times New Roman", "00"),
+                ("Courier New", "00"),
                 ("\u{5b8b}\u{4f53}", "86"), // 宋体
                 ("\u{9ed1}\u{4f53}", "86"), // 黑体
                 ("\u{6977}\u{4f53}", "86"), // 楷体
                 ("\u{4eff}\u{5b8b}", "86"), // 仿宋
+                ("\u{7b49}\u{7ebf}", "86"), // 等线
             ] {
                 w.create_element("w:font")
                     .with_attribute(("w:name", name))

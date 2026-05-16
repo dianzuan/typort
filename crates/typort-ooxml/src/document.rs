@@ -37,6 +37,7 @@ pub struct Run {
     pub italic: bool,
     pub superscript: bool,
     pub subscript: bool,
+    pub monospace: bool,
 }
 
 impl Run {
@@ -48,6 +49,7 @@ impl Run {
             italic: false,
             superscript: false,
             subscript: false,
+            monospace: false,
         }
     }
 }
@@ -78,6 +80,10 @@ pub struct Paragraph {
     pub suppress_indent: bool,
     /// Use hanging indent (e.g., bibliography entries).
     pub hanging_indent: bool,
+    /// Left indent in twips (e.g., 720 for block quotes).
+    pub left_indent: Option<u32>,
+    /// Apply `CodeBlock` style (monospace, no indent, optional shading).
+    pub code_block: bool,
 }
 
 impl Paragraph {

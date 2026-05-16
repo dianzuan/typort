@@ -245,6 +245,9 @@ fn convert_element_with_math(
         "h5" => convert_heading(elem, doc, 4, para_ctx),
         "h6" => convert_heading(elem, doc, 5, para_ctx),
         "p" => convert_paragraph(elem, doc, para_ctx),
+        "pre" => convert_code_block(elem, doc),
+        "blockquote" => convert_blockquote(elem, doc, equations, eq_state, para_ctx),
+        "dl" => convert_term_list(elem, doc),
         "ol" | "ul" => convert_list(elem, doc),
         "table" => convert_table(elem, doc),
         "div" => {
@@ -353,6 +356,83 @@ fn convert_list(elem: &HtmlElement, doc: &mut Document) {
     }
 }
 
+/// Convert a `<pre>` code block into monospace paragraphs (one per line).
+fn convert_code_block(elem: &HtmlElement, doc: &mut Document) {
+    // Collect all text content from the <pre> (typically contains a single <code>)
+    let text = collect_all_text(&elem.children);
+    // Split on newlines to produce one paragraph per line
+    for line in text.split('\n') {
+        let mut para = Paragraph::new();
+        para.code_block = true;
+        let mut run = Run::new(line);
+        run.monospace = true;
+        para.push_run(run);
+        doc.add_paragraph(para);
+    }
+}
+
+/// Convert a `<blockquote>` into indented paragraphs.
+fn convert_blockquote(
+    elem: &HtmlElement,
+    doc: &mut Document,
+    equations: &[Content],
+    eq_state: &mut EquationState,
+    para_ctx: &mut ParagraphContext,
+) {
+    // Save the current element count so we can apply left_indent to newly added paragraphs
+    let start_idx = doc.body.elements.len();
+    convert_block_children_with_math(&elem.children, doc, equations, eq_state, para_ctx);
+    // Apply left indent to all paragraphs added by the blockquote
+    for element in &mut doc.body.elements[start_idx..] {
+        if let BlockElement::Paragraph(para) = element {
+            para.left_indent = Some(720);
+            para.suppress_indent = true;
+        }
+    }
+}
+
+/// Convert a `<dl>` (definition list) into bold terms and indented definitions.
+fn convert_term_list(elem: &HtmlElement, doc: &mut Document) {
+    for child in &elem.children {
+        if let HtmlNode::Element(item) = child {
+            let tag = tag_name(item);
+            match tag.as_str() {
+                "dt" => {
+                    let mut para = Paragraph::new();
+                    para.suppress_indent = true;
+                    collect_inlines(&item.children, &mut para, true, false);
+                    if !para.runs.is_empty() {
+                        doc.add_paragraph(para);
+                    }
+                }
+                "dd" => {
+                    let mut para = Paragraph::new();
+                    para.left_indent = Some(420);
+                    para.suppress_indent = true;
+                    collect_inlines(&item.children, &mut para, false, false);
+                    if !para.runs.is_empty() {
+                        doc.add_paragraph(para);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Recursively collect all text content from a node tree.
+fn collect_all_text(children: &[HtmlNode]) -> String {
+    let mut text = String::new();
+    for child in children {
+        match child {
+            HtmlNode::Text(t, _) => text.push_str(t),
+            HtmlNode::Element(elem) => text.push_str(&collect_all_text(&elem.children)),
+            _ => {}
+        }
+    }
+    text
+}
+
 fn convert_table(elem: &HtmlElement, doc: &mut Document) {
     let mut table = Table { rows: Vec::new() };
     for child in &elem.children {
@@ -433,6 +513,7 @@ struct InlineStyle {
     italic: bool,
     superscript: bool,
     subscript: bool,
+    monospace: bool,
 }
 
 fn collect_inlines(children: &[HtmlNode], para: &mut Paragraph, bold: bool, italic: bool) {
@@ -455,6 +536,7 @@ fn collect_inlines_styled(children: &[HtmlNode], para: &mut Paragraph, style: In
                     run.italic = style.italic;
                     run.superscript = style.superscript;
                     run.subscript = style.subscript;
+                    run.monospace = style.monospace;
                     para.push_run(run);
                 }
             }
@@ -468,6 +550,7 @@ fn collect_inlines_styled(children: &[HtmlNode], para: &mut Paragraph, style: In
                         italic: style.italic || tag == "em" || tag == "i",
                         superscript: style.superscript || tag == "sup",
                         subscript: style.subscript || tag == "sub",
+                        monospace: style.monospace || tag == "code",
                     };
                     collect_inlines_styled(&elem.children, para, new_style);
                 }
