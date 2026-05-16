@@ -1,9 +1,12 @@
 use quick_xml::Writer;
 use std::io::{self, Write};
 
+use crate::document::DocumentStyle;
+
 pub(crate) fn generate_styles(
     writer: &mut Writer<&mut Vec<u8>>,
     has_footnotes: bool,
+    style: &DocumentStyle,
 ) -> io::Result<()> {
     writer
         .create_element("w:styles")
@@ -12,10 +15,10 @@ pub(crate) fn generate_styles(
             "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
         ))
         .write_inner_content(|w| {
-            write_doc_defaults(w)?;
-            write_style_normal(w)?;
+            write_doc_defaults(w, style)?;
+            write_style_normal(w, style)?;
             for level in 1..=5 {
-                write_style_heading(w, level)?;
+                write_style_heading(w, level, style)?;
             }
             write_style_code_block(w)?;
             if has_footnotes {
@@ -27,25 +30,26 @@ pub(crate) fn generate_styles(
     Ok(())
 }
 
-fn write_doc_defaults<W: Write>(w: &mut Writer<W>) -> io::Result<()> {
+fn write_doc_defaults<W: Write>(w: &mut Writer<W>, style: &DocumentStyle) -> io::Result<()> {
+    let sz = style.body_size_half_pt.to_string();
     w.create_element("w:docDefaults").write_inner_content(|d| {
         d.create_element("w:rPrDefault")
             .write_inner_content(|rprd| {
                 rprd.create_element("w:rPr").write_inner_content(|rpr| {
                     rpr.create_element("w:rFonts")
-                        .with_attribute(("w:ascii", "Times New Roman"))
-                        .with_attribute(("w:hAnsi", "Times New Roman"))
-                        .with_attribute(("w:eastAsia", "\u{5b8b}\u{4f53}"))
+                        .with_attribute(("w:ascii", style.body_font_ascii.as_str()))
+                        .with_attribute(("w:hAnsi", style.body_font_ascii.as_str()))
+                        .with_attribute(("w:eastAsia", style.body_font_east_asia.as_str()))
                         .with_attribute(("w:hint", "eastAsia"))
                         .write_empty()?;
                     rpr.create_element("w:kern")
                         .with_attribute(("w:val", "2"))
                         .write_empty()?;
                     rpr.create_element("w:sz")
-                        .with_attribute(("w:val", "21"))
+                        .with_attribute(("w:val", sz.as_str()))
                         .write_empty()?;
                     rpr.create_element("w:szCs")
-                        .with_attribute(("w:val", "21"))
+                        .with_attribute(("w:val", sz.as_str()))
                         .write_empty()?;
                     rpr.create_element("w:lang")
                         .with_attribute(("w:val", "en-US"))
@@ -60,7 +64,10 @@ fn write_doc_defaults<W: Write>(w: &mut Writer<W>) -> io::Result<()> {
     Ok(())
 }
 
-fn write_style_normal<W: Write>(w: &mut Writer<W>) -> io::Result<()> {
+fn write_style_normal<W: Write>(w: &mut Writer<W>, style: &DocumentStyle) -> io::Result<()> {
+    let sz = style.body_size_half_pt.to_string();
+    let line_spacing = style.line_spacing.to_string();
+    let indent = style.first_line_indent_twips.to_string();
     w.create_element("w:style")
         .with_attribute(("w:type", "paragraph"))
         .with_attribute(("w:default", "1"))
@@ -71,16 +78,16 @@ fn write_style_normal<W: Write>(w: &mut Writer<W>) -> io::Result<()> {
                 .write_empty()?;
             s.create_element("w:rPr").write_inner_content(|rpr| {
                 rpr.create_element("w:rFonts")
-                    .with_attribute(("w:ascii", "Times New Roman"))
-                    .with_attribute(("w:hAnsi", "Times New Roman"))
-                    .with_attribute(("w:eastAsia", "\u{5b8b}\u{4f53}"))
+                    .with_attribute(("w:ascii", style.body_font_ascii.as_str()))
+                    .with_attribute(("w:hAnsi", style.body_font_ascii.as_str()))
+                    .with_attribute(("w:eastAsia", style.body_font_east_asia.as_str()))
                     .with_attribute(("w:hint", "eastAsia"))
                     .write_empty()?;
                 rpr.create_element("w:sz")
-                    .with_attribute(("w:val", "21"))
+                    .with_attribute(("w:val", sz.as_str()))
                     .write_empty()?;
                 rpr.create_element("w:szCs")
-                    .with_attribute(("w:val", "21"))
+                    .with_attribute(("w:val", sz.as_str()))
                     .write_empty()?;
                 rpr.create_element("w:lang")
                     .with_attribute(("w:val", "en-US"))
@@ -93,11 +100,11 @@ fn write_style_normal<W: Write>(w: &mut Writer<W>) -> io::Result<()> {
                     .with_attribute(("w:val", "both"))
                     .write_empty()?;
                 ppr.create_element("w:spacing")
-                    .with_attribute(("w:line", "360"))
+                    .with_attribute(("w:line", line_spacing.as_str()))
                     .with_attribute(("w:lineRule", "auto"))
                     .write_empty()?;
                 ppr.create_element("w:ind")
-                    .with_attribute(("w:firstLine", "420"))
+                    .with_attribute(("w:firstLine", indent.as_str()))
                     .write_empty()?;
                 Ok(())
             })?;
@@ -106,16 +113,26 @@ fn write_style_normal<W: Write>(w: &mut Writer<W>) -> io::Result<()> {
     Ok(())
 }
 
-fn write_style_heading<W: Write>(w: &mut Writer<W>, level: u8) -> io::Result<()> {
+fn write_style_heading<W: Write>(
+    w: &mut Writer<W>,
+    level: u8,
+    style: &DocumentStyle,
+) -> io::Result<()> {
     let style_id = format!("Heading{level}");
     let name = format!("heading {level}");
-    let font_size = match level {
-        1 => "30", // 15pt
-        2 => "28", // 14pt
-        3 => "26", // 13pt
-        4 => "24", // 12pt
-        _ => "22", // 11pt
-    };
+
+    // Heading sizes: scale up from body size
+    // Level 1: body + 4.5pt (9 half-pt), Level 2: body + 3.5pt (7),
+    // Level 3: body + 2.5pt (5), Level 4: body + 1.5pt (3), Level 5: body + 0.5pt (1)
+    let heading_size = style.body_size_half_pt
+        + match level {
+            1 => 9,
+            2 => 7,
+            3 => 5,
+            4 => 3,
+            _ => 1,
+        };
+    let font_size = heading_size.to_string();
 
     w.create_element("w:style")
         .with_attribute(("w:type", "paragraph"))
@@ -143,16 +160,16 @@ fn write_style_heading<W: Write>(w: &mut Writer<W>, level: u8) -> io::Result<()>
             })?;
             s.create_element("w:rPr").write_inner_content(|rpr| {
                 rpr.create_element("w:rFonts")
-                    .with_attribute(("w:ascii", "Times New Roman"))
-                    .with_attribute(("w:hAnsi", "Times New Roman"))
-                    .with_attribute(("w:eastAsia", "\u{9ed1}\u{4f53}"))
+                    .with_attribute(("w:ascii", style.body_font_ascii.as_str()))
+                    .with_attribute(("w:hAnsi", style.body_font_ascii.as_str()))
+                    .with_attribute(("w:eastAsia", style.body_font_east_asia.as_str()))
                     .write_empty()?;
                 rpr.create_element("w:b").write_empty()?;
                 rpr.create_element("w:sz")
-                    .with_attribute(("w:val", font_size))
+                    .with_attribute(("w:val", font_size.as_str()))
                     .write_empty()?;
                 rpr.create_element("w:szCs")
-                    .with_attribute(("w:val", font_size))
+                    .with_attribute(("w:val", font_size.as_str()))
                     .write_empty()?;
                 Ok(())
             })?;
@@ -252,7 +269,27 @@ fn write_style_footnote_text<W: Write>(w: &mut Writer<W>) -> io::Result<()> {
     Ok(())
 }
 
-pub(crate) fn generate_font_table(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<()> {
+pub(crate) fn generate_font_table(
+    writer: &mut Writer<&mut Vec<u8>>,
+    style: &DocumentStyle,
+) -> io::Result<()> {
+    // Collect unique fonts to declare in fontTable.xml
+    let mut fonts: Vec<(&str, &str)> = Vec::new();
+
+    // Always include the body fonts
+    fonts.push((style.body_font_ascii.as_str(), "00"));
+    if style.body_font_east_asia != style.body_font_ascii {
+        fonts.push((style.body_font_east_asia.as_str(), "86"));
+    }
+
+    // Always include code block fonts
+    fonts.push(("Courier New", "00"));
+    fonts.push(("\u{7b49}\u{7ebf}", "86")); // 等线
+
+    // Deduplicate by font name
+    fonts.sort_by_key(|(name, _)| *name);
+    fonts.dedup_by_key(|(name, _)| *name);
+
     writer
         .create_element("w:fonts")
         .with_attribute((
@@ -260,20 +297,12 @@ pub(crate) fn generate_font_table(writer: &mut Writer<&mut Vec<u8>>) -> io::Resu
             "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
         ))
         .write_inner_content(|w| {
-            for (name, charset) in [
-                ("Times New Roman", "00"),
-                ("Courier New", "00"),
-                ("\u{5b8b}\u{4f53}", "86"), // 宋体
-                ("\u{9ed1}\u{4f53}", "86"), // 黑体
-                ("\u{6977}\u{4f53}", "86"), // 楷体
-                ("\u{4eff}\u{5b8b}", "86"), // 仿宋
-                ("\u{7b49}\u{7ebf}", "86"), // 等线
-            ] {
+            for (name, charset) in &fonts {
                 w.create_element("w:font")
-                    .with_attribute(("w:name", name))
+                    .with_attribute(("w:name", *name))
                     .write_inner_content(|f| {
                         f.create_element("w:charset")
-                            .with_attribute(("w:val", charset))
+                            .with_attribute(("w:val", *charset))
                             .write_empty()?;
                         Ok(())
                     })?;

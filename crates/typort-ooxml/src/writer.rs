@@ -36,10 +36,12 @@ pub fn write_docx<W: Write + Seek>(
     })?)?;
 
     zip.start_file("word/styles.xml", options)?;
-    zip.write_all(&xml_part(|w| styles::generate_styles(w, has_footnotes))?)?;
+    zip.write_all(&xml_part(|w| {
+        styles::generate_styles(w, has_footnotes, &doc.style)
+    })?)?;
 
     zip.start_file("word/fontTable.xml", options)?;
-    zip.write_all(&xml_part(styles::generate_font_table)?)?;
+    zip.write_all(&xml_part(|w| styles::generate_font_table(w, &doc.style))?)?;
 
     zip.start_file("word/settings.xml", options)?;
     zip.write_all(&xml_part(generate_settings)?)?;
