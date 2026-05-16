@@ -4,7 +4,7 @@ pub mod document;
 pub mod styles;
 pub mod writer;
 
-pub use document::{Document, DocumentMetadata, DocumentStyle};
+pub use document::{Document, DocumentMetadata, DocumentStyle, FootnoteFormat};
 pub use writer::write_docx;
 
 #[cfg(test)]

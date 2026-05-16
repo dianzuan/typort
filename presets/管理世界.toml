@@ -10,3 +10,6 @@ margin_right_cm = 3.17
 [font]
 body_size_pt = 10.5
 heading1_size_pt = 15.0
+
+[footnote]
+format = "circled"

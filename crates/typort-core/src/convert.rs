@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, HashMap};
 
 use typort_ooxml::document::{
-    Alignment, BlockElement, Document, DocumentStyle, InlineElement, Paragraph, ParagraphStyle,
-    Run, Table, TableCell, TableRow, VMerge,
+    Alignment, BlockElement, Document, DocumentStyle, FootnoteFormat, InlineElement, Paragraph,
+    ParagraphStyle, Run, Table, TableCell, TableRow, VMerge,
 };
 use typst::foundations::{Content, NativeElement};
 use typst::introspection::Tag;
@@ -48,11 +48,12 @@ pub fn convert_html(world: &TyportWorld) -> Result<Document, Vec<String>> {
         &mut para_ctx,
     );
 
+    // Detect footnote numbering format from the DOM
+    detect_footnote_format(&body.children, &mut doc);
+
     // Recovery: compile also to PagedDocument and recover content that was lost
-    // (e.g. #align(center) content which has no HTML show rule)
     recover_missing_content(world, &mut doc);
 
-    // Extract title from the first heading element
     extract_title_from_first_heading(&mut doc);
 
     Ok(doc)
@@ -656,7 +657,15 @@ fn find_sup_number(children: &[HtmlNode]) -> Option<u32> {
             if tag == "sup"
                 && let Some(text) = get_text_content(&elem.children)
             {
-                return text.trim().parse().ok();
+                let trimmed = text.trim();
+                // Try parsing as plain number first
+                if let Ok(n) = trimmed.parse() {
+                    return Some(n);
+                }
+                // Try parsing circled number (①=1, ②=2, ..., ⑳=20, ㉑=21, ...)
+                if let Some(n) = parse_circled_number(trimmed) {
+                    return Some(n);
+                }
             }
             if let Some(n) = find_sup_number(&elem.children) {
                 return Some(n);
@@ -664,6 +673,46 @@ fn find_sup_number(children: &[HtmlNode]) -> Option<u32> {
         }
     }
     None
+}
+
+fn detect_footnote_format(children: &[HtmlNode], doc: &mut Document) {
+    for child in children {
+        if let HtmlNode::Element(elem) = child {
+            if has_attr_value(elem, "role", "doc-noteref")
+                && let Some(text) = get_text_content(&elem.children)
+                && parse_circled_number(text.trim()).is_some()
+            {
+                doc.style.footnote_format = FootnoteFormat::CircledNumber;
+                return;
+            }
+            for inner in &elem.children {
+                if let HtmlNode::Element(sup) = inner
+                    && tag_name(sup) == "sup"
+                    && let Some(text) = get_text_content(&sup.children)
+                    && parse_circled_number(text.trim()).is_some()
+                {
+                    doc.style.footnote_format = FootnoteFormat::CircledNumber;
+                    return;
+                }
+            }
+            detect_footnote_format(&elem.children, doc);
+            if doc.style.footnote_format == FootnoteFormat::CircledNumber {
+                return;
+            }
+        }
+    }
+}
+
+fn parse_circled_number(s: &str) -> Option<u32> {
+    let c = s.chars().next()?;
+    let code = c as u32;
+    match code {
+        // ① U+2460 to ⑳ U+2473
+        0x2460..=0x2473 => Some(code - 0x2460 + 1),
+        // ㉑ U+3251 to ㊿ U+32BF
+        0x3251..=0x32BF => Some(code - 0x3251 + 21),
+        _ => None,
+    }
 }
 
 /// Get concatenated text content from children.
@@ -1085,6 +1134,7 @@ fn extract_document_style(paged: &PagedDocument) -> DocumentStyle {
         body_size_half_pt,
         line_spacing,
         first_line_indent_twips,
+        footnote_format: FootnoteFormat::default(),
     }
 }
 

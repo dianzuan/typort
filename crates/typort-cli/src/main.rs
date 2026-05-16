@@ -76,4 +76,12 @@ fn apply_preset(doc: &mut typort_ooxml::Document, preset: &typort_presets::Prese
             doc.page_settings.margin_right = typort_presets::cm_to_twips(right);
         }
     }
+    if let Some(footnote) = &preset.footnote
+        && let Some(fmt) = &footnote.format
+    {
+        doc.style.footnote_format = match fmt.as_str() {
+            "circled" => typort_ooxml::FootnoteFormat::CircledNumber,
+            _ => typort_ooxml::FootnoteFormat::Decimal,
+        };
+    }
 }
