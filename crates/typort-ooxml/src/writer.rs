@@ -5,7 +5,8 @@ use quick_xml::events::{BytesDecl, BytesText, Event};
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
-use crate::document::{BlockElement, Document};
+use crate::document::{BlockElement, Document, ParagraphStyle};
+use crate::styles;
 
 /// Write a Document to a .docx file (ZIP archive) into the given writer.
 ///
@@ -27,6 +28,12 @@ pub fn write_docx<W: Write + Seek>(
     zip.start_file("word/_rels/document.xml.rels", options)?;
     zip.write_all(&xml_part(generate_document_rels)?)?;
 
+    zip.start_file("word/styles.xml", options)?;
+    zip.write_all(&xml_part(styles::generate_styles)?)?;
+
+    zip.start_file("word/fontTable.xml", options)?;
+    zip.write_all(&xml_part(styles::generate_font_table)?)?;
+
     zip.start_file("word/document.xml", options)?;
     zip.write_all(&xml_part(|w| generate_document_xml(w, doc))?)?;
 
@@ -34,7 +41,7 @@ pub fn write_docx<W: Write + Seek>(
     Ok(())
 }
 
-fn xml_part(
+pub(crate) fn xml_part(
     build: impl FnOnce(&mut Writer<&mut Vec<u8>>) -> io::Result<()>,
 ) -> io::Result<Vec<u8>> {
     let mut buf = Vec::new();
@@ -65,6 +72,14 @@ fn generate_content_types(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<()> {
                 .with_attribute(("PartName", "/word/document.xml"))
                 .with_attribute(("ContentType", "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"))
                 .write_empty()?;
+            w.create_element("Override")
+                .with_attribute(("PartName", "/word/styles.xml"))
+                .with_attribute(("ContentType", "application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"))
+                .write_empty()?;
+            w.create_element("Override")
+                .with_attribute(("PartName", "/word/fontTable.xml"))
+                .with_attribute(("ContentType", "application/vnd.openxmlformats-officedocument.wordprocessingml.fontTable+xml"))
+                .write_empty()?;
             Ok(())
         })?;
     Ok(())
@@ -92,7 +107,25 @@ fn generate_document_rels(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<()> {
             "xmlns",
             "http://schemas.openxmlformats.org/package/2006/relationships",
         ))
-        .write_inner_content(|_w| Ok(()))?;
+        .write_inner_content(|w| {
+            w.create_element("Relationship")
+                .with_attribute(("Id", "rId1"))
+                .with_attribute((
+                    "Type",
+                    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles",
+                ))
+                .with_attribute(("Target", "styles.xml"))
+                .write_empty()?;
+            w.create_element("Relationship")
+                .with_attribute(("Id", "rId2"))
+                .with_attribute((
+                    "Type",
+                    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable",
+                ))
+                .with_attribute(("Target", "fontTable.xml"))
+                .write_empty()?;
+            Ok(())
+        })?;
     Ok(())
 }
 
@@ -116,10 +149,31 @@ fn generate_document_xml(writer: &mut Writer<&mut Vec<u8>>, doc: &Document) -> i
                         }
                     }
                 }
+                write_section_properties(body_w, &doc.page_settings)?;
                 Ok(())
             })?;
             Ok(())
         })?;
+    Ok(())
+}
+
+fn write_section_properties<W: Write>(
+    writer: &mut Writer<W>,
+    settings: &crate::document::PageSettings,
+) -> io::Result<()> {
+    writer.create_element("w:sectPr").write_inner_content(|w| {
+        w.create_element("w:pgSz")
+            .with_attribute(("w:w", settings.width_twips.to_string().as_str()))
+            .with_attribute(("w:h", settings.height_twips.to_string().as_str()))
+            .write_empty()?;
+        w.create_element("w:pgMar")
+            .with_attribute(("w:top", settings.margin_top.to_string().as_str()))
+            .with_attribute(("w:right", settings.margin_right.to_string().as_str()))
+            .with_attribute(("w:bottom", settings.margin_bottom.to_string().as_str()))
+            .with_attribute(("w:left", settings.margin_left.to_string().as_str()))
+            .write_empty()?;
+        Ok(())
+    })?;
     Ok(())
 }
 
@@ -128,14 +182,42 @@ fn write_paragraph<W: Write>(
     para: &crate::document::Paragraph,
 ) -> io::Result<()> {
     writer.create_element("w:p").write_inner_content(|w| {
-        for run in &para.runs {
-            w.create_element("w:r").write_inner_content(|rw| {
-                rw.create_element("w:t")
-                    .with_attribute(("xml:space", "preserve"))
-                    .write_text_content(BytesText::new(&run.text))?;
+        if let Some(style) = &para.style {
+            w.create_element("w:pPr").write_inner_content(|ppr| {
+                let style_id = match style {
+                    ParagraphStyle::Heading(n) => format!("Heading{n}"),
+                    ParagraphStyle::Normal => "Normal".to_string(),
+                };
+                ppr.create_element("w:pStyle")
+                    .with_attribute(("w:val", style_id.as_str()))
+                    .write_empty()?;
                 Ok(())
             })?;
         }
+        for run in &para.runs {
+            write_run(w, run)?;
+        }
+        Ok(())
+    })?;
+    Ok(())
+}
+
+fn write_run<W: Write>(writer: &mut Writer<W>, run: &crate::document::Run) -> io::Result<()> {
+    writer.create_element("w:r").write_inner_content(|w| {
+        if run.bold || run.italic {
+            w.create_element("w:rPr").write_inner_content(|rpr| {
+                if run.bold {
+                    rpr.create_element("w:b").write_empty()?;
+                }
+                if run.italic {
+                    rpr.create_element("w:i").write_empty()?;
+                }
+                Ok(())
+            })?;
+        }
+        w.create_element("w:t")
+            .with_attribute(("xml:space", "preserve"))
+            .write_text_content(BytesText::new(&run.text))?;
         Ok(())
     })?;
     Ok(())

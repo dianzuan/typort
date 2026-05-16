@@ -27,15 +27,13 @@ fn main() {
         process::exit(1);
     });
 
-    let paged = typort_core::compile(&world).unwrap_or_else(|errors| {
+    let doc = typort_core::convert_html(&world).unwrap_or_else(|errors| {
         eprintln!("error: Typst compilation failed:");
         for msg in &errors {
             eprintln!("  {msg}");
         }
         process::exit(1);
     });
-
-    let doc = typort_core::convert::convert_document(&paged);
 
     let file = File::create(&output_path).unwrap_or_else(|e| {
         eprintln!("error: cannot create output file: {e}");
