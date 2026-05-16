@@ -8,6 +8,9 @@ use zip::write::SimpleFileOptions;
 use crate::document::{BlockElement, Document};
 
 /// Write a Document to a .docx file (ZIP archive) into the given writer.
+///
+/// # Errors
+/// Returns an error if XML serialization or ZIP writing fails.
 pub fn write_docx<W: Write + Seek>(
     doc: &Document,
     writer: W,
@@ -15,36 +18,37 @@ pub fn write_docx<W: Write + Seek>(
     let mut zip = ZipWriter::new(writer);
     let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
-    // [Content_Types].xml
     zip.start_file("[Content_Types].xml", options)?;
-    zip.write_all(generate_content_types()?.as_bytes())?;
+    zip.write_all(&xml_part(generate_content_types)?)?;
 
-    // _rels/.rels
     zip.start_file("_rels/.rels", options)?;
-    zip.write_all(generate_rels()?.as_bytes())?;
+    zip.write_all(&xml_part(generate_rels)?)?;
 
-    // word/_rels/document.xml.rels
     zip.start_file("word/_rels/document.xml.rels", options)?;
-    zip.write_all(generate_document_rels()?.as_bytes())?;
+    zip.write_all(&xml_part(generate_document_rels)?)?;
 
-    // word/document.xml
     zip.start_file("word/document.xml", options)?;
-    zip.write_all(generate_document_xml(doc)?.as_bytes())?;
+    zip.write_all(&xml_part(|w| generate_document_xml(w, doc))?)?;
 
     zip.finish()?;
     Ok(())
 }
 
-fn generate_content_types() -> io::Result<String> {
+fn xml_part(
+    build: impl FnOnce(&mut Writer<&mut Vec<u8>>) -> io::Result<()>,
+) -> io::Result<Vec<u8>> {
     let mut buf = Vec::new();
     let mut writer = Writer::new_with_indent(&mut buf, b' ', 2);
-
     writer.write_event(Event::Decl(BytesDecl::new(
         "1.0",
         Some("UTF-8"),
         Some("yes"),
     )))?;
+    build(&mut writer)?;
+    Ok(buf)
+}
 
+fn generate_content_types(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<()> {
     writer
         .create_element("Types")
         .with_attribute(("xmlns", "http://schemas.openxmlformats.org/package/2006/content-types"))
@@ -63,20 +67,10 @@ fn generate_content_types() -> io::Result<String> {
                 .write_empty()?;
             Ok(())
         })?;
-
-    Ok(String::from_utf8(buf).unwrap())
+    Ok(())
 }
 
-fn generate_rels() -> io::Result<String> {
-    let mut buf = Vec::new();
-    let mut writer = Writer::new_with_indent(&mut buf, b' ', 2);
-
-    writer.write_event(Event::Decl(BytesDecl::new(
-        "1.0",
-        Some("UTF-8"),
-        Some("yes"),
-    )))?;
-
+fn generate_rels(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<()> {
     writer
         .create_element("Relationships")
         .with_attribute(("xmlns", "http://schemas.openxmlformats.org/package/2006/relationships"))
@@ -88,20 +82,10 @@ fn generate_rels() -> io::Result<String> {
                 .write_empty()?;
             Ok(())
         })?;
-
-    Ok(String::from_utf8(buf).unwrap())
+    Ok(())
 }
 
-fn generate_document_rels() -> io::Result<String> {
-    let mut buf = Vec::new();
-    let mut writer = Writer::new_with_indent(&mut buf, b' ', 2);
-
-    writer.write_event(Event::Decl(BytesDecl::new(
-        "1.0",
-        Some("UTF-8"),
-        Some("yes"),
-    )))?;
-
+fn generate_document_rels(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<()> {
     writer
         .create_element("Relationships")
         .with_attribute((
@@ -109,20 +93,10 @@ fn generate_document_rels() -> io::Result<String> {
             "http://schemas.openxmlformats.org/package/2006/relationships",
         ))
         .write_inner_content(|_w| Ok(()))?;
-
-    Ok(String::from_utf8(buf).unwrap())
+    Ok(())
 }
 
-fn generate_document_xml(doc: &Document) -> io::Result<String> {
-    let mut buf = Vec::new();
-    let mut writer = Writer::new_with_indent(&mut buf, b' ', 2);
-
-    writer.write_event(Event::Decl(BytesDecl::new(
-        "1.0",
-        Some("UTF-8"),
-        Some("yes"),
-    )))?;
-
+fn generate_document_xml(writer: &mut Writer<&mut Vec<u8>>, doc: &Document) -> io::Result<()> {
     writer
         .create_element("w:document")
         .with_attribute((
@@ -146,8 +120,7 @@ fn generate_document_xml(doc: &Document) -> io::Result<String> {
             })?;
             Ok(())
         })?;
-
-    Ok(String::from_utf8(buf).unwrap())
+    Ok(())
 }
 
 fn write_paragraph<W: Write>(

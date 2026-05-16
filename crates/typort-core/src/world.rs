@@ -9,15 +9,10 @@ use typst::utils::LazyHash;
 use typst::{Library, LibraryExt, World};
 use typst_kit::fonts::{FontSlot, Fonts};
 
-/// A minimal Typst world implementation for compiling single `.typ` files.
 pub struct TyportWorld {
-    /// The standard library.
     library: LazyHash<Library>,
-    /// Font metadata.
     book: LazyHash<FontBook>,
-    /// All discovered font slots.
     fonts: Vec<FontSlot>,
-    /// The main source file.
     source: Source,
 }
 
