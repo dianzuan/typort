@@ -22,7 +22,11 @@ pub enum InlineElement {
     /// The `id` corresponds to the footnote in the `Document::footnotes` list.
     FootnoteRef(u32),
     /// A math equation rendered as OMML XML.
-    Math { omml_xml: String },
+    /// If `equation_number` is set, the equation is a numbered block equation.
+    Math {
+        omml_xml: String,
+        equation_number: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -97,7 +101,18 @@ impl Paragraph {
 
     /// Add a math equation (OMML XML) to this paragraph.
     pub fn add_math(&mut self, omml_xml: String) {
-        self.inlines.push(InlineElement::Math { omml_xml });
+        self.inlines.push(InlineElement::Math {
+            omml_xml,
+            equation_number: None,
+        });
+    }
+
+    /// Add a numbered math equation (OMML XML) to this paragraph.
+    pub fn add_numbered_math(&mut self, omml_xml: String, number: String) {
+        self.inlines.push(InlineElement::Math {
+            omml_xml,
+            equation_number: Some(number),
+        });
     }
 }
 
@@ -105,6 +120,22 @@ impl Paragraph {
 #[derive(Debug, Clone)]
 pub struct TableCell {
     pub paragraphs: Vec<Paragraph>,
+    /// Number of columns this cell spans (1 = no merge). Maps to `w:gridSpan`.
+    pub colspan: u32,
+    /// Vertical merge state. Maps to `w:vMerge`.
+    pub vmerge: VMerge,
+}
+
+/// Vertical merge state for a table cell.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum VMerge {
+    /// Not part of a vertical merge.
+    #[default]
+    None,
+    /// Start (first cell) of a vertical merge (`w:vMerge val="restart"`).
+    Restart,
+    /// Continuation cell of a vertical merge (`w:vMerge` with no val).
+    Continue,
 }
 
 /// A table row containing cells.

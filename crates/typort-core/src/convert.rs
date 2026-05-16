@@ -2,12 +2,14 @@ use std::collections::BTreeMap;
 
 use typort_ooxml::document::{
     Alignment, BlockElement, Document, Paragraph, ParagraphStyle, Run, Table, TableCell, TableRow,
+    VMerge,
 };
 use typst::foundations::{Content, NativeElement};
 use typst::introspection::Tag;
 use typst::layout::{Frame, FrameItem, PagedDocument, Point};
 use typst_html::{HtmlDocument, HtmlElement, HtmlNode};
 use typst_library::math::EquationElem;
+use typst_library::model::Numbering;
 
 use crate::world::TyportWorld;
 
@@ -69,6 +71,7 @@ fn tag_name(elem: &HtmlElement) -> String {
     raw.trim_matches('<').trim_matches('>').to_string()
 }
 
+#[allow(clippy::too_many_lines)]
 fn convert_block_children_with_math(
     children: &[HtmlNode],
     doc: &mut Document,
@@ -107,13 +110,38 @@ fn convert_block_children_with_math(
                     if let Some(eq_content) = equations.get(*eq_counter) {
                         let omml = typort_math::equation_to_omml(eq_content);
 
-                        let is_block = eq_content
-                            .to_packed::<EquationElem>()
+                        let eq_packed = eq_content.to_packed::<EquationElem>();
+                        let is_block = eq_packed
+                            .as_ref()
                             .is_some_and(|eq| *eq.block.as_option().as_ref().unwrap_or(&false));
+
+                        // Check if the equation has numbering
+                        let eq_number = if is_block {
+                            eq_packed.as_ref().and_then(|eq| {
+                                // numbering is Settable<Option<Numbering>>
+                                let numbering_opt = eq.numbering.as_option().as_ref()?.as_ref()?;
+                                // Only handle Pattern numbering (not Func, which needs Engine)
+                                if let Numbering::Pattern(pattern) = numbering_opt {
+                                    // Compute the equation number: we count block equations
+                                    // with numbering up to (and including) this one
+                                    let num =
+                                        count_numbered_block_equations(equations, *eq_counter);
+                                    Some(pattern.apply(&[num]).to_string())
+                                } else {
+                                    None
+                                }
+                            })
+                        } else {
+                            None
+                        };
 
                         if is_block {
                             let mut para = Paragraph::new();
-                            para.add_math(omml);
+                            if let Some(number) = eq_number {
+                                para.add_numbered_math(omml, number);
+                            } else {
+                                para.add_math(omml);
+                            }
                             doc.add_paragraph(para);
                             continue_paragraph = false;
                         } else if let Some(BlockElement::Paragraph(para)) =
@@ -143,7 +171,16 @@ fn convert_block_children_with_math(
                     // Non-equation tags don't reset continue_paragraph
                 }
             }
-            HtmlNode::Frame(_) => {}
+            HtmlNode::Frame(_) => {
+                // Frame elements at block level may contain images.
+                // Emit a placeholder paragraph.
+                let mut para = Paragraph::new();
+                let mut run = Run::new("[Image]");
+                run.italic = true;
+                para.push_run(run);
+                doc.add_paragraph(para);
+                continue_paragraph = false;
+            }
             HtmlNode::Text(text, _) => {
                 let trimmed = text.trim();
                 if !trimmed.is_empty() {
@@ -291,8 +328,25 @@ fn convert_table_row(tr: &HtmlElement, doc: &Document) -> Option<TableRow> {
             if tag == "td" || tag == "th" {
                 let mut para = Paragraph::new();
                 collect_inlines(&td.children, &mut para, tag == "th", false, doc);
+
+                // Parse colspan and rowspan attributes
+                let colspan = get_attr_value(td, "colspan")
+                    .and_then(|v| v.parse::<u32>().ok())
+                    .unwrap_or(1);
+                let rowspan = get_attr_value(td, "rowspan")
+                    .and_then(|v| v.parse::<u32>().ok())
+                    .unwrap_or(1);
+
+                let vmerge = if rowspan > 1 {
+                    VMerge::Restart
+                } else {
+                    VMerge::None
+                };
+
                 cells.push(TableCell {
                     paragraphs: vec![para],
+                    colspan,
+                    vmerge,
                 });
             }
         }
@@ -392,10 +446,37 @@ fn collect_inlines_styled(
                     }
                 }
             }
-            HtmlNode::Frame(_) => {}
+            HtmlNode::Frame(_) => {
+                // Frame elements may contain images or other visual content.
+                // For now, emit a placeholder text.
+                let mut run = Run::new("[Image]");
+                run.italic = true;
+                para.push_run(run);
+            }
         }
         i += 1;
     }
+}
+
+/// Count the number of block equations with numbering up to and including `current_idx`.
+/// This gives us the 1-based equation number for the current equation.
+fn count_numbered_block_equations(equations: &[Content], current_idx: usize) -> u64 {
+    let mut count = 0u64;
+    for eq_content in equations.iter().take(current_idx + 1) {
+        if let Some(eq) = eq_content.to_packed::<EquationElem>() {
+            let is_block = *eq.block.as_option().as_ref().unwrap_or(&false);
+            let has_numbering = eq
+                .numbering
+                .as_option()
+                .as_ref()
+                .and_then(|o| o.as_ref())
+                .is_some();
+            if is_block && has_numbering {
+                count += 1;
+            }
+        }
+    }
+    count
 }
 
 /// Check if a `Tag` is a Start tag with the given element name.
