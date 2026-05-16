@@ -6,3 +6,5 @@ license.workspace = true
 
 [dependencies]
 quick-xml.workspace = true
+typst.workspace = true
+typst-library.workspace = true

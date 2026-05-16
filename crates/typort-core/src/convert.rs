@@ -1,8 +1,10 @@
 use typort_ooxml::document::{
     Document, Paragraph, ParagraphStyle, Run, Table, TableCell, TableRow,
 };
+use typst::foundations::{Content, NativeElement};
 use typst::introspection::Tag;
 use typst_html::{HtmlDocument, HtmlElement, HtmlNode};
+use typst_library::math::EquationElem;
 
 use crate::world::TyportWorld;
 
@@ -17,6 +19,9 @@ pub fn convert_html(world: &TyportWorld) -> Result<Document, Vec<String>> {
         Err(errors) => return Err(errors.iter().map(|e| e.message.to_string()).collect()),
     };
 
+    // Query all equations via introspector (ordered by location)
+    let equations = html_doc.introspector.query(&EquationElem::ELEM.select());
+
     let mut doc = Document::new();
     let body = find_body(&html_doc.root).unwrap_or(&html_doc.root);
 
@@ -28,7 +33,8 @@ pub fn convert_html(world: &TyportWorld) -> Result<Document, Vec<String>> {
         doc.add_footnote(content.clone());
     }
 
-    convert_block_children(&body.children, &mut doc);
+    let mut eq_counter = 0usize;
+    convert_block_children_with_math(&body.children, &mut doc, &equations, &mut eq_counter);
     Ok(doc)
 }
 
@@ -52,11 +58,60 @@ fn tag_name(elem: &HtmlElement) -> String {
     raw.trim_matches('<').trim_matches('>').to_string()
 }
 
-fn convert_block_children(children: &[HtmlNode], doc: &mut Document) {
-    for child in children {
-        match child {
-            HtmlNode::Element(elem) => convert_element(elem, doc),
-            HtmlNode::Tag(_) | HtmlNode::Frame(_) => {}
+fn convert_block_children_with_math(
+    children: &[HtmlNode],
+    doc: &mut Document,
+    equations: &[Content],
+    eq_counter: &mut usize,
+) {
+    let mut i = 0;
+    while i < children.len() {
+        match &children[i] {
+            HtmlNode::Element(elem) => {
+                convert_element_with_math(elem, doc, equations, eq_counter);
+            }
+            HtmlNode::Tag(tag) => {
+                if is_tag_start(tag, "equation") {
+                    // Convert the equation using the introspector data
+                    if let Some(eq_content) = equations.get(*eq_counter) {
+                        let omml = typort_math::equation_to_omml(eq_content);
+
+                        // Check if this is a block equation
+                        let is_block = eq_content
+                            .to_packed::<EquationElem>()
+                            .is_some_and(|eq| *eq.block.as_option().as_ref().unwrap_or(&false));
+
+                        if is_block {
+                            // Block equation gets its own paragraph
+                            let mut para = Paragraph::new();
+                            para.add_math(omml);
+                            doc.add_paragraph(para);
+                        } else if let Some(typort_ooxml::document::BlockElement::Paragraph(para)) =
+                            doc.body.elements.last_mut()
+                        {
+                            // Inline equation: attach to the last paragraph
+                            para.add_math(omml);
+                        } else {
+                            let mut para = Paragraph::new();
+                            para.add_math(omml);
+                            doc.add_paragraph(para);
+                        }
+                    }
+                    *eq_counter += 1;
+                    // Skip to the matching End tag
+                    let start_loc = tag.location();
+                    i += 1;
+                    while i < children.len() {
+                        if let HtmlNode::Tag(end_tag) = &children[i]
+                            && is_tag_end_for(end_tag, start_loc)
+                        {
+                            break;
+                        }
+                        i += 1;
+                    }
+                }
+            }
+            HtmlNode::Frame(_) => {}
             HtmlNode::Text(text, _) => {
                 let trimmed = text.trim();
                 if !trimmed.is_empty() {
@@ -66,10 +121,16 @@ fn convert_block_children(children: &[HtmlNode], doc: &mut Document) {
                 }
             }
         }
+        i += 1;
     }
 }
 
-fn convert_element(elem: &HtmlElement, doc: &mut Document) {
+fn convert_element_with_math(
+    elem: &HtmlElement,
+    doc: &mut Document,
+    equations: &[Content],
+    eq_counter: &mut usize,
+) {
     let tag = tag_name(elem);
     match tag.as_str() {
         "h2" => convert_heading(elem, doc, 1),
@@ -85,9 +146,9 @@ fn convert_element(elem: &HtmlElement, doc: &mut Document) {
             if has_attr_value(elem, "role", "doc-endnotes") {
                 return;
             }
-            convert_block_children(&elem.children, doc);
+            convert_block_children_with_math(&elem.children, doc, equations, eq_counter);
         }
-        _ => convert_block_children(&elem.children, doc),
+        _ => convert_block_children_with_math(&elem.children, doc, equations, eq_counter),
     }
 }
 

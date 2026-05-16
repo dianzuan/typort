@@ -12,6 +12,8 @@ pub enum InlineElement {
     /// A footnote reference (rendered as superscript number in the document).
     /// The `id` corresponds to the footnote in the `Document::footnotes` list.
     FootnoteRef(u32),
+    /// A math equation rendered as OMML XML.
+    Math { omml_xml: String },
 }
 
 #[derive(Debug, Clone)]
@@ -75,6 +77,11 @@ impl Paragraph {
     /// Add a footnote reference to this paragraph.
     pub fn add_footnote_ref(&mut self, id: u32) {
         self.inlines.push(InlineElement::FootnoteRef(id));
+    }
+
+    /// Add a math equation (OMML XML) to this paragraph.
+    pub fn add_math(&mut self, omml_xml: String) {
+        self.inlines.push(InlineElement::Math { omml_xml });
     }
 }
 

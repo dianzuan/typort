@@ -250,3 +250,76 @@ fn italic_text_produces_w_i_element() {
         "should contain italic text content"
     );
 }
+
+#[test]
+fn math_test_produces_omml() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/math_test.typ")).unwrap();
+    let doc = typort_core::convert_html(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    // Verify OMML namespace is present
+    assert!(
+        doc_xml.contains("xmlns:m=\"http://schemas.openxmlformats.org/officeDocument/2006/math\""),
+        "document.xml should have the math namespace"
+    );
+
+    // Verify inline equation produces m:oMath
+    assert!(
+        doc_xml.contains("<m:oMath>"),
+        "document.xml should contain <m:oMath> for equations"
+    );
+
+    // Verify block equation produces m:oMathPara
+    assert!(
+        doc_xml.contains("<m:oMathPara>"),
+        "document.xml should contain <m:oMathPara> for block equations"
+    );
+
+    // Verify superscript structure (x^2)
+    assert!(
+        doc_xml.contains("<m:sSup>"),
+        "document.xml should contain <m:sSup> for superscripts"
+    );
+
+    // Verify fraction structure (frac(n(n+1), 2))
+    assert!(
+        doc_xml.contains("<m:f>"),
+        "document.xml should contain <m:f> for fractions"
+    );
+    assert!(
+        doc_xml.contains("<m:num>"),
+        "document.xml should contain <m:num> for fraction numerator"
+    );
+    assert!(
+        doc_xml.contains("<m:den>"),
+        "document.xml should contain <m:den> for fraction denominator"
+    );
+
+    // Verify nary (summation) structure
+    assert!(
+        doc_xml.contains("<m:nary>"),
+        "document.xml should contain <m:nary> for summation"
+    );
+
+    // Verify delimiter structure (parentheses in n(n+1))
+    assert!(
+        doc_xml.contains("<m:d>"),
+        "document.xml should contain <m:d> for delimiters"
+    );
+
+    // Verify math runs contain expected symbols
+    assert!(
+        doc_xml.contains("<m:t>x</m:t>"),
+        "document.xml should contain math text 'x'"
+    );
+    assert!(
+        doc_xml.contains("<m:t>2</m:t>"),
+        "document.xml should contain math text '2'"
+    );
+}

@@ -287,4 +287,16 @@ mod tests {
             println!("    body debug: {:?}", eq.body);
         }
     }
+
+    #[test]
+    fn math_test_dom_structure() {
+        let world = TyportWorld::new(Path::new("../../tests/fixtures/math_test.typ")).unwrap();
+        let result = typst::compile::<typst_html::HtmlDocument>(&world);
+        let html_doc = result.output.unwrap();
+        let root = &html_doc.root;
+        let body = find_element_by_tag(&root.children, "body").unwrap_or(root);
+
+        println!("\n=== MATH TEST DOM ===");
+        print_deep(&body.children, 0);
+    }
 }
