@@ -5,7 +5,9 @@ use quick_xml::events::{BytesDecl, BytesText, Event};
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
-use crate::document::{Alignment, BlockElement, Document, InlineElement, ParagraphStyle, Table};
+use crate::document::{
+    Alignment, BlockElement, Document, ImageData, ImageFormat, InlineElement, ParagraphStyle, Table,
+};
 use crate::styles;
 
 /// Write a Document to a .docx file (ZIP archive) into the given writer.
@@ -331,6 +333,17 @@ fn write_section_properties<W: Write>(
             .with_attribute(("w:right", settings.margin_right.to_string().as_str()))
             .with_attribute(("w:bottom", settings.margin_bottom.to_string().as_str()))
             .with_attribute(("w:left", settings.margin_left.to_string().as_str()))
+            .write_empty()?;
+        // Document grid: constrain line pitch for CJK documents.
+        // linePitch = body font size in twips × line spacing factor.
+        // body_size_half_pt is in half-points; convert to twips: half_pt × 10.
+        // line_spacing is in 240ths of a line (240 = 1.0×, 360 = 1.5×).
+        let font_twips = u32::from(style.body_size_half_pt) * 10;
+        let line_pitch = font_twips * style.line_spacing / 240;
+        let line_pitch_str = line_pitch.to_string();
+        w.create_element("w:docGrid")
+            .with_attribute(("w:type", "lines"))
+            .with_attribute(("w:linePitch", line_pitch_str.as_str()))
             .write_empty()?;
         Ok(())
     })?;

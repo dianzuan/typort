@@ -4,7 +4,7 @@ pub mod document;
 pub mod styles;
 pub mod writer;
 
-pub use document::{Document, DocumentMetadata, DocumentStyle, FootnoteFormat};
+pub use document::{Document, DocumentMetadata, DocumentStyle, FootnoteFormat, ImageData, ImageFormat};
 pub use writer::write_docx;
 
 #[cfg(test)]
@@ -587,7 +587,82 @@ mod tests {
         );
     }
 
-    // ── 19. Numbered equation ───────────────────────────────────────────
+    // ── 19. Document grid ────────────────────────────────────────────────
+
+    #[test]
+    fn doc_grid_in_section_properties() {
+        let doc = Document::new();
+        let buf = build_docx(&doc);
+        let xml = read_zip_entry(&buf, "word/document.xml");
+        assert!(
+            xml.contains("w:docGrid"),
+            "should have docGrid in sectPr: {xml}"
+        );
+        assert!(
+            xml.contains("w:linePitch"),
+            "should have linePitch attribute: {xml}"
+        );
+        assert!(
+            xml.contains(r#"w:type="lines""#),
+            "docGrid type should be 'lines': {xml}"
+        );
+    }
+
+    // ── 20. CJK properties in docDefaults ──────────────────────────────
+
+    #[test]
+    fn cjk_properties_in_doc_defaults() {
+        let doc = Document::new();
+        let buf = build_docx(&doc);
+        let xml = read_zip_entry(&buf, "word/styles.xml");
+        assert!(
+            xml.contains("<w:kinsoku/>"),
+            "should have kinsoku in docDefaults: {xml}"
+        );
+        assert!(
+            xml.contains("<w:overflowPunct/>"),
+            "should have overflowPunct in docDefaults: {xml}"
+        );
+        assert!(
+            xml.contains("<w:autoSpaceDE/>"),
+            "should have autoSpaceDE in docDefaults: {xml}"
+        );
+        assert!(
+            xml.contains("<w:autoSpaceDN/>"),
+            "should have autoSpaceDN in docDefaults: {xml}"
+        );
+        assert!(
+            xml.contains("<w:wordWrap/>"),
+            "should have wordWrap in docDefaults: {xml}"
+        );
+        assert!(
+            xml.contains("<w:topLinePunct/>"),
+            "should have topLinePunct in docDefaults: {xml}"
+        );
+    }
+
+    // ── 21. Heading paragraph control properties ───────────────────────
+
+    #[test]
+    fn heading_styles_have_keep_next_and_widow_control() {
+        let doc = Document::new();
+        let buf = build_docx(&doc);
+        let xml = read_zip_entry(&buf, "word/styles.xml");
+        assert!(
+            xml.contains("<w:keepNext/>"),
+            "heading styles should have keepNext: {xml}"
+        );
+        assert!(
+            xml.contains("<w:widowControl/>"),
+            "should have widowControl: {xml}"
+        );
+        assert!(
+            xml.contains("<w:pageBreakBefore/>"),
+            "Heading1 should have pageBreakBefore: {xml}"
+        );
+    }
+
+    // ── 22. Numbered equation ──────────────────────────────────────────
 
     #[test]
     fn numbered_equation_produces_right_tab_and_number_text() {

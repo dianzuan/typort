@@ -59,6 +59,20 @@ fn write_doc_defaults<W: Write>(w: &mut Writer<W>, style: &DocumentStyle) -> io:
                 })?;
                 Ok(())
             })?;
+        d.create_element("w:pPrDefault")
+            .write_inner_content(|pprd| {
+                pprd.create_element("w:pPr").write_inner_content(|ppr| {
+                    // CJK typography attributes — inherited by all paragraphs
+                    ppr.create_element("w:kinsoku").write_empty()?;
+                    ppr.create_element("w:overflowPunct").write_empty()?;
+                    ppr.create_element("w:autoSpaceDE").write_empty()?;
+                    ppr.create_element("w:autoSpaceDN").write_empty()?;
+                    ppr.create_element("w:wordWrap").write_empty()?;
+                    ppr.create_element("w:topLinePunct").write_empty()?;
+                    Ok(())
+                })?;
+                Ok(())
+            })?;
         Ok(())
     })?;
     Ok(())
@@ -96,6 +110,7 @@ fn write_style_normal<W: Write>(w: &mut Writer<W>, style: &DocumentStyle) -> io:
                 Ok(())
             })?;
             s.create_element("w:pPr").write_inner_content(|ppr| {
+                ppr.create_element("w:widowControl").write_empty()?;
                 ppr.create_element("w:jc")
                     .with_attribute(("w:val", "both"))
                     .write_empty()?;
@@ -145,6 +160,11 @@ fn write_style_heading<W: Write>(
                 .with_attribute(("w:val", "Normal"))
                 .write_empty()?;
             s.create_element("w:pPr").write_inner_content(|ppr| {
+                ppr.create_element("w:keepNext").write_empty()?;
+                ppr.create_element("w:widowControl").write_empty()?;
+                if level == 1 {
+                    ppr.create_element("w:pageBreakBefore").write_empty()?;
+                }
                 let outline_level = (level - 1).to_string();
                 ppr.create_element("w:outlineLvl")
                     .with_attribute(("w:val", outline_level.as_str()))
