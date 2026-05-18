@@ -5,7 +5,7 @@ use std::path::Path;
 fn complex_paper_has_table_structure() {
     let world =
         typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
-    let doc = typort_core::convert_html(&world).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
 
     let mut buf = Vec::new();
     typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
@@ -41,7 +41,7 @@ fn complex_paper_has_table_structure() {
 fn complex_paper_has_list_numbering() {
     let world =
         typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
-    let doc = typort_core::convert_html(&world).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
 
     let mut buf = Vec::new();
     typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
@@ -104,7 +104,7 @@ fn complex_paper_has_list_numbering() {
 #[test]
 fn end_to_end_hello_typ_to_docx() {
     let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/hello.typ")).unwrap();
-    let doc = typort_core::convert_html(&world).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
 
     let mut buf = Vec::new();
     typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
@@ -131,7 +131,7 @@ fn end_to_end_hello_typ_to_docx() {
 fn complex_paper_has_semantic_structure() {
     let world =
         typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
-    let doc = typort_core::convert_html(&world).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
 
     let mut buf = Vec::new();
     typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
@@ -153,7 +153,7 @@ fn complex_paper_has_semantic_structure() {
 fn complex_paper_has_footnotes() {
     let world =
         typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
-    let doc = typort_core::convert_html(&world).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
 
     // Verify footnotes were detected in the document model
     assert!(!doc.footnotes.is_empty(), "should have detected footnotes");
@@ -233,7 +233,7 @@ fn complex_paper_has_footnotes() {
 fn italic_text_produces_w_i_element() {
     let world =
         typort_core::TyportWorld::new(Path::new("../../tests/fixtures/italic_test.typ")).unwrap();
-    let doc = typort_core::convert_html(&world).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
 
     let mut buf = Vec::new();
     typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
@@ -255,7 +255,7 @@ fn italic_text_produces_w_i_element() {
 fn math_test_produces_omml() {
     let world =
         typort_core::TyportWorld::new(Path::new("../../tests/fixtures/math_test.typ")).unwrap();
-    let doc = typort_core::convert_html(&world).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
 
     let mut buf = Vec::new();
     typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
@@ -327,7 +327,7 @@ fn math_test_produces_omml() {
 #[test]
 fn docx_contains_core_properties() {
     let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/hello.typ")).unwrap();
-    let doc = typort_core::convert_html(&world).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
 
     let mut buf = Vec::new();
     typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
@@ -378,7 +378,7 @@ fn docx_contains_core_properties() {
 #[test]
 fn metadata_title_extracted_from_first_heading() {
     let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/hello.typ")).unwrap();
-    let doc = typort_core::convert_html(&world).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
 
     assert_eq!(
         doc.metadata.title.as_deref(),
@@ -390,7 +390,7 @@ fn metadata_title_extracted_from_first_heading() {
 #[test]
 fn preset_overrides_page_margins() {
     let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/hello.typ")).unwrap();
-    let mut doc = typort_core::convert_html(&world).unwrap();
+    let mut doc = typort_core::convert::convert(&world).unwrap();
 
     // Load the built-in preset
     let preset = typort_presets::load_preset(Path::new("../../presets"), "管理世界").unwrap();
@@ -449,7 +449,7 @@ fn preset_overrides_page_margins() {
 fn numbered_equation_has_right_aligned_number() {
     let world =
         typort_core::TyportWorld::new(Path::new("../../tests/fixtures/numbered_eq.typ")).unwrap();
-    let doc = typort_core::convert_html(&world).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
 
     let mut buf = Vec::new();
     typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
@@ -485,7 +485,7 @@ fn numbered_equation_document_model_has_numbers() {
 
     let world =
         typort_core::TyportWorld::new(Path::new("../../tests/fixtures/numbered_eq.typ")).unwrap();
-    let doc = typort_core::convert_html(&world).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
 
     // Find paragraphs with numbered equations
     let numbered_eqs: Vec<&str> = doc
@@ -614,7 +614,7 @@ fn merged_cell_emits_grid_span_and_vmerge() {
 fn math_unit_doc_xml() -> String {
     let world =
         typort_core::TyportWorld::new(Path::new("../../tests/fixtures/math_unit.typ")).unwrap();
-    let doc = typort_core::convert_html(&world).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
 
     let mut buf = Vec::new();
     typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
@@ -749,7 +749,7 @@ fn math_greek_letters() {
 fn features_footnote_restart_and_font_hint() {
     let world =
         typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
-    let doc = typort_core::convert_html(&world).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
 
     let mut buf = Vec::new();
     typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
@@ -790,7 +790,7 @@ fn features_footnote_restart_and_font_hint() {
 fn features_suppress_indent_and_bibliography() {
     let world =
         typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
-    let doc = typort_core::convert_html(&world).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
 
     let mut buf = Vec::new();
     typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
@@ -816,7 +816,7 @@ fn features_suppress_indent_and_bibliography() {
 fn features_table_width_percentage() {
     let world =
         typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
-    let doc = typort_core::convert_html(&world).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
 
     let mut buf = Vec::new();
     typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
@@ -840,7 +840,7 @@ fn features_table_width_percentage() {
 fn features_chinese_heading_numbering_definition() {
     let world =
         typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
-    let doc = typort_core::convert_html(&world).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
 
     let mut buf = Vec::new();
     typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
@@ -875,7 +875,7 @@ fn features_chinese_heading_numbering_definition() {
 fn v2_hello_typ_produces_heading_and_text() {
     let world =
         typort_core::TyportWorld::new(Path::new("../../tests/fixtures/hello.typ")).unwrap();
-    let doc = typort_core::convert_v2::convert(&world).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
 
     let mut buf = Vec::new();
     typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
@@ -892,7 +892,7 @@ fn v2_hello_typ_produces_heading_and_text() {
 fn v2_italic_text_produces_w_i_element() {
     let world =
         typort_core::TyportWorld::new(Path::new("../../tests/fixtures/italic_test.typ")).unwrap();
-    let doc = typort_core::convert_v2::convert(&world).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
     let mut buf = Vec::new();
     typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
     let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
@@ -909,7 +909,7 @@ fn v2_italic_text_produces_w_i_element() {
 fn v2_complex_paper_has_table_structure() {
     let world =
         typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
-    let doc = typort_core::convert_v2::convert(&world).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
     let mut buf = Vec::new();
     typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
     let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
@@ -923,7 +923,7 @@ fn v2_complex_paper_has_table_structure() {
 fn v2_complex_paper_has_list_numbering() {
     let world =
         typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
-    let doc = typort_core::convert_v2::convert(&world).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
     let mut buf = Vec::new();
     typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
     let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
@@ -935,7 +935,7 @@ fn v2_complex_paper_has_list_numbering() {
 fn v2_general_elements_has_code_block() {
     let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/general_elements.typ"))
         .unwrap();
-    let doc = typort_core::convert_v2::convert(&world).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
     let mut buf = Vec::new();
     typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
     let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
@@ -951,7 +951,7 @@ fn v2_general_elements_has_code_block() {
 fn v2_complex_paper_has_footnotes() {
     let world =
         typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
-    let doc = typort_core::convert_v2::convert(&world).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
     assert!(!doc.footnotes.is_empty(), "should have footnotes");
     let mut buf = Vec::new();
     typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
@@ -966,7 +966,7 @@ fn v2_complex_paper_has_footnotes() {
 #[test]
 fn v2_end_to_end_hello_typ_to_docx() {
     let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/hello.typ")).unwrap();
-    let doc = typort_core::convert_v2::convert(&world).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
     let mut buf = Vec::new();
     typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
     let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
@@ -986,7 +986,7 @@ fn v2_end_to_end_hello_typ_to_docx() {
 fn v2_complex_paper_has_semantic_structure() {
     let world =
         typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
-    let doc = typort_core::convert_v2::convert(&world).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
     let mut buf = Vec::new();
     typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
     let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
@@ -1002,7 +1002,7 @@ fn v2_complex_paper_has_semantic_structure() {
 fn v2_math_test_produces_omml() {
     let world =
         typort_core::TyportWorld::new(Path::new("../../tests/fixtures/math_test.typ")).unwrap();
-    let doc = typort_core::convert_v2::convert(&world).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
     let mut buf = Vec::new();
     typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
     let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
