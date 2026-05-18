@@ -14,9 +14,21 @@ use typort_ooxml::document::{
 use typst::foundations::StyleChain;
 use typst::introspection::Tag;
 use typst::layout::PagedDocument;
+use typst::model::Numbering;
 use typst_html::{HtmlDocument, HtmlElement, HtmlNode};
 use typst_library::math::EquationElem;
 use typst_library::model::HeadingElem;
+
+/// Tracks equation numbering state across the document.
+#[derive(Default)]
+struct EquationState {
+    /// Current chapter number (incremented on h1 headings).
+    chapter: u64,
+    /// Equation counter within the current chapter.
+    eq_in_chapter: u64,
+    /// Global equation counter.
+    global_eq: u64,
+}
 
 use crate::world::TyportWorld;
 
@@ -52,16 +64,20 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
     }
 
     // 5. Walk the HTML tree's Tag sequence
-    walk_tags(&body.children, &html_doc, &mut doc);
+    let mut eq_state = EquationState::default();
+    walk_tags(&body.children, &html_doc, &mut doc, &mut eq_state);
 
     // 6. Extract title from first heading
     extract_title_from_first_heading(&mut doc);
+
+    // 7. Post-processing: suppress indent after headings, bibliography hanging indent
+    apply_paragraph_formatting(&mut doc);
 
     Ok(doc)
 }
 
 /// Recursively walk `HtmlNode` children, dispatching on `Tag::Start` element types.
-fn walk_tags(children: &[HtmlNode], html_doc: &HtmlDocument, doc: &mut Document) {
+fn walk_tags(children: &[HtmlNode], html_doc: &HtmlDocument, doc: &mut Document, eq_state: &mut EquationState) {
     let mut i = 0;
     while i < children.len() {
         match &children[i] {
@@ -69,14 +85,28 @@ fn walk_tags(children: &[HtmlNode], html_doc: &HtmlDocument, doc: &mut Document)
                 if let Tag::Start(content, _) = tag {
                     let elem_name = content.elem().name();
                     match elem_name {
-                        "heading" => handle_heading(tag, html_doc, doc),
+                        "heading" => {
+                            handle_heading(tag, html_doc, doc);
+                            // Track chapter changes for equation numbering
+                            if let Some(c) = html_doc
+                                .introspector
+                                .query_first(&typst::foundations::Selector::Location(tag.location()))
+                                .and_then(|c| c.to_packed::<HeadingElem>().cloned())
+                            {
+                                let level = c.resolve_level(StyleChain::default()).get();
+                                if level == 1 {
+                                    eq_state.chapter += 1;
+                                    eq_state.eq_in_chapter = 0;
+                                }
+                            }
+                        }
                         "par" => {
                             let end = find_tag_end(children, i, tag.location());
-                            handle_par(&children[i..=end], html_doc, doc);
+                            handle_par(&children[i..=end], html_doc, doc, eq_state);
                             i = end;
                         }
                         "equation" => {
-                            handle_equation(tag, html_doc, doc);
+                            handle_equation(tag, html_doc, doc, eq_state);
                             let end = find_tag_end(children, i, tag.location());
                             i = end;
                         }
@@ -87,17 +117,17 @@ fn walk_tags(children: &[HtmlNode], html_doc: &HtmlDocument, doc: &mut Document)
                         }
                         "table" => {
                             let end = find_tag_end(children, i, tag.location());
-                            handle_table(&children[i..=end], html_doc, doc);
+                            handle_table(&children[i..=end], html_doc, doc, eq_state);
                             i = end;
                         }
                         "list" => {
                             let end = find_tag_end(children, i, tag.location());
-                            handle_list(&children[i..=end], html_doc, doc, false);
+                            handle_list(&children[i..=end], html_doc, doc, false, eq_state);
                             i = end;
                         }
                         "enum" => {
                             let end = find_tag_end(children, i, tag.location());
-                            handle_list(&children[i..=end], html_doc, doc, true);
+                            handle_list(&children[i..=end], html_doc, doc, true, eq_state);
                             i = end;
                         }
                         "figure" | "section" => {
@@ -111,7 +141,7 @@ fn walk_tags(children: &[HtmlNode], html_doc: &HtmlDocument, doc: &mut Document)
                                 i += 1;
                                 continue;
                             }
-                            walk_tags(&children[i + 1..end], html_doc, doc);
+                            walk_tags(&children[i + 1..end], html_doc, doc, eq_state);
                             i = end;
                         }
                         // Inline elements handled within par/collect_par_inlines,
@@ -122,7 +152,7 @@ fn walk_tags(children: &[HtmlNode], html_doc: &HtmlDocument, doc: &mut Document)
                 // Tag::End is consumed implicitly
             }
             HtmlNode::Element(elem) => {
-                handle_html_element(elem, html_doc, doc);
+                handle_html_element(elem, html_doc, doc, eq_state);
             }
             HtmlNode::Text(text, _) => {
                 // Bare text outside of any Tag — emit as a paragraph
@@ -146,11 +176,12 @@ fn handle_html_element(
     elem: &HtmlElement,
     html_doc: &HtmlDocument,
     doc: &mut Document,
+    eq_state: &mut EquationState,
 ) {
     let tag = tag_name(elem);
     match tag.as_str() {
         "pre" => convert_code_block(elem, doc),
-        "blockquote" => convert_blockquote(elem, html_doc, doc),
+        "blockquote" => convert_blockquote(elem, html_doc, doc, eq_state),
         "dl" => convert_term_list(elem, doc),
         "ol" => convert_html_list(elem, doc, true),
         "ul" => convert_html_list(elem, doc, false),
@@ -160,11 +191,11 @@ fn handle_html_element(
             if has_attr_value(elem, "role", "doc-endnotes") {
                 return;
             }
-            walk_tags(&elem.children, html_doc, doc);
+            walk_tags(&elem.children, html_doc, doc, eq_state);
         }
         _ => {
             // Recurse into other HTML elements
-            walk_tags(&elem.children, html_doc, doc);
+            walk_tags(&elem.children, html_doc, doc, eq_state);
         }
     }
 }
@@ -204,11 +235,12 @@ fn handle_par(
     slice: &[HtmlNode],
     html_doc: &HtmlDocument,
     doc: &mut Document,
+    eq_state: &mut EquationState,
 ) {
     let mut para = Paragraph::new();
     // Skip the first Tag::Start("par") and collect inlines from the inner nodes
     let inner = &slice[1..slice.len().saturating_sub(1)];
-    collect_par_inlines(inner, html_doc, doc, &mut para);
+    collect_par_inlines(inner, html_doc, doc, &mut para, eq_state);
     if !para.runs.is_empty() || !para.inlines.is_empty() {
         doc.add_paragraph(para);
     }
@@ -221,6 +253,7 @@ fn collect_par_inlines(
     html_doc: &HtmlDocument,
     doc: &mut Document,
     para: &mut Paragraph,
+    eq_state: &mut EquationState,
 ) {
     let mut i = 0;
     while i < children.len() {
@@ -232,11 +265,11 @@ fn collect_par_inlines(
             }
             HtmlNode::Tag(tag) => {
                 if let Tag::Start(..) = tag {
-                    i = handle_inline_tag(tag, children, i, html_doc, doc, para);
+                    i = handle_inline_tag(tag, children, i, html_doc, doc, para, eq_state);
                 }
             }
             HtmlNode::Element(elem) => {
-                handle_inline_html_element(elem, html_doc, doc, para);
+                handle_inline_html_element(elem, html_doc, doc, para, eq_state);
             }
             HtmlNode::Frame(_) => {}
         }
@@ -253,6 +286,7 @@ fn handle_inline_tag(
     html_doc: &HtmlDocument,
     doc: &mut Document,
     para: &mut Paragraph,
+    eq_state: &mut EquationState,
 ) -> usize {
     let Tag::Start(content, _) = tag else {
         return i;
@@ -294,16 +328,22 @@ fn handle_inline_tag(
                 .query_first(&typst::foundations::Selector::Location(loc))
             {
                 let omml = typort_math::equation_to_omml(&c);
-                let is_block = c
-                    .to_packed::<EquationElem>()
+                let eq_packed = c.to_packed::<EquationElem>();
+                let is_block = eq_packed
+                    .as_ref()
                     .is_some_and(|eq| *eq.block.as_option().as_ref().unwrap_or(&false));
                 if is_block {
                     if !para.runs.is_empty() || !para.inlines.is_empty() {
                         let prev = std::mem::take(para);
                         doc.add_paragraph(prev);
                     }
+                    let eq_number = compute_equation_number(eq_packed, eq_state);
                     let mut math_para = Paragraph::new();
-                    math_para.add_math(omml);
+                    if let Some(number) = eq_number {
+                        math_para.add_numbered_math(omml, number);
+                    } else {
+                        math_para.add_math(omml);
+                    }
                     doc.add_paragraph(math_para);
                 } else {
                     para.add_math(omml);
@@ -331,6 +371,7 @@ fn handle_inline_html_element(
     html_doc: &HtmlDocument,
     doc: &mut Document,
     para: &mut Paragraph,
+    eq_state: &mut EquationState,
 ) {
     let tag_str = tag_name(elem);
     match tag_str.as_str() {
@@ -362,7 +403,7 @@ fn handle_inline_html_element(
             // Skip, consumed by footnote
         }
         _ => {
-            collect_par_inlines(&elem.children, html_doc, doc, para);
+            collect_par_inlines(&elem.children, html_doc, doc, para, eq_state);
         }
     }
 }
@@ -403,7 +444,7 @@ fn collect_html_inlines(
 }
 
 /// Handle a block-level equation Tag.
-fn handle_equation(tag: &Tag, html_doc: &HtmlDocument, doc: &mut Document) {
+fn handle_equation(tag: &Tag, html_doc: &HtmlDocument, doc: &mut Document, eq_state: &mut EquationState) {
     let loc = tag.location();
     let Some(content) = html_doc
         .introspector
@@ -420,7 +461,12 @@ fn handle_equation(tag: &Tag, html_doc: &HtmlDocument, doc: &mut Document) {
 
     let mut para = Paragraph::new();
     if is_block {
-        para.add_math(omml);
+        let eq_number = compute_equation_number(eq_packed, eq_state);
+        if let Some(number) = eq_number {
+            para.add_numbered_math(omml, number);
+        } else {
+            para.add_math(omml);
+        }
         doc.add_paragraph(para);
     } else {
         // Inline equation at block level: wrap in a paragraph
@@ -456,6 +502,7 @@ fn handle_table(
     slice: &[HtmlNode],
     html_doc: &HtmlDocument,
     doc: &mut Document,
+    eq_state: &mut EquationState,
 ) {
     // Look for an HTML <table> element within the tag range
     for node in slice {
@@ -473,7 +520,7 @@ fn handle_table(
     }
     // Fallback: walk inner children normally
     let inner = &slice[1..slice.len().saturating_sub(1)];
-    walk_tags(inner, html_doc, doc);
+    walk_tags(inner, html_doc, doc, eq_state);
 }
 
 /// Recursively search for a `<table>` element within an HTML element tree.
@@ -500,6 +547,7 @@ fn handle_list(
     html_doc: &HtmlDocument,
     doc: &mut Document,
     ordered: bool,
+    eq_state: &mut EquationState,
 ) {
     // Look for an HTML <ul> or <ol> element within the tag range
     for node in slice {
@@ -517,7 +565,7 @@ fn handle_list(
     }
     // Fallback: walk inner children normally
     let inner = &slice[1..slice.len().saturating_sub(1)];
-    walk_tags(inner, html_doc, doc);
+    walk_tags(inner, html_doc, doc, eq_state);
 }
 
 /// Recursively search for a `<ul>` or `<ol>` element.
@@ -644,9 +692,10 @@ fn convert_blockquote(
     elem: &HtmlElement,
     html_doc: &HtmlDocument,
     doc: &mut Document,
+    eq_state: &mut EquationState,
 ) {
     let start_idx = doc.body.elements.len();
-    walk_tags(&elem.children, html_doc, doc);
+    walk_tags(&elem.children, html_doc, doc, eq_state);
     // Apply left indent to all paragraphs added by the blockquote
     for element in &mut doc.body.elements[start_idx..] {
         if let BlockElement::Paragraph(para) = element {
@@ -707,6 +756,28 @@ fn collect_all_text(children: &[HtmlNode]) -> String {
     text
 }
 
+/// Compute the equation number string for a block equation, if it has numbering.
+fn compute_equation_number(
+    eq_packed: Option<&typst::foundations::Packed<EquationElem>>,
+    eq_state: &mut EquationState,
+) -> Option<String> {
+    let eq = eq_packed?;
+    let numbering_opt = eq.numbering.as_option().as_ref()?.as_ref()?;
+    if let Numbering::Pattern(pattern) = numbering_opt {
+        eq_state.global_eq += 1;
+        eq_state.eq_in_chapter += 1;
+        let pieces = pattern.pieces();
+        let nums: Vec<u64> = if pieces >= 2 {
+            vec![eq_state.chapter, eq_state.eq_in_chapter]
+        } else {
+            vec![eq_state.global_eq]
+        };
+        Some(pattern.apply(&nums).to_string())
+    } else {
+        None
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Helper functions
 // ---------------------------------------------------------------------------
@@ -752,6 +823,35 @@ fn find_body(root: &HtmlElement) -> Option<&HtmlElement> {
         }
     }
     None
+}
+
+/// Post-processing: suppress first-line indent on the first paragraph after
+/// each heading, and apply hanging indent to bibliography paragraphs.
+fn apply_paragraph_formatting(doc: &mut Document) {
+    let mut after_heading = false;
+    let mut in_bibliography = false;
+
+    for element in &mut doc.body.elements {
+        if let BlockElement::Paragraph(p) = element {
+            if matches!(p.style, Some(ParagraphStyle::Heading(_))) {
+                // Detect bibliography section
+                let text: String = p.runs.iter().map(|r| r.text.as_str()).collect();
+                if text.contains("参考文献") {
+                    in_bibliography = true;
+                }
+                after_heading = true;
+            } else {
+                // Normal paragraph
+                if after_heading {
+                    p.suppress_indent = true;
+                    after_heading = false;
+                }
+                if in_bibliography {
+                    p.hanging_indent = true;
+                }
+            }
+        }
+    }
 }
 
 /// Set the document title from the first heading's text.

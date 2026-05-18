@@ -31,7 +31,7 @@ fn main() {
         process::exit(1);
     });
 
-    let mut doc = typort_core::convert_html(&world).unwrap_or_else(|errors| {
+    let mut doc = typort_core::convert(&world).unwrap_or_else(|errors| {
         eprintln!("error: Typst compilation failed:");
         for msg in &errors {
             eprintln!("  {msg}");
