@@ -842,8 +842,9 @@ fn write_footnote_ref<W: Write>(
 
 fn circled_number_char(n: u32) -> String {
     let c = match n {
-        1..=20 => char::from_u32(0x2460 + n - 1),   // ① to ⑳
-        21..=50 => char::from_u32(0x3251 + n - 21), // ㉑ to ㊿
+        1..=20 => char::from_u32(0x2460 + n - 1),    // ① to ⑳
+        21..=35 => char::from_u32(0x3251 + n - 21),  // ㉑ to ㉟
+        36..=50 => char::from_u32(0x32B1 + n - 36),  // ㊱ to ㊿
         _ => None,
     };
     c.map_or_else(|| n.to_string(), |c| c.to_string())

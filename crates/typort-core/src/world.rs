@@ -1,9 +1,9 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use typst::diag::FileResult;
 use typst::foundations::{Bytes, Datetime};
 use typst::layout::PagedDocument;
-use typst::syntax::{FileId, Source};
+use typst::syntax::{FileId, Source, VirtualPath};
 use typst::text::{Font, FontBook};
 use typst::utils::LazyHash;
 use typst::{Feature, Library, LibraryExt, World};
@@ -14,6 +14,7 @@ pub struct TyportWorld {
     book: LazyHash<FontBook>,
     fonts: Vec<FontSlot>,
     source: Source,
+    root: PathBuf,
 }
 
 impl TyportWorld {
@@ -22,8 +23,15 @@ impl TyportWorld {
     /// # Errors
     /// Returns an error if the file cannot be read.
     pub fn new(path: &Path) -> std::io::Result<Self> {
-        let content = std::fs::read_to_string(path)?;
-        let source = Source::detached(content);
+        let abs_path = path.canonicalize()?;
+        let root = abs_path.parent().unwrap_or(Path::new(".")).to_path_buf();
+        let file_name = abs_path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy();
+        let vpath = VirtualPath::new(format!("/{file_name}"));
+        let content = std::fs::read_to_string(&abs_path)?;
+        let source = Source::new(FileId::new(None, vpath), content);
 
         let Fonts { book, fonts } = Fonts::searcher().include_system_fonts(false).search();
 
@@ -36,7 +44,12 @@ impl TyportWorld {
             book: LazyHash::new(book),
             fonts,
             source,
+            root,
         })
+    }
+
+    fn resolve_path(&self, id: FileId) -> PathBuf {
+        self.root.join(id.vpath().as_rootless_path())
     }
 }
 
@@ -57,16 +70,18 @@ impl World for TyportWorld {
         if id == self.source.id() {
             Ok(self.source.clone())
         } else {
-            Err(typst::diag::FileError::NotFound(
-                id.vpath().as_rootless_path().into(),
-            ))
+            let path = self.resolve_path(id);
+            let content = std::fs::read_to_string(&path)
+                .map_err(|_| typst::diag::FileError::NotFound(path))?;
+            Ok(Source::new(id, content))
         }
     }
 
     fn file(&self, id: FileId) -> FileResult<Bytes> {
-        Err(typst::diag::FileError::NotFound(
-            id.vpath().as_rootless_path().into(),
-        ))
+        let path = self.resolve_path(id);
+        let data = std::fs::read(&path)
+            .map_err(|_| typst::diag::FileError::NotFound(path))?;
+        Ok(Bytes::new(data))
     }
 
     fn font(&self, index: usize) -> Option<Font> {
