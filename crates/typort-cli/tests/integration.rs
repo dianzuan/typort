@@ -887,3 +887,96 @@ fn v2_hello_typ_produces_heading_and_text() {
     assert!(doc_xml.contains("Hello"), "should contain heading text");
     assert!(doc_xml.contains("test document"), "should contain body text");
 }
+
+#[test]
+fn v2_italic_text_produces_w_i_element() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/italic_test.typ")).unwrap();
+    let doc = typort_core::convert_v2::convert(&world).unwrap();
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    assert!(doc_xml.contains("<w:i/>"), "should have italic");
+    assert!(doc_xml.contains("<w:b/>"), "should have bold");
+    assert!(
+        doc_xml.contains("emphasized text"),
+        "should have italic text content"
+    );
+}
+
+#[test]
+fn v2_complex_paper_has_table_structure() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
+    let doc = typort_core::convert_v2::convert(&world).unwrap();
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    assert!(doc_xml.contains("w:tbl"), "should have table");
+    assert!(doc_xml.contains("w:tr"), "should have table rows");
+    assert!(doc_xml.contains("w:tc"), "should have table cells");
+}
+
+#[test]
+fn v2_complex_paper_has_list_numbering() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
+    let doc = typort_core::convert_v2::convert(&world).unwrap();
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    assert!(doc_xml.contains("w:numPr"), "should have list numbering");
+}
+
+#[test]
+fn v2_general_elements_has_code_block() {
+    let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/general_elements.typ"))
+        .unwrap();
+    let doc = typort_core::convert_v2::convert(&world).unwrap();
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    assert!(doc_xml.contains("CodeBlock"), "should have CodeBlock style");
+    assert!(
+        doc_xml.contains("println"),
+        "should contain code content"
+    );
+}
+
+#[test]
+fn v2_complex_paper_has_footnotes() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
+    let doc = typort_core::convert_v2::convert(&world).unwrap();
+    assert!(!doc.footnotes.is_empty(), "should have footnotes");
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    assert!(
+        doc_xml.contains("w:footnoteReference"),
+        "should have footnote refs"
+    );
+}
+
+#[test]
+fn v2_math_test_produces_omml() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/math_test.typ")).unwrap();
+    let doc = typort_core::convert_v2::convert(&world).unwrap();
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    assert!(doc_xml.contains("<m:oMath>"), "should have inline math");
+    assert!(
+        doc_xml.contains("<m:oMathPara>"),
+        "should have block math"
+    );
+    assert!(doc_xml.contains("<m:sSup>"), "should have superscript");
+    assert!(doc_xml.contains("<m:f>"), "should have fraction");
+}
