@@ -871,4 +871,157 @@ mod tests {
             "document without images should not have wp namespace"
         );
     }
+
+    // ── 25. Bookmark start/end ──────────────────────────────────────────
+
+    #[test]
+    fn bookmark_produces_bookmark_start_and_end() {
+        let mut doc = Document::new();
+        let bk_id = doc.next_bookmark_id();
+        let mut para = document::Paragraph::new();
+        para.add_bookmark(bk_id, "fig-demo".to_string());
+        para.add_run("Figure 1: Demo");
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        let xml = read_zip_entry(&buf, "word/document.xml");
+        assert!(
+            xml.contains(r#"<w:bookmarkStart w:id="0" w:name="fig-demo"/>"#),
+            "expected bookmarkStart in: {xml}"
+        );
+        assert!(
+            xml.contains(r#"<w:bookmarkEnd w:id="0"/>"#),
+            "expected bookmarkEnd in: {xml}"
+        );
+    }
+
+    // ── 26. Cross-reference field (REF) ─────────────────────────────────
+
+    #[test]
+    fn field_ref_produces_fld_char_and_instr_text() {
+        let mut doc = Document::new();
+        let mut para = document::Paragraph::new();
+        para.add_field_ref("fig-demo".to_string(), "Figure 1".to_string());
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        let xml = read_zip_entry(&buf, "word/document.xml");
+        assert!(
+            xml.contains(r#"w:fldCharType="begin"#),
+            "expected fldChar begin in: {xml}"
+        );
+        assert!(
+            xml.contains("REF fig-demo"),
+            "expected REF instrText in: {xml}"
+        );
+        assert!(
+            xml.contains(r#"w:fldCharType="separate"#),
+            "expected fldChar separate in: {xml}"
+        );
+        assert!(
+            xml.contains("Figure 1"),
+            "expected display text in: {xml}"
+        );
+        assert!(
+            xml.contains(r#"w:fldCharType="end"#),
+            "expected fldChar end in: {xml}"
+        );
+    }
+
+    // ── 27. Hyperlink ───────────────────────────────────────────────────
+
+    #[test]
+    fn hyperlink_produces_fld_simple_with_url() {
+        let mut doc = Document::new();
+        let mut para = document::Paragraph::new();
+        para.add_hyperlink(
+            "https://example.com".to_string(),
+            vec![document::Run::new("click here")],
+        );
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        let xml = read_zip_entry(&buf, "word/document.xml");
+        assert!(
+            xml.contains("w:fldSimple"),
+            "expected w:fldSimple in: {xml}"
+        );
+        assert!(
+            xml.contains("HYPERLINK"),
+            "expected HYPERLINK in instrText: {xml}"
+        );
+        assert!(
+            xml.contains("https://example.com"),
+            "expected URL in: {xml}"
+        );
+        assert!(
+            xml.contains("click here"),
+            "expected display text in: {xml}"
+        );
+        assert!(
+            xml.contains(r#"<w:color w:val="0563C1"/>"#),
+            "expected blue color in: {xml}"
+        );
+        assert!(
+            xml.contains(r#"<w:u w:val="single"/>"#),
+            "expected underline in: {xml}"
+        );
+    }
+
+    // ── 28. Page break ──────────────────────────────────────────────────
+
+    #[test]
+    fn page_break_produces_br_type_page() {
+        let mut doc = Document::new();
+        let mut para = document::Paragraph::new();
+        para.add_page_break();
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        let xml = read_zip_entry(&buf, "word/document.xml");
+        assert!(
+            xml.contains(r#"<w:br w:type="page"/>"#),
+            "expected page break in: {xml}"
+        );
+    }
+
+    // ── 29. Bookmark counter increments ─────────────────────────────────
+
+    #[test]
+    fn bookmark_counter_increments() {
+        let mut doc = Document::new();
+        let id1 = doc.next_bookmark_id();
+        let id2 = doc.next_bookmark_id();
+        assert_eq!(id1, 0);
+        assert_eq!(id2, 1);
+    }
+
+    // ── 30. Combined cross-reference round-trip ─────────────────────────
+
+    #[test]
+    fn bookmark_and_ref_round_trip() {
+        let mut doc = Document::new();
+
+        // Target paragraph with bookmark
+        let bk_id = doc.next_bookmark_id();
+        let mut target_para = document::Paragraph::new();
+        target_para.style = Some(document::ParagraphStyle::Heading(1));
+        target_para.add_bookmark(bk_id, "intro".to_string());
+        target_para.add_run("Introduction");
+        doc.add_paragraph(target_para);
+
+        // Paragraph with cross-reference
+        let mut ref_para = document::Paragraph::new();
+        ref_para.add_run("See ");
+        ref_para.add_field_ref("intro".to_string(), "Introduction".to_string());
+        doc.add_paragraph(ref_para);
+
+        let buf = build_docx(&doc);
+        let xml = read_zip_entry(&buf, "word/document.xml");
+
+        // Both bookmark and REF field should be present
+        assert!(xml.contains(r#"w:name="intro"#), "bookmark should exist");
+        assert!(xml.contains("REF intro"), "REF field should reference bookmark");
+    }
+
 }
