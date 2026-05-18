@@ -45,6 +45,19 @@ pub enum InlineElement {
     },
     /// An inline image.
     Image(ImageData),
+    /// A bookmark start marker (anchor for cross-references).
+    Bookmark { id: u32, name: String },
+    /// A bookmark end marker.
+    BookmarkEnd { id: u32 },
+    /// A cross-reference field (REF field code pointing at a bookmark).
+    FieldRef {
+        bookmark_name: String,
+        display_text: String,
+    },
+    /// An external hyperlink using `fldSimple` with HYPERLINK field code.
+    Hyperlink { url: String, runs: Vec<Run> },
+    /// A page break (`w:br type="page"`).
+    PageBreak,
 }
 
 #[derive(Debug, Clone)]
@@ -146,6 +159,33 @@ impl Paragraph {
     /// Add an inline image to this paragraph.
     pub fn add_image(&mut self, image: ImageData) {
         self.inlines.push(InlineElement::Image(image));
+    }
+
+    /// Add a bookmark start + end pair (anchor for cross-references).
+    pub fn add_bookmark(&mut self, id: u32, name: String) {
+        self.inlines.push(InlineElement::Bookmark {
+            id,
+            name,
+        });
+        self.inlines.push(InlineElement::BookmarkEnd { id });
+    }
+
+    /// Add a cross-reference field (REF field code).
+    pub fn add_field_ref(&mut self, bookmark_name: String, display_text: String) {
+        self.inlines.push(InlineElement::FieldRef {
+            bookmark_name,
+            display_text,
+        });
+    }
+
+    /// Add an external hyperlink.
+    pub fn add_hyperlink(&mut self, url: String, runs: Vec<Run>) {
+        self.inlines.push(InlineElement::Hyperlink { url, runs });
+    }
+
+    /// Add a page break.
+    pub fn add_page_break(&mut self) {
+        self.inlines.push(InlineElement::PageBreak);
     }
 }
 
@@ -279,6 +319,8 @@ pub struct Document {
     pub metadata: DocumentMetadata,
     /// Style information extracted from the Typst document rendering.
     pub style: DocumentStyle,
+    /// Counter for generating unique bookmark IDs.
+    pub bookmark_counter: u32,
 }
 
 impl Document {
@@ -293,6 +335,13 @@ impl Document {
 
     pub fn add_table(&mut self, table: Table) {
         self.body.elements.push(BlockElement::Table(table));
+    }
+
+    /// Allocate and return the next unique bookmark ID.
+    pub fn next_bookmark_id(&mut self) -> u32 {
+        let id = self.bookmark_counter;
+        self.bookmark_counter += 1;
+        id
     }
 
     /// Add a footnote and return its ID (starting from 2, since 0 and 1 are reserved by OOXML).

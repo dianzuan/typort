@@ -611,6 +611,24 @@ fn write_paragraph<W: Write>(
                         let rid = image_rel_id(n, has_footnotes, has_numbering);
                         write_image_inline(w, img, n, &rid)?;
                     }
+                    InlineElement::Bookmark { id, name } => {
+                        write_bookmark_start(w, *id, name)?;
+                    }
+                    InlineElement::BookmarkEnd { id } => {
+                        write_bookmark_end(w, *id)?;
+                    }
+                    InlineElement::FieldRef {
+                        bookmark_name,
+                        display_text,
+                    } => {
+                        write_field_ref(w, bookmark_name, display_text)?;
+                    }
+                    InlineElement::Hyperlink { url, runs } => {
+                        write_hyperlink(w, url, runs)?;
+                    }
+                    InlineElement::PageBreak => {
+                        write_page_break(w)?;
+                    }
                 }
             }
         }
@@ -1030,6 +1048,123 @@ fn write_image_inline<W: Write>(
                 })?;
             Ok(())
         })?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
+fn write_bookmark_start<W: Write>(
+    writer: &mut Writer<W>,
+    id: u32,
+    name: &str,
+) -> io::Result<()> {
+    let id_str = id.to_string();
+    writer
+        .create_element("w:bookmarkStart")
+        .with_attribute(("w:id", id_str.as_str()))
+        .with_attribute(("w:name", name))
+        .write_empty()?;
+    Ok(())
+}
+
+fn write_bookmark_end<W: Write>(writer: &mut Writer<W>, id: u32) -> io::Result<()> {
+    let id_str = id.to_string();
+    writer
+        .create_element("w:bookmarkEnd")
+        .with_attribute(("w:id", id_str.as_str()))
+        .write_empty()?;
+    Ok(())
+}
+
+fn write_field_ref<W: Write>(
+    writer: &mut Writer<W>,
+    bookmark_name: &str,
+    display_text: &str,
+) -> io::Result<()> {
+    // fldChar begin
+    writer.create_element("w:r").write_inner_content(|w| {
+        w.create_element("w:fldChar")
+            .with_attribute(("w:fldCharType", "begin"))
+            .write_empty()?;
+        Ok(())
+    })?;
+    // instrText with REF field code
+    let instr = format!(" REF {bookmark_name} \\h ");
+    writer.create_element("w:r").write_inner_content(|w| {
+        w.create_element("w:instrText")
+            .with_attribute(("xml:space", "preserve"))
+            .write_text_content(BytesText::new(&instr))?;
+        Ok(())
+    })?;
+    // fldChar separate
+    writer.create_element("w:r").write_inner_content(|w| {
+        w.create_element("w:fldChar")
+            .with_attribute(("w:fldCharType", "separate"))
+            .write_empty()?;
+        Ok(())
+    })?;
+    // Display text (fallback)
+    writer.create_element("w:r").write_inner_content(|w| {
+        w.create_element("w:t")
+            .with_attribute(("xml:space", "preserve"))
+            .write_text_content(BytesText::new(display_text))?;
+        Ok(())
+    })?;
+    // fldChar end
+    writer.create_element("w:r").write_inner_content(|w| {
+        w.create_element("w:fldChar")
+            .with_attribute(("w:fldCharType", "end"))
+            .write_empty()?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
+fn write_hyperlink<W: Write>(
+    writer: &mut Writer<W>,
+    url: &str,
+    runs: &[crate::document::Run],
+) -> io::Result<()> {
+    // Use w:fldSimple with HYPERLINK field code to avoid relationship management
+    let instr = format!("HYPERLINK &quot;{url}&quot;");
+    writer
+        .create_element("w:fldSimple")
+        .with_attribute(("w:instr", instr.as_str()))
+        .write_inner_content(|w| {
+            for run in runs {
+                w.create_element("w:r").write_inner_content(|rw| {
+                    // Apply hyperlink styling: blue underlined
+                    rw.create_element("w:rPr").write_inner_content(|rpr| {
+                        rpr.create_element("w:color")
+                            .with_attribute(("w:val", "0563C1"))
+                            .write_empty()?;
+                        rpr.create_element("w:u")
+                            .with_attribute(("w:val", "single"))
+                            .write_empty()?;
+                        if run.bold {
+                            rpr.create_element("w:b").write_empty()?;
+                        }
+                        if run.italic {
+                            rpr.create_element("w:i").write_empty()?;
+                        }
+                        Ok(())
+                    })?;
+                    rw.create_element("w:t")
+                        .with_attribute(("xml:space", "preserve"))
+                        .write_text_content(BytesText::new(&run.text))?;
+                    Ok(())
+                })?;
+            }
+            Ok(())
+        })?;
+    Ok(())
+}
+
+fn write_page_break<W: Write>(writer: &mut Writer<W>) -> io::Result<()> {
+    writer.create_element("w:r").write_inner_content(|w| {
+        w.create_element("w:br")
+            .with_attribute(("w:type", "page"))
+            .write_empty()?;
         Ok(())
     })?;
     Ok(())
