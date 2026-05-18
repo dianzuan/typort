@@ -20,13 +20,15 @@ pub fn write_docx<W: Write + Seek>(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let has_footnotes = !doc.footnotes.is_empty();
     let has_numbering = doc_has_lists(doc);
+    let images = collect_images(doc);
+    let has_images = !images.is_empty();
 
     let mut zip = ZipWriter::new(writer);
     let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
     zip.start_file("[Content_Types].xml", options)?;
     zip.write_all(&xml_part(|w| {
-        generate_content_types(w, has_footnotes, has_numbering)
+        generate_content_types(w, has_footnotes, has_numbering, &images)
     })?)?;
 
     zip.start_file("_rels/.rels", options)?;
@@ -34,7 +36,7 @@ pub fn write_docx<W: Write + Seek>(
 
     zip.start_file("word/_rels/document.xml.rels", options)?;
     zip.write_all(&xml_part(|w| {
-        generate_document_rels(w, has_footnotes, has_numbering)
+        generate_document_rels(w, has_footnotes, has_numbering, &images)
     })?)?;
 
     zip.start_file("word/styles.xml", options)?;
@@ -49,7 +51,7 @@ pub fn write_docx<W: Write + Seek>(
     zip.write_all(&xml_part(|w| generate_settings(w, &doc.style))?)?;
 
     zip.start_file("word/document.xml", options)?;
-    zip.write_all(&xml_part(|w| generate_document_xml(w, doc))?)?;
+    zip.write_all(&xml_part(|w| generate_document_xml(w, doc, has_images))?)?;
 
     if has_footnotes {
         zip.start_file("word/footnotes.xml", options)?;
@@ -59,6 +61,18 @@ pub fn write_docx<W: Write + Seek>(
     if has_numbering {
         zip.start_file("word/numbering.xml", options)?;
         zip.write_all(&xml_part(generate_numbering_xml)?)?;
+    }
+
+    // Write image files to word/media/
+    for (idx, img) in images.iter().enumerate() {
+        let n = idx + 1;
+        let ext = match img.format {
+            ImageFormat::Png => "png",
+            ImageFormat::Jpeg => "jpg",
+        };
+        let path = format!("word/media/image{n}.{ext}");
+        zip.start_file(path, options)?;
+        zip.write_all(&img.bytes)?;
     }
 
     // Always write docProps/core.xml with metadata
@@ -75,6 +89,54 @@ fn doc_has_lists(doc: &Document) -> bool {
         BlockElement::Paragraph(p) => p.list_id.is_some(),
         BlockElement::Table(_) => false,
     })
+}
+
+/// Collect all images from the document model in order of appearance.
+/// Returns a `Vec<&ImageData>` where the index corresponds to the 1-based image number.
+fn collect_images(doc: &Document) -> Vec<&ImageData> {
+    let mut images = Vec::new();
+    for el in &doc.body.elements {
+        match el {
+            BlockElement::Paragraph(p) => collect_images_from_para(p, &mut images),
+            BlockElement::Table(t) => {
+                for row in &t.rows {
+                    for cell in &row.cells {
+                        for para in &cell.paragraphs {
+                            collect_images_from_para(para, &mut images);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    images
+}
+
+fn collect_images_from_para<'a>(
+    para: &'a crate::document::Paragraph,
+    images: &mut Vec<&'a ImageData>,
+) {
+    for inline in &para.inlines {
+        if let InlineElement::Image(img) = inline {
+            images.push(img);
+        }
+    }
+}
+
+/// Compute the relationship ID for an image given its 1-based index.
+/// Image relationship IDs start after the fixed relationships (styles, fontTable,
+/// footnotes, numbering, settings).
+fn image_rel_id(image_index: usize, has_footnotes: bool, has_numbering: bool) -> String {
+    // Base count: rId1=styles, rId2=fontTable
+    let mut base = 2;
+    if has_footnotes {
+        base += 1;
+    }
+    if has_numbering {
+        base += 1;
+    }
+    base += 1; // settings
+    format!("rId{}", base + image_index)
 }
 
 pub(crate) fn xml_part(
@@ -95,7 +157,12 @@ fn generate_content_types(
     writer: &mut Writer<&mut Vec<u8>>,
     has_footnotes: bool,
     has_numbering: bool,
+    images: &[&ImageData],
 ) -> io::Result<()> {
+    // Determine which image extensions are used
+    let has_png = images.iter().any(|i| i.format == ImageFormat::Png);
+    let has_jpeg = images.iter().any(|i| i.format == ImageFormat::Jpeg);
+
     writer
         .create_element("Types")
         .with_attribute(("xmlns", "http://schemas.openxmlformats.org/package/2006/content-types"))
@@ -108,6 +175,18 @@ fn generate_content_types(
                 .with_attribute(("Extension", "xml"))
                 .with_attribute(("ContentType", "application/xml"))
                 .write_empty()?;
+            if has_png {
+                w.create_element("Default")
+                    .with_attribute(("Extension", "png"))
+                    .with_attribute(("ContentType", "image/png"))
+                    .write_empty()?;
+            }
+            if has_jpeg {
+                w.create_element("Default")
+                    .with_attribute(("Extension", "jpg"))
+                    .with_attribute(("ContentType", "image/jpeg"))
+                    .write_empty()?;
+            }
             w.create_element("Override")
                 .with_attribute(("PartName", "/word/document.xml"))
                 .with_attribute(("ContentType", "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"))
@@ -169,6 +248,7 @@ fn generate_document_rels(
     writer: &mut Writer<&mut Vec<u8>>,
     has_footnotes: bool,
     has_numbering: bool,
+    images: &[&ImageData],
 ) -> io::Result<()> {
     writer
         .create_element("Relationships")
@@ -227,6 +307,23 @@ fn generate_document_rels(
                 ))
                 .with_attribute(("Target", "settings.xml"))
                 .write_empty()?;
+            // Image relationships
+            for (idx, img) in images.iter().enumerate() {
+                let rid = image_rel_id(idx + 1, has_footnotes, has_numbering);
+                let ext = match img.format {
+                    ImageFormat::Png => "png",
+                    ImageFormat::Jpeg => "jpg",
+                };
+                let target = format!("media/image{}.{ext}", idx + 1);
+                w.create_element("Relationship")
+                    .with_attribute(("Id", rid.as_str()))
+                    .with_attribute((
+                        "Type",
+                        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image",
+                    ))
+                    .with_attribute(("Target", target.as_str()))
+                    .write_empty()?;
+            }
             Ok(())
         })?;
     Ok(())
@@ -272,8 +369,12 @@ fn generate_settings(
     Ok(())
 }
 
-fn generate_document_xml(writer: &mut Writer<&mut Vec<u8>>, doc: &Document) -> io::Result<()> {
-    writer
+fn generate_document_xml(
+    writer: &mut Writer<&mut Vec<u8>>,
+    doc: &Document,
+    has_images: bool,
+) -> io::Result<()> {
+    let mut elem = writer
         .create_element("w:document")
         .with_attribute((
             "xmlns:w",
@@ -286,16 +387,36 @@ fn generate_document_xml(writer: &mut Writer<&mut Vec<u8>>, doc: &Document) -> i
         .with_attribute((
             "xmlns:m",
             "http://schemas.openxmlformats.org/officeDocument/2006/math",
-        ))
-        .write_inner_content(|w| {
+        ));
+    if has_images {
+        elem = elem
+            .with_attribute((
+                "xmlns:wp",
+                "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing",
+            ))
+            .with_attribute((
+                "xmlns:a",
+                "http://schemas.openxmlformats.org/drawingml/2006/main",
+            ))
+            .with_attribute((
+                "xmlns:pic",
+                "http://schemas.openxmlformats.org/drawingml/2006/picture",
+            ));
+    }
+    // We need to track image index state across paragraphs for the writer.
+    // Use a Cell to allow mutation inside the closure.
+    let image_counter = std::cell::Cell::new(0_usize);
+    let has_fn = !doc.footnotes.is_empty();
+    let has_num = doc_has_lists(doc);
+    elem.write_inner_content(|w| {
             w.create_element("w:body").write_inner_content(|body_w| {
                 for element in &doc.body.elements {
                     match element {
                         BlockElement::Paragraph(para) => {
-                            write_paragraph(body_w, para, &doc.style.footnote_format)?;
+                            write_paragraph(body_w, para, &doc.style.footnote_format, has_fn, has_num, &image_counter)?;
                         }
                         BlockElement::Table(table) => {
-                            write_table(body_w, table, &doc.style.footnote_format)?;
+                            write_table(body_w, table, &doc.style.footnote_format, has_fn, has_num, &image_counter)?;
                         }
                     }
                 }
@@ -350,11 +471,14 @@ fn write_section_properties<W: Write>(
     Ok(())
 }
 
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 fn write_paragraph<W: Write>(
     writer: &mut Writer<W>,
     para: &crate::document::Paragraph,
     fn_format: &crate::document::FootnoteFormat,
+    has_footnotes: bool,
+    has_numbering: bool,
+    image_counter: &std::cell::Cell<usize>,
 ) -> io::Result<()> {
     writer.create_element("w:p").write_inner_content(|w| {
         let has_style = para.style.is_some();
@@ -481,6 +605,12 @@ fn write_paragraph<W: Write>(
                             write_equation_number(w, num)?;
                         }
                     }
+                    InlineElement::Image(img) => {
+                        let n = image_counter.get() + 1;
+                        image_counter.set(n);
+                        let rid = image_rel_id(n, has_footnotes, has_numbering);
+                        write_image_inline(w, img, n, &rid)?;
+                    }
                 }
             }
         }
@@ -528,10 +658,14 @@ fn write_run<W: Write>(writer: &mut Writer<W>, run: &crate::document::Run) -> io
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_table<W: Write>(
     writer: &mut Writer<W>,
     table: &Table,
     fn_format: &crate::document::FootnoteFormat,
+    has_footnotes: bool,
+    has_numbering: bool,
+    image_counter: &std::cell::Cell<usize>,
 ) -> io::Result<()> {
     // Determine number of columns from the first row for equal-width distribution
     let num_cols = table
@@ -611,7 +745,7 @@ fn write_table<W: Write>(
                             tc_w.create_element("w:p").write_empty()?;
                         } else {
                             for para in &cell.paragraphs {
-                                write_paragraph(tc_w, para, fn_format)?;
+                                write_paragraph(tc_w, para, fn_format, has_footnotes, has_numbering, image_counter)?;
                             }
                         }
                         Ok(())
@@ -800,6 +934,102 @@ fn write_equation_number<W: Write>(writer: &mut Writer<W>, number: &str) -> io::
         w.create_element("w:t")
             .with_attribute(("xml:space", "preserve"))
             .write_text_content(BytesText::new(number))?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
+/// Write a `wp:inline` drawing element for an embedded image.
+#[allow(clippy::too_many_lines)]
+fn write_image_inline<W: Write>(
+    writer: &mut Writer<W>,
+    img: &ImageData,
+    n: usize,
+    rid: &str,
+) -> io::Result<()> {
+    let cx = img.width_emu.to_string();
+    let cy = img.height_emu.to_string();
+    let id_str = n.to_string();
+    let ext = match img.format {
+        ImageFormat::Png => "png",
+        ImageFormat::Jpeg => "jpg",
+    };
+    let name = format!("Image{n}");
+    let filename = format!("image{n}.{ext}");
+
+    writer.create_element("w:r").write_inner_content(|w| {
+        w.create_element("w:drawing").write_inner_content(|dw| {
+            dw.create_element("wp:inline")
+                .with_attribute(("distT", "0"))
+                .with_attribute(("distB", "0"))
+                .with_attribute(("distL", "0"))
+                .with_attribute(("distR", "0"))
+                .write_inner_content(|inl| {
+                    inl.create_element("wp:extent")
+                        .with_attribute(("cx", cx.as_str()))
+                        .with_attribute(("cy", cy.as_str()))
+                        .write_empty()?;
+                    inl.create_element("wp:docPr")
+                        .with_attribute(("id", id_str.as_str()))
+                        .with_attribute(("name", name.as_str()))
+                        .write_empty()?;
+                    inl.create_element("a:graphic")
+                        .with_attribute(("xmlns:a", "http://schemas.openxmlformats.org/drawingml/2006/main"))
+                        .write_inner_content(|gr| {
+                            gr.create_element("a:graphicData")
+                                .with_attribute(("uri", "http://schemas.openxmlformats.org/drawingml/2006/picture"))
+                                .write_inner_content(|gd| {
+                                    gd.create_element("pic:pic")
+                                        .with_attribute(("xmlns:pic", "http://schemas.openxmlformats.org/drawingml/2006/picture"))
+                                        .write_inner_content(|pic| {
+                                            pic.create_element("pic:nvPicPr").write_inner_content(|nv| {
+                                                nv.create_element("pic:cNvPr")
+                                                    .with_attribute(("id", id_str.as_str()))
+                                                    .with_attribute(("name", filename.as_str()))
+                                                    .write_empty()?;
+                                                nv.create_element("pic:cNvPicPr").write_empty()?;
+                                                Ok(())
+                                            })?;
+                                            pic.create_element("pic:blipFill").write_inner_content(|bf| {
+                                                bf.create_element("a:blip")
+                                                    .with_attribute(("r:embed", rid))
+                                                    .write_empty()?;
+                                                bf.create_element("a:stretch").write_inner_content(|st| {
+                                                    st.create_element("a:fillRect").write_empty()?;
+                                                    Ok(())
+                                                })?;
+                                                Ok(())
+                                            })?;
+                                            pic.create_element("pic:spPr").write_inner_content(|sp| {
+                                                sp.create_element("a:xfrm").write_inner_content(|xf| {
+                                                    xf.create_element("a:off")
+                                                        .with_attribute(("x", "0"))
+                                                        .with_attribute(("y", "0"))
+                                                        .write_empty()?;
+                                                    xf.create_element("a:ext")
+                                                        .with_attribute(("cx", cx.as_str()))
+                                                        .with_attribute(("cy", cy.as_str()))
+                                                        .write_empty()?;
+                                                    Ok(())
+                                                })?;
+                                                sp.create_element("a:prstGeom")
+                                                    .with_attribute(("prst", "rect"))
+                                                    .write_inner_content(|pg| {
+                                                        pg.create_element("a:avLst").write_empty()?;
+                                                        Ok(())
+                                                    })?;
+                                                Ok(())
+                                            })?;
+                                            Ok(())
+                                        })?;
+                                    Ok(())
+                                })?;
+                            Ok(())
+                        })?;
+                    Ok(())
+                })?;
+            Ok(())
+        })?;
         Ok(())
     })?;
     Ok(())

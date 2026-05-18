@@ -13,6 +13,22 @@ pub enum Alignment {
     Justify,
 }
 
+/// Image format (PNG or JPEG).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImageFormat {
+    Png,
+    Jpeg,
+}
+
+/// Embedded image data with dimensions in EMU (English Metric Units).
+#[derive(Debug, Clone)]
+pub struct ImageData {
+    pub bytes: Vec<u8>,
+    pub format: ImageFormat,
+    pub width_emu: u64,
+    pub height_emu: u64,
+}
+
 /// A single inline element within a paragraph.
 #[derive(Debug, Clone)]
 pub enum InlineElement {
@@ -27,6 +43,8 @@ pub enum InlineElement {
         omml_xml: String,
         equation_number: Option<String>,
     },
+    /// An inline image.
+    Image(ImageData),
 }
 
 #[derive(Debug, Clone)]
@@ -123,6 +141,11 @@ impl Paragraph {
             omml_xml,
             equation_number: Some(number),
         });
+    }
+
+    /// Add an inline image to this paragraph.
+    pub fn add_image(&mut self, image: ImageData) {
+        self.inlines.push(InlineElement::Image(image));
     }
 }
 

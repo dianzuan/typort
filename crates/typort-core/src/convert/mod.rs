@@ -11,8 +11,8 @@ pub mod page;
 use std::collections::{BTreeMap, HashMap};
 
 use typort_ooxml::document::{
-    Alignment, BlockElement, Document, FootnoteFormat, Paragraph, ParagraphStyle,
-    Run, Table, TableCell, TableRow, VMerge,
+    Alignment, BlockElement, Document, FootnoteFormat, ImageData, ImageFormat, Paragraph,
+    ParagraphStyle, Run, Table, TableCell, TableRow, VMerge,
 };
 use typst::foundations::StyleChain;
 use typst::introspection::Tag;
@@ -66,29 +66,42 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
         doc.add_footnote(content.clone());
     }
 
-    // 5. Walk the HTML tree's Tag sequence
-    let mut eq_state = EquationState::default();
-    walk_tags(&body.children, &html_doc, &mut doc, &mut eq_state);
+    // 5. Extract images from PagedDocument for embedding
+    let mut image_queue = if let Some(paged) = &paged_doc {
+        extract_images_from_paged(paged)
+    } else {
+        Vec::new()
+    };
 
-    // 6. Detect footnote format (circled numbers)
+    // 6. Walk the HTML tree's Tag sequence
+    let mut eq_state = EquationState::default();
+    walk_tags(&body.children, &html_doc, &mut doc, &mut eq_state, &mut image_queue);
+
+    // 7. Detect footnote format (circled numbers)
     detect_footnote_format(&body.children, &mut doc);
 
-    // 7. Recover missing content from PagedDocument (e.g. #align(center) blocks)
+    // 8. Recover missing content from PagedDocument (e.g. #align(center) blocks)
     if let Some(paged) = &paged_doc {
         recover_missing_content(paged, &mut doc);
     }
 
-    // 8. Extract title from first heading
+    // 9. Extract title from first heading
     extract_title_from_first_heading(&mut doc);
 
-    // 9. Post-processing: suppress indent after headings, bibliography hanging indent
+    // 10. Post-processing: suppress indent after headings, bibliography hanging indent
     apply_paragraph_formatting(&mut doc);
 
     Ok(doc)
 }
 
 /// Recursively walk `HtmlNode` children, dispatching on `Tag::Start` element types.
-fn walk_tags(children: &[HtmlNode], html_doc: &HtmlDocument, doc: &mut Document, eq_state: &mut EquationState) {
+fn walk_tags(
+    children: &[HtmlNode],
+    html_doc: &HtmlDocument,
+    doc: &mut Document,
+    eq_state: &mut EquationState,
+    image_queue: &mut Vec<ImageData>,
+) {
     let mut i = 0;
     while i < children.len() {
         match &children[i] {
@@ -116,7 +129,7 @@ fn walk_tags(children: &[HtmlNode], html_doc: &HtmlDocument, doc: &mut Document,
                         }
                         "par" => {
                             let end = find_tag_end(children, i, tag.location());
-                            handle_par(&children[i..=end], html_doc, doc, eq_state);
+                            handle_par(&children[i..=end], html_doc, doc, eq_state, image_queue);
                             i = end;
                         }
                         "equation" => {
@@ -131,17 +144,28 @@ fn walk_tags(children: &[HtmlNode], html_doc: &HtmlDocument, doc: &mut Document,
                         }
                         "table" => {
                             let end = find_tag_end(children, i, tag.location());
-                            handle_table(&children[i..=end], html_doc, doc, eq_state);
+                            handle_table(&children[i..=end], html_doc, doc, eq_state, image_queue);
                             i = end;
                         }
                         "list" => {
                             let end = find_tag_end(children, i, tag.location());
-                            handle_list(&children[i..=end], html_doc, doc, false, eq_state);
+                            handle_list(&children[i..=end], html_doc, doc, false, eq_state, image_queue);
                             i = end;
                         }
                         "enum" => {
                             let end = find_tag_end(children, i, tag.location());
-                            handle_list(&children[i..=end], html_doc, doc, true, eq_state);
+                            handle_list(&children[i..=end], html_doc, doc, true, eq_state, image_queue);
+                            i = end;
+                        }
+                        "image" => {
+                            // Consume the next image from the queue extracted from PagedDocument
+                            if !image_queue.is_empty() {
+                                let img_data = image_queue.remove(0);
+                                let mut para = Paragraph::new();
+                                para.add_image(img_data);
+                                doc.add_paragraph(para);
+                            }
+                            let end = find_tag_end(children, i, tag.location());
                             i = end;
                         }
                         "figure" | "section" => {
@@ -155,7 +179,7 @@ fn walk_tags(children: &[HtmlNode], html_doc: &HtmlDocument, doc: &mut Document,
                                 i += 1;
                                 continue;
                             }
-                            walk_tags(&children[i + 1..end], html_doc, doc, eq_state);
+                            walk_tags(&children[i + 1..end], html_doc, doc, eq_state, image_queue);
                             i = end;
                         }
                         // Inline elements handled within par/collect_par_inlines,
@@ -166,7 +190,7 @@ fn walk_tags(children: &[HtmlNode], html_doc: &HtmlDocument, doc: &mut Document,
                 // Tag::End is consumed implicitly
             }
             HtmlNode::Element(elem) => {
-                handle_html_element(elem, html_doc, doc, eq_state);
+                handle_html_element(elem, html_doc, doc, eq_state, image_queue);
             }
             HtmlNode::Text(text, _) => {
                 // Bare text outside of any Tag — emit as a paragraph
@@ -191,11 +215,12 @@ fn handle_html_element(
     html_doc: &HtmlDocument,
     doc: &mut Document,
     eq_state: &mut EquationState,
+    image_queue: &mut Vec<ImageData>,
 ) {
     let tag = tag_name(elem);
     match tag.as_str() {
         "pre" => convert_code_block(elem, doc),
-        "blockquote" => convert_blockquote(elem, html_doc, doc, eq_state),
+        "blockquote" => convert_blockquote(elem, html_doc, doc, eq_state, image_queue),
         "dl" => convert_term_list(elem, doc),
         "ol" => convert_html_list(elem, doc, true),
         "ul" => convert_html_list(elem, doc, false),
@@ -205,13 +230,13 @@ fn handle_html_element(
             if has_attr_value(elem, "role", "doc-endnotes") {
                 return;
             }
-            walk_tags(&elem.children, html_doc, doc, eq_state);
+            walk_tags(&elem.children, html_doc, doc, eq_state, image_queue);
         }
         _ => {
             // Check for alignment on this element and apply to child paragraphs
             let alignment = detect_alignment(elem);
             let start_idx = doc.body.elements.len();
-            walk_tags(&elem.children, html_doc, doc, eq_state);
+            walk_tags(&elem.children, html_doc, doc, eq_state, image_queue);
             if let Some(align) = alignment {
                 for element in &mut doc.body.elements[start_idx..] {
                     if let BlockElement::Paragraph(para) = element {
@@ -259,11 +284,12 @@ fn handle_par(
     html_doc: &HtmlDocument,
     doc: &mut Document,
     eq_state: &mut EquationState,
+    image_queue: &mut Vec<ImageData>,
 ) {
     let mut para = Paragraph::new();
     // Skip the first Tag::Start("par") and collect inlines from the inner nodes
     let inner = &slice[1..slice.len().saturating_sub(1)];
-    collect_par_inlines(inner, html_doc, doc, &mut para, eq_state);
+    collect_par_inlines(inner, html_doc, doc, &mut para, eq_state, image_queue);
     if !para.runs.is_empty() || !para.inlines.is_empty() {
         doc.add_paragraph(para);
     }
@@ -277,6 +303,7 @@ fn collect_par_inlines(
     doc: &mut Document,
     para: &mut Paragraph,
     eq_state: &mut EquationState,
+    image_queue: &mut Vec<ImageData>,
 ) {
     let mut i = 0;
     while i < children.len() {
@@ -288,11 +315,11 @@ fn collect_par_inlines(
             }
             HtmlNode::Tag(tag) => {
                 if let Tag::Start(..) = tag {
-                    i = handle_inline_tag(tag, children, i, html_doc, doc, para, eq_state);
+                    i = handle_inline_tag(tag, children, i, html_doc, doc, para, eq_state, image_queue);
                 }
             }
             HtmlNode::Element(elem) => {
-                handle_inline_html_element(elem, html_doc, doc, para, eq_state);
+                handle_inline_html_element(elem, html_doc, doc, para, eq_state, image_queue);
             }
             HtmlNode::Frame(_) => {}
         }
@@ -302,6 +329,7 @@ fn collect_par_inlines(
 
 /// Process a single inline `Tag::Start` within a paragraph.
 /// Returns the new index (pointing at the matching End tag).
+#[allow(clippy::too_many_arguments)]
 fn handle_inline_tag(
     tag: &Tag,
     children: &[HtmlNode],
@@ -310,6 +338,7 @@ fn handle_inline_tag(
     doc: &mut Document,
     para: &mut Paragraph,
     eq_state: &mut EquationState,
+    image_queue: &mut Vec<ImageData>,
 ) -> usize {
     let Tag::Start(content, _) = tag else {
         return i;
@@ -381,6 +410,14 @@ fn handle_inline_tag(
             }
             find_tag_end(children, i, start_loc)
         }
+        "image" => {
+            // Inline image within a paragraph
+            if !image_queue.is_empty() {
+                let img_data = image_queue.remove(0);
+                para.add_image(img_data);
+            }
+            find_tag_end(children, i, tag.location())
+        }
         _ => {
             // Skip unknown or non-inline tags
             find_tag_end(children, i, tag.location())
@@ -395,6 +432,7 @@ fn handle_inline_html_element(
     doc: &mut Document,
     para: &mut Paragraph,
     eq_state: &mut EquationState,
+    image_queue: &mut Vec<ImageData>,
 ) {
     let tag_str = tag_name(elem);
     match tag_str.as_str() {
@@ -439,7 +477,7 @@ fn handle_inline_html_element(
             }
         }
         _ => {
-            collect_par_inlines(&elem.children, html_doc, doc, para, eq_state);
+            collect_par_inlines(&elem.children, html_doc, doc, para, eq_state, image_queue);
         }
     }
 }
@@ -539,6 +577,7 @@ fn handle_table(
     html_doc: &HtmlDocument,
     doc: &mut Document,
     eq_state: &mut EquationState,
+    image_queue: &mut Vec<ImageData>,
 ) {
     // Look for an HTML <table> element within the tag range
     for node in slice {
@@ -556,7 +595,7 @@ fn handle_table(
     }
     // Fallback: walk inner children normally
     let inner = &slice[1..slice.len().saturating_sub(1)];
-    walk_tags(inner, html_doc, doc, eq_state);
+    walk_tags(inner, html_doc, doc, eq_state, image_queue);
 }
 
 /// Recursively search for a `<table>` element within an HTML element tree.
@@ -584,6 +623,7 @@ fn handle_list(
     doc: &mut Document,
     ordered: bool,
     eq_state: &mut EquationState,
+    image_queue: &mut Vec<ImageData>,
 ) {
     // Look for an HTML <ul> or <ol> element within the tag range
     for node in slice {
@@ -601,7 +641,7 @@ fn handle_list(
     }
     // Fallback: walk inner children normally
     let inner = &slice[1..slice.len().saturating_sub(1)];
-    walk_tags(inner, html_doc, doc, eq_state);
+    walk_tags(inner, html_doc, doc, eq_state, image_queue);
 }
 
 /// Recursively search for a `<ul>` or `<ol>` element.
@@ -729,9 +769,10 @@ fn convert_blockquote(
     html_doc: &HtmlDocument,
     doc: &mut Document,
     eq_state: &mut EquationState,
+    image_queue: &mut Vec<ImageData>,
 ) {
     let start_idx = doc.body.elements.len();
-    walk_tags(&elem.children, html_doc, doc, eq_state);
+    walk_tags(&elem.children, html_doc, doc, eq_state, image_queue);
     // Apply left indent to all paragraphs added by the blockquote
     for element in &mut doc.body.elements[start_idx..] {
         if let BlockElement::Paragraph(para) = element {
@@ -1118,6 +1159,83 @@ fn detect_footnote_format(children: &[HtmlNode], doc: &mut Document) {
                 return;
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Image extraction from PagedDocument
+// ---------------------------------------------------------------------------
+
+/// Extract all images from a `PagedDocument` in document order.
+///
+/// Walks all page frames and converts `FrameItem::Image` into `ImageData`
+/// with EMU dimensions based on the rendered size (not pixel size).
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn extract_images_from_paged(paged: &PagedDocument) -> Vec<ImageData> {
+    let mut images = Vec::new();
+    for page in &paged.pages {
+        collect_frame_images(&page.frame, &mut images);
+    }
+    images
+}
+
+/// Recursively collect images from a frame.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn collect_frame_images(frame: &Frame, images: &mut Vec<ImageData>) {
+    for (_, item) in frame.items() {
+        match item {
+            FrameItem::Image(img, size, _) => {
+                if let Some(data) = convert_typst_image(img, size) {
+                    images.push(data);
+                }
+            }
+            FrameItem::Group(group) => {
+                collect_frame_images(&group.frame, images);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Convert a Typst Image + rendered Size into an `ImageData`.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn convert_typst_image(
+    img: &typst::visualize::Image,
+    size: &typst::layout::Size,
+) -> Option<ImageData> {
+    use typst_library::visualize::ImageKind;
+
+    // Use the rendered size for EMU dimensions: 1 pt = 12700 EMU
+    let width_emu = (size.x.to_pt() * 12700.0) as u64;
+    let height_emu = (size.y.to_pt() * 12700.0) as u64;
+
+    match img.kind() {
+        ImageKind::Raster(raster) => {
+            let bytes = raster.data().to_vec();
+            let format = match raster.format() {
+                typst_library::visualize::RasterFormat::Exchange(exchange) => {
+                    // Check if it's PNG by matching the exchange format
+                    let fmt_str = format!("{exchange:?}");
+                    if fmt_str.contains("Png") {
+                        ImageFormat::Png
+                    } else {
+                        ImageFormat::Jpeg
+                    }
+                }
+                _ => ImageFormat::Png, // Default to PNG for other formats
+            };
+            Some(ImageData {
+                bytes,
+                format,
+                width_emu,
+                height_emu,
+            })
+        }
+        ImageKind::Svg(_) => {
+            // SVG rasterization is not yet supported (P0 future work)
+            None
+        }
+        _ => None,
     }
 }
 

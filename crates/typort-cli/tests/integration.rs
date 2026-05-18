@@ -930,3 +930,112 @@ fn complex_paper_recovers_author_info() {
         "complex paper should recover institution info from #align(center)"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Image embedding tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn image_embeds_in_docx() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/image_test.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+
+    // Check image file exists in ZIP
+    let names: Vec<String> = reader.file_names().map(String::from).collect();
+    assert!(
+        names.iter().any(|n| n.starts_with("word/media/image")),
+        "should have image in word/media/, got: {names:?}"
+    );
+
+    // Check document.xml has drawing element
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    assert!(
+        doc_xml.contains("w:drawing"),
+        "should have w:drawing element"
+    );
+    assert!(
+        doc_xml.contains("wp:inline"),
+        "should have wp:inline element"
+    );
+    assert!(doc_xml.contains("a:blip"), "should have a:blip element");
+
+    // Check content types include image
+    let ct_xml = std::io::read_to_string(reader.by_name("[Content_Types].xml").unwrap()).unwrap();
+    assert!(
+        ct_xml.contains("image/png"),
+        "content types should include image/png"
+    );
+}
+
+#[test]
+fn image_has_relationships_in_rels() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/image_test.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+
+    // Check document rels include image relationship
+    let rels_xml =
+        std::io::read_to_string(reader.by_name("word/_rels/document.xml.rels").unwrap()).unwrap();
+    assert!(
+        rels_xml.contains("relationships/image"),
+        "document rels should include image relationship"
+    );
+    assert!(
+        rels_xml.contains("media/image1"),
+        "document rels should reference media/image1"
+    );
+}
+
+#[test]
+fn image_document_model_has_image_inline() {
+    use typort_ooxml::document::{BlockElement, InlineElement};
+
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/image_test.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    // Find paragraphs with Image inlines
+    let has_image = doc.body.elements.iter().any(|e| {
+        if let BlockElement::Paragraph(p) = e {
+            p.inlines
+                .iter()
+                .any(|i| matches!(i, InlineElement::Image(_)))
+        } else {
+            false
+        }
+    });
+    assert!(
+        has_image,
+        "document model should have at least one Image inline element"
+    );
+}
+
+#[test]
+fn image_has_nonzero_emu_dimensions() {
+    use typort_ooxml::document::{BlockElement, InlineElement};
+
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/image_test.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    for e in &doc.body.elements {
+        if let BlockElement::Paragraph(p) = e {
+            for inline in &p.inlines {
+                if let InlineElement::Image(img) = inline {
+                    assert!(img.width_emu > 0, "image width_emu should be > 0");
+                    assert!(img.height_emu > 0, "image height_emu should be > 0");
+                    assert!(!img.bytes.is_empty(), "image bytes should not be empty");
+                }
+            }
+        }
+    }
+}
