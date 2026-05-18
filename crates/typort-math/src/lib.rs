@@ -350,4 +350,53 @@ mod tests {
         assert!(result.contains("<m:t>x</m:t>"));
         assert!(result.contains("</m:r>"));
     }
+
+    #[test]
+    fn test_write_math_run_empty_string() {
+        let mut buf = Vec::new();
+        let mut writer = Writer::new_with_indent(&mut buf, b' ', 2);
+        write_math_run(&mut writer, "").unwrap();
+        let result = String::from_utf8(buf).unwrap();
+        assert!(result.contains("<m:r>"), "should still produce m:r element");
+        assert!(
+            result.contains("<m:t></m:t>") || result.contains("<m:t/>"),
+            "should produce empty m:t element, got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_write_math_run_unicode() {
+        let mut buf = Vec::new();
+        let mut writer = Writer::new_with_indent(&mut buf, b' ', 2);
+        write_math_run(&mut writer, "\u{03B1}").unwrap(); // alpha
+        let result = String::from_utf8(buf).unwrap();
+        assert!(
+            result.contains("<m:t>\u{03B1}</m:t>"),
+            "should contain Unicode alpha character, got: {result}"
+        );
+    }
+
+    #[test]
+    fn test_write_math_run_xml_special_chars() {
+        let mut buf = Vec::new();
+        let mut writer = Writer::new_with_indent(&mut buf, b' ', 2);
+        write_math_run(&mut writer, "&<>").unwrap();
+        let result = String::from_utf8(buf).unwrap();
+        assert!(
+            !result.contains("<m:t>&<></m:t>"),
+            "XML special chars should be escaped, got: {result}"
+        );
+        assert!(
+            result.contains("&amp;"),
+            "ampersand should be escaped to &amp;, got: {result}"
+        );
+        assert!(
+            result.contains("&lt;"),
+            "less-than should be escaped to &lt;, got: {result}"
+        );
+        assert!(
+            result.contains("&gt;"),
+            "greater-than should be escaped to &gt;, got: {result}"
+        );
+    }
 }
