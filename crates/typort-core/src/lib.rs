@@ -2,9 +2,12 @@
 #![allow(clippy::module_name_repetitions)]
 
 pub mod convert;
+pub mod convert_v2;
 pub mod world;
 
 mod realize_test;
+#[cfg(test)]
+mod spike_introspector;
 
 pub use convert::convert_html;
 pub use world::{TyportWorld, compile};
