@@ -695,4 +695,180 @@ mod tests {
             "expected firstLine=0 for equation paragraph: {xml}"
         );
     }
+
+    // ── 23. Image embedding ───────────────────────────────────────────────
+
+    #[test]
+    fn image_inline_produces_drawing_xml() {
+        let mut doc = Document::new();
+        let mut para = document::Paragraph::new();
+        para.add_image(document::ImageData {
+            bytes: vec![0x89, 0x50, 0x4E, 0x47], // PNG magic bytes
+            format: document::ImageFormat::Png,
+            width_emu: 914_400,  // 1 inch
+            height_emu: 457_200, // 0.5 inch
+        });
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        let xml = read_zip_entry(&buf, "word/document.xml");
+        assert!(
+            xml.contains("w:drawing"),
+            "expected w:drawing in: {xml}"
+        );
+        assert!(
+            xml.contains("wp:inline"),
+            "expected wp:inline in: {xml}"
+        );
+        assert!(
+            xml.contains("a:blip"),
+            "expected a:blip in: {xml}"
+        );
+        assert!(
+            xml.contains(r#"cx="914400""#),
+            "expected cx=914400 in: {xml}"
+        );
+        assert!(
+            xml.contains(r#"cy="457200""#),
+            "expected cy=457200 in: {xml}"
+        );
+    }
+
+    #[test]
+    fn image_writes_to_zip_media() {
+        let mut doc = Document::new();
+        let mut para = document::Paragraph::new();
+        let png_data = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]; // PNG header
+        para.add_image(document::ImageData {
+            bytes: png_data.clone(),
+            format: document::ImageFormat::Png,
+            width_emu: 914_400,
+            height_emu: 914_400,
+        });
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        assert!(
+            zip_has_entry(&buf, "word/media/image1.png"),
+            "ZIP should contain word/media/image1.png"
+        );
+
+        // Verify the image bytes are correct
+        let mut archive = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+        let mut img_entry = archive.by_name("word/media/image1.png").unwrap();
+        let mut img_bytes = Vec::new();
+        std::io::Read::read_to_end(&mut img_entry, &mut img_bytes).unwrap();
+        assert_eq!(img_bytes, png_data, "image bytes in ZIP should match input");
+    }
+
+    #[test]
+    fn image_content_types_include_png() {
+        let mut doc = Document::new();
+        let mut para = document::Paragraph::new();
+        para.add_image(document::ImageData {
+            bytes: vec![0x89],
+            format: document::ImageFormat::Png,
+            width_emu: 100,
+            height_emu: 100,
+        });
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        let ct = read_zip_entry(&buf, "[Content_Types].xml");
+        assert!(
+            ct.contains("image/png"),
+            "content types should include image/png: {ct}"
+        );
+    }
+
+    #[test]
+    fn image_content_types_include_jpeg() {
+        let mut doc = Document::new();
+        let mut para = document::Paragraph::new();
+        para.add_image(document::ImageData {
+            bytes: vec![0xFF, 0xD8],
+            format: document::ImageFormat::Jpeg,
+            width_emu: 100,
+            height_emu: 100,
+        });
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        let ct = read_zip_entry(&buf, "[Content_Types].xml");
+        assert!(
+            ct.contains("image/jpeg"),
+            "content types should include image/jpeg: {ct}"
+        );
+        assert!(
+            zip_has_entry(&buf, "word/media/image1.jpg"),
+            "ZIP should contain word/media/image1.jpg"
+        );
+    }
+
+    #[test]
+    fn image_rels_include_image_relationship() {
+        let mut doc = Document::new();
+        let mut para = document::Paragraph::new();
+        para.add_image(document::ImageData {
+            bytes: vec![0x89],
+            format: document::ImageFormat::Png,
+            width_emu: 100,
+            height_emu: 100,
+        });
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        let rels = read_zip_entry(&buf, "word/_rels/document.xml.rels");
+        assert!(
+            rels.contains("relationships/image"),
+            "rels should include image relationship: {rels}"
+        );
+        assert!(
+            rels.contains("media/image1.png"),
+            "rels should reference media/image1.png: {rels}"
+        );
+    }
+
+    #[test]
+    fn document_xml_has_image_namespaces() {
+        let mut doc = Document::new();
+        let mut para = document::Paragraph::new();
+        para.add_image(document::ImageData {
+            bytes: vec![0x89],
+            format: document::ImageFormat::Png,
+            width_emu: 100,
+            height_emu: 100,
+        });
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        let xml = read_zip_entry(&buf, "word/document.xml");
+        assert!(
+            xml.contains("xmlns:wp="),
+            "document should have wp namespace: {xml}"
+        );
+        assert!(
+            xml.contains("xmlns:a="),
+            "document should have a namespace: {xml}"
+        );
+        assert!(
+            xml.contains("xmlns:pic="),
+            "document should have pic namespace: {xml}"
+        );
+    }
+
+    #[test]
+    fn document_without_images_has_no_image_namespaces() {
+        let mut doc = Document::new();
+        let mut para = document::Paragraph::new();
+        para.add_run("no images here");
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        let xml = read_zip_entry(&buf, "word/document.xml");
+        assert!(
+            !xml.contains("xmlns:wp="),
+            "document without images should not have wp namespace"
+        );
+    }
 }
