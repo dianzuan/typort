@@ -1039,3 +1039,171 @@ fn image_has_nonzero_emu_dimensions() {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Math P1 element integration tests — new OMML elements
+// ---------------------------------------------------------------------------
+
+#[test]
+fn math_matrix_produces_m_m() {
+    let doc_xml = math_unit_doc_xml();
+    assert!(
+        doc_xml.contains("<m:m>"),
+        "document.xml should contain <m:m> for matrix"
+    );
+    assert!(
+        doc_xml.contains("<m:mr>"),
+        "document.xml should contain <m:mr> for matrix row"
+    );
+}
+
+#[test]
+fn math_accent_hat_produces_m_acc() {
+    let doc_xml = math_unit_doc_xml();
+    assert!(
+        doc_xml.contains("<m:acc>"),
+        "document.xml should contain <m:acc> for accent"
+    );
+    assert!(
+        doc_xml.contains("<m:accPr>"),
+        "document.xml should contain <m:accPr> for accent properties"
+    );
+    // hat accent should use combining circumflex U+0302
+    assert!(
+        doc_xml.contains("<m:chr m:val=\"\u{0302}\"/>"),
+        "hat accent should have chr U+0302 (combining circumflex)"
+    );
+}
+
+#[test]
+fn math_accent_arrow_produces_m_acc_with_arrow_chr() {
+    let doc_xml = math_unit_doc_xml();
+    // arrow accent should use combining right arrow above U+20D7
+    assert!(
+        doc_xml.contains("<m:chr m:val=\"\u{20D7}\"/>"),
+        "arrow accent should have chr U+20D7 (combining right arrow above)"
+    );
+}
+
+#[test]
+fn math_overline_produces_m_bar_top() {
+    let doc_xml = math_unit_doc_xml();
+    assert!(
+        doc_xml.contains("<m:bar>"),
+        "document.xml should contain <m:bar> for overline"
+    );
+    assert!(
+        doc_xml.contains("<m:pos m:val=\"top\"/>"),
+        "overline should have pos=top"
+    );
+}
+
+#[test]
+fn math_underline_produces_m_bar_bot() {
+    let doc_xml = math_unit_doc_xml();
+    assert!(
+        doc_xml.contains("<m:pos m:val=\"bot\"/>"),
+        "underline should have pos=bot"
+    );
+}
+
+#[test]
+fn math_named_func_produces_m_func() {
+    let doc_xml = math_unit_doc_xml();
+    assert!(
+        doc_xml.contains("<m:func>"),
+        "document.xml should contain <m:func> for named function"
+    );
+    assert!(
+        doc_xml.contains("<m:fName>"),
+        "document.xml should contain <m:fName> for function name"
+    );
+    // sin should appear as plain-style text
+    assert!(
+        doc_xml.contains("<m:t>sin</m:t>"),
+        "function name should contain 'sin'"
+    );
+}
+
+#[test]
+fn math_cases_produces_m_d_with_m_eqarr() {
+    let doc_xml = math_unit_doc_xml();
+    assert!(
+        doc_xml.contains("<m:eqArr>"),
+        "document.xml should contain <m:eqArr> for cases"
+    );
+    // Cases should have a left brace delimiter
+    assert!(
+        doc_xml.contains("<m:begChr m:val=\"{\"/>"),
+        "cases should have opening brace delimiter"
+    );
+    // Cases should suppress the closing delimiter
+    assert!(
+        doc_xml.contains("<m:endChr m:val=\"\"/>"),
+        "cases should have empty closing delimiter"
+    );
+}
+
+#[test]
+fn math_underbrace_produces_m_groupchr() {
+    let doc_xml = math_unit_doc_xml();
+    assert!(
+        doc_xml.contains("<m:groupChr>"),
+        "document.xml should contain <m:groupChr> for underbrace"
+    );
+    assert!(
+        doc_xml.contains("<m:groupChrPr>"),
+        "document.xml should contain <m:groupChrPr> for group char properties"
+    );
+    // Underbrace uses U+23DF
+    assert!(
+        doc_xml.contains("<m:chr m:val=\"\u{23DF}\"/>"),
+        "underbrace should have chr U+23DF (bottom curly bracket)"
+    );
+}
+
+#[test]
+fn math_overbrace_produces_m_groupchr() {
+    let doc_xml = math_unit_doc_xml();
+    // Overbrace uses U+23DE
+    assert!(
+        doc_xml.contains("<m:chr m:val=\"\u{23DE}\"/>"),
+        "overbrace should have chr U+23DE (top curly bracket)"
+    );
+}
+
+#[test]
+fn math_underbrace_annotation_produces_m_limlow() {
+    let doc_xml = math_unit_doc_xml();
+    // Underbrace with annotation should be wrapped in m:limLow
+    assert!(
+        doc_xml.contains("<m:limLow>"),
+        "underbrace with annotation should produce <m:limLow>"
+    );
+    assert!(
+        doc_xml.contains("<m:lim>"),
+        "should have <m:lim> element for the annotation"
+    );
+}
+
+#[test]
+fn math_overbrace_annotation_produces_m_limupp() {
+    let doc_xml = math_unit_doc_xml();
+    // Overbrace with annotation should be wrapped in m:limUpp
+    assert!(
+        doc_xml.contains("<m:limUpp>"),
+        "overbrace with annotation should produce <m:limUpp>"
+    );
+}
+
+#[test]
+fn math_vector_produces_m_m_in_delimiters() {
+    let doc_xml = math_unit_doc_xml();
+    // vec() produces a column vector with parentheses and a matrix inside
+    // It should have at least 3 m:mr rows (for vec(1, 2, 3))
+    let mr_count = doc_xml.matches("<m:mr>").count();
+    assert!(
+        mr_count >= 3,
+        "vector should produce at least 3 <m:mr> rows, got {mr_count}"
+    );
+}

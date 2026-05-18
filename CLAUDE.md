@@ -14,7 +14,7 @@
 - 标题（h1-h5）→ Word Heading 样式
 - 段落、粗体、斜体、上标、下标、等宽
 - 脚注（含带圈数字格式）
-- 数学公式（Typst → OMML）：分数、上下标、根号、求和/积分/连乘、定界符
+- 数学公式（Typst → OMML）：分数、上下标、根号、求和/积分/连乘、定界符、矩阵、向量、重音符号、上/下划线、命名函数、cases、overbrace/underbrace/overbracket/underbracket/overparen/underparen/overshell/undershell
 - 表格（含合并单元格 colspan/rowspan）
 - 有序/无序列表
 - 代码块、引用块、术语列表
@@ -37,13 +37,13 @@
 - CJK 排版属性（`w:kinsoku`、`w:overflowPunct`、`w:autoSpaceDE/DN`）
 
 **P1 — 数学公式补全：**
-- 矩阵 `mat` → `m:m`
-- 向量/重音 `accent`/`hat`/`arrow` → `m:acc`
-- 上/下划线 → `m:bar`
-- 命名函数 `sin`/`cos`/`lim` → `m:func`
-- 多行对齐公式 → `m:eqArr`
-- `cases` → `m:d` + `m:eqArr`
-- 花括号注释 `overbrace`/`underbrace` → `m:groupChr`
+- ~~矩阵 `mat` → `m:m`~~ ✅ 已实现
+- ~~向量/重音 `accent`/`hat`/`arrow` → `m:acc`~~ ✅ 已实现
+- ~~上/下划线 → `m:bar`~~ ✅ 已实现
+- ~~命名函数 `sin`/`cos`/`lim` → `m:func`~~ ✅ 已实现
+- 多行对齐公式 → `m:eqArr`（AlignPointElem 独立识别待实现，当前仅在 cases 内使用）
+- ~~`cases` → `m:d` + `m:eqArr`~~ ✅ 已实现
+- ~~花括号注释 `overbrace`/`underbrace` → `m:groupChr`~~ ✅ 已实现（含 bracket/paren/shell 变体）
 
 **P2 — 完整文档：**
 - 交叉引用（`@label` → `w:bookmarkStart` + `REF` 域代码）
@@ -78,7 +78,7 @@ Cargo workspace with 5 crates under `crates/`:
 - `typort-cli` — Binary. CLI entry point (clap). Depends on typort-core.
 - `typort-core` — Lib. Typst compilation (World impl), HtmlDocument 遍历, PagedDocument 恢复, 元素分发. Depends on typort-ooxml, typort-math, typort-presets.
 - `typort-ooxml` — Lib. OOXML XML generation (pure quick-xml) + ZIP packaging. Document model → Word XML.
-- `typort-math` — Lib. Typst math Content → OMML conversion. 已实现 6/17 OMML 元素.
+- `typort-math` — Lib. Typst math Content → OMML conversion. 已实现 13/17 OMML 元素.
 - `typort-presets` — Lib. Journal preset TOML loading.
 
 ## Key Dependencies

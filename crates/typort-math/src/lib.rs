@@ -7,7 +7,11 @@ use quick_xml::Writer;
 use quick_xml::events::BytesText;
 use typst::foundations::Content;
 use typst_library::foundations::{SequenceElem, SymbolElem};
-use typst_library::math::{AttachElem, EquationElem, FracElem, LrElem, RootElem};
+use typst_library::math::{
+    AccentElem, AlignPointElem, AttachElem, CasesElem, EquationElem, FracElem, LrElem, MatElem,
+    OpElem, OverbraceElem, OverbracketElem, OverlineElem, OverparenElem, OvershellElem, RootElem,
+    UnderbraceElem, UnderbracketElem, UnderlineElem, UnderparenElem, UndershellElem, VecElem,
+};
 use typst_library::text::{SpaceElem, TextElem};
 
 /// Convert a Typst `EquationElem` Content into an OMML XML string.
@@ -66,6 +70,47 @@ fn convert_content<W: Write>(writer: &mut Writer<W>, content: &Content) -> std::
         convert_lr(writer, lr)?;
     } else if let Some(root) = content.to_packed::<RootElem>() {
         convert_root(writer, root)?;
+    } else if let Some(mat) = content.to_packed::<MatElem>() {
+        convert_mat(writer, mat)?;
+    } else if let Some(vec_elem) = content.to_packed::<VecElem>() {
+        convert_vec(writer, vec_elem)?;
+    } else if let Some(accent) = content.to_packed::<AccentElem>() {
+        convert_accent(writer, accent)?;
+    } else if let Some(overline) = content.to_packed::<OverlineElem>() {
+        convert_bar(writer, &overline.body, "top")?;
+    } else if let Some(underline) = content.to_packed::<UnderlineElem>() {
+        convert_bar(writer, &underline.body, "bot")?;
+    } else if let Some(op) = content.to_packed::<OpElem>() {
+        convert_op(writer, op)?;
+    } else if let Some(cases) = content.to_packed::<CasesElem>() {
+        convert_cases(writer, cases)?;
+    } else if let Some(ob) = content.to_packed::<OverbraceElem>() {
+        let ann = ob.annotation.as_option().as_ref().and_then(|v| v.as_ref());
+        convert_groupchr(writer, &ob.body, ann, "\u{23DE}", "top")?;
+    } else if let Some(ub) = content.to_packed::<UnderbraceElem>() {
+        let ann = ub.annotation.as_option().as_ref().and_then(|v| v.as_ref());
+        convert_groupchr(writer, &ub.body, ann, "\u{23DF}", "bot")?;
+    } else if let Some(ob) = content.to_packed::<OverbracketElem>() {
+        let ann = ob.annotation.as_option().as_ref().and_then(|v| v.as_ref());
+        convert_groupchr(writer, &ob.body, ann, "\u{23B4}", "top")?;
+    } else if let Some(ub) = content.to_packed::<UnderbracketElem>() {
+        let ann = ub.annotation.as_option().as_ref().and_then(|v| v.as_ref());
+        convert_groupchr(writer, &ub.body, ann, "\u{23B5}", "bot")?;
+    } else if let Some(op) = content.to_packed::<OverparenElem>() {
+        let ann = op.annotation.as_option().as_ref().and_then(|v| v.as_ref());
+        convert_groupchr(writer, &op.body, ann, "\u{23DC}", "top")?;
+    } else if let Some(up) = content.to_packed::<UnderparenElem>() {
+        let ann = up.annotation.as_option().as_ref().and_then(|v| v.as_ref());
+        convert_groupchr(writer, &up.body, ann, "\u{23DD}", "bot")?;
+    } else if let Some(os) = content.to_packed::<OvershellElem>() {
+        let ann = os.annotation.as_option().as_ref().and_then(|v| v.as_ref());
+        convert_groupchr(writer, &os.body, ann, "\u{23E0}", "top")?;
+    } else if let Some(us) = content.to_packed::<UndershellElem>() {
+        let ann = us.annotation.as_option().as_ref().and_then(|v| v.as_ref());
+        convert_groupchr(writer, &us.body, ann, "\u{23E1}", "bot")?;
+    } else if content.to_packed::<AlignPointElem>().is_some() {
+        // Alignment points inside equation arrays are handled by the parent;
+        // standalone occurrences are skipped (no OMML equivalent).
     } else if let Some(sym) = content.to_packed::<SymbolElem>() {
         write_math_run(writer, &sym.text)?;
     } else if let Some(text) = content.to_packed::<TextElem>() {
@@ -324,6 +369,352 @@ fn convert_root<W: Write>(writer: &mut Writer<W>, root: &RootElem) -> std::io::R
         })?;
         Ok(())
     })?;
+    Ok(())
+}
+
+/// Convert a `MatElem` (matrix) to `m:m` with `m:mr` rows and `m:e` cells.
+/// The matrix is wrapped in `m:d` delimiters matching the Typst delimiter pair.
+fn convert_mat<W: Write>(writer: &mut Writer<W>, mat: &MatElem) -> std::io::Result<()> {
+    // MatElem default delimiter is PAREN: ( )
+    let (open, close) = if let Some(delim) = mat.delim.as_option().as_ref() {
+        (
+            delim.open().map_or_else(String::new, |c| c.to_string()),
+            delim.close().map_or_else(String::new, |c| c.to_string()),
+        )
+    } else {
+        ("(".to_string(), ")".to_string())
+    };
+
+    writer.create_element("m:d").write_inner_content(|w| {
+        w.create_element("m:dPr").write_inner_content(|pr| {
+            pr.create_element("m:begChr")
+                .with_attribute(("m:val", open.as_str()))
+                .write_empty()?;
+            pr.create_element("m:endChr")
+                .with_attribute(("m:val", close.as_str()))
+                .write_empty()?;
+            Ok(())
+        })?;
+        w.create_element("m:e").write_inner_content(|e| {
+            e.create_element("m:m").write_inner_content(|m| {
+                for row in &mat.rows {
+                    m.create_element("m:mr").write_inner_content(|mr| {
+                        for cell in row {
+                            mr.create_element("m:e").write_inner_content(|ce| {
+                                convert_content(ce, cell)?;
+                                Ok(())
+                            })?;
+                        }
+                        Ok(())
+                    })?;
+                }
+                Ok(())
+            })?;
+            Ok(())
+        })?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
+/// Convert a `VecElem` (column vector) to `m:d` wrapping `m:m` with one column.
+fn convert_vec<W: Write>(writer: &mut Writer<W>, vec_elem: &VecElem) -> std::io::Result<()> {
+    // VecElem default delimiter is PAREN: ( )
+    let (open, close) = if let Some(delim) = vec_elem.delim.as_option().as_ref() {
+        (
+            delim.open().map_or_else(String::new, |c| c.to_string()),
+            delim.close().map_or_else(String::new, |c| c.to_string()),
+        )
+    } else {
+        ("(".to_string(), ")".to_string())
+    };
+
+    writer.create_element("m:d").write_inner_content(|w| {
+        w.create_element("m:dPr").write_inner_content(|pr| {
+            pr.create_element("m:begChr")
+                .with_attribute(("m:val", open.as_str()))
+                .write_empty()?;
+            pr.create_element("m:endChr")
+                .with_attribute(("m:val", close.as_str()))
+                .write_empty()?;
+            Ok(())
+        })?;
+        w.create_element("m:e").write_inner_content(|e| {
+            e.create_element("m:m").write_inner_content(|m| {
+                for child in &vec_elem.children {
+                    m.create_element("m:mr").write_inner_content(|mr| {
+                        mr.create_element("m:e").write_inner_content(|ce| {
+                            convert_content(ce, child)?;
+                            Ok(())
+                        })?;
+                        Ok(())
+                    })?;
+                }
+                Ok(())
+            })?;
+            Ok(())
+        })?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
+/// Convert an `AccentElem` to `m:acc` with the appropriate combining character.
+fn convert_accent<W: Write>(writer: &mut Writer<W>, accent: &AccentElem) -> std::io::Result<()> {
+    // Map the Typst Accent to the OMML combining character.
+    // OMML expects the combining Unicode character for the accent.
+    let chr = accent_to_omml_char(accent.accent.0);
+
+    writer.create_element("m:acc").write_inner_content(|w| {
+        w.create_element("m:accPr").write_inner_content(|pr| {
+            pr.create_element("m:chr")
+                .with_attribute(("m:val", chr))
+                .write_empty()?;
+            Ok(())
+        })?;
+        w.create_element("m:e").write_inner_content(|e| {
+            convert_content(e, &accent.base)?;
+            Ok(())
+        })?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
+/// Map a Typst accent character to the OMML accent character string.
+///
+/// Typst normalizes accents to their combining Unicode form. OMML also
+/// expects combining characters, so in most cases the character is used
+/// directly. We handle the common cases explicitly to ensure correctness.
+fn accent_to_omml_char(c: char) -> &'static str {
+    match c {
+        '\u{0303}' => "\u{0303}", // tilde
+        '\u{20D7}' => "\u{20D7}", // combining right arrow above (vec)
+        '\u{0307}' => "\u{0307}", // dot above
+        '\u{0308}' => "\u{0308}", // diaeresis / double dot
+        '\u{0300}' => "\u{0300}", // grave
+        '\u{0301}' => "\u{0301}", // acute
+        '\u{0304}' => "\u{0304}", // macron
+        '\u{0305}' => "\u{0305}", // overline / dash
+        '\u{0306}' => "\u{0306}", // breve
+        '\u{030A}' => "\u{030A}", // ring above
+        '\u{030C}' => "\u{030C}", // caron / háček
+        '\u{20DB}' => "\u{20DB}", // triple dot
+        '\u{20DC}' => "\u{20DC}", // quad dot
+        '\u{030B}' => "\u{030B}", // double acute
+        '\u{20D6}' => "\u{20D6}", // left arrow
+        '\u{20E1}' => "\u{20E1}", // left-right arrow
+        '\u{20D0}' => "\u{20D0}", // left harpoon
+        '\u{20D1}' => "\u{20D1}", // right harpoon
+        // Default: use combining circumflex (U+0302) as fallback — also covers hat
+        _ => "\u{0302}",
+    }
+}
+
+/// Convert `OverlineElem`/`UnderlineElem` to `m:bar` with position top/bot.
+fn convert_bar<W: Write>(
+    writer: &mut Writer<W>,
+    body: &Content,
+    pos: &str,
+) -> std::io::Result<()> {
+    writer.create_element("m:bar").write_inner_content(|w| {
+        w.create_element("m:barPr").write_inner_content(|pr| {
+            pr.create_element("m:pos")
+                .with_attribute(("m:val", pos))
+                .write_empty()?;
+            Ok(())
+        })?;
+        w.create_element("m:e").write_inner_content(|e| {
+            convert_content(e, body)?;
+            Ok(())
+        })?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
+/// Convert an `OpElem` (named math operator like sin, cos, lim) to `m:func`.
+///
+/// The function name is rendered in plain (upright) style via `m:sty m:val="p"`.
+fn convert_op<W: Write>(writer: &mut Writer<W>, op: &OpElem) -> std::io::Result<()> {
+    // Extract the operator text from the OpElem's text field.
+    // OpElem.text is a Content that wraps a TextElem with the operator name.
+    let op_text = extract_text_content(&op.text);
+
+    writer.create_element("m:func").write_inner_content(|w| {
+        w.create_element("m:fName").write_inner_content(|fname| {
+            fname.create_element("m:r").write_inner_content(|r| {
+                r.create_element("m:rPr").write_inner_content(|rpr| {
+                    rpr.create_element("m:sty")
+                        .with_attribute(("m:val", "p"))
+                        .write_empty()?;
+                    Ok(())
+                })?;
+                r.create_element("m:t")
+                    .write_text_content(BytesText::new(&op_text))?;
+                Ok(())
+            })?;
+            Ok(())
+        })?;
+        // OpElem in Typst is standalone — the argument is external in the
+        // Content tree (attached via AttachElem or adjacent). Emit empty body.
+        w.create_element("m:e").write_inner_content(|_| Ok(()))?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
+/// Recursively extract plain text from a Content tree.
+fn extract_text_content(content: &Content) -> String {
+    if let Some(text) = content.to_packed::<TextElem>() {
+        return text.text.to_string();
+    }
+    if let Some(sym) = content.to_packed::<SymbolElem>() {
+        return sym.text.to_string();
+    }
+    if let Some(seq) = content.to_packed::<SequenceElem>() {
+        let mut result = String::new();
+        for child in &seq.children {
+            result.push_str(&extract_text_content(child));
+        }
+        return result;
+    }
+    String::new()
+}
+
+/// Convert a `CasesElem` to `m:d` (left brace) wrapping `m:eqArr`.
+fn convert_cases<W: Write>(writer: &mut Writer<W>, cases: &CasesElem) -> std::io::Result<()> {
+    let is_reverse = *cases.reverse.as_option().as_ref().unwrap_or(&false);
+
+    // CasesElem default delimiter is BRACE: { }
+    let (delim_open, delim_close) = if let Some(delim) = cases.delim.as_option().as_ref() {
+        (
+            delim.open().map_or_else(String::new, |c| c.to_string()),
+            delim.close().map_or_else(String::new, |c| c.to_string()),
+        )
+    } else {
+        ("{".to_string(), "}".to_string())
+    };
+
+    let (open_str, close_str) = if is_reverse {
+        (delim_close, delim_open)
+    } else {
+        (delim_open, delim_close)
+    };
+
+    // For standard (non-reverse) cases, suppress the closing delimiter
+    let effective_close = if is_reverse {
+        close_str.as_str()
+    } else {
+        ""
+    };
+    let effective_open = if is_reverse {
+        ""
+    } else {
+        open_str.as_str()
+    };
+
+    writer.create_element("m:d").write_inner_content(|w| {
+        w.create_element("m:dPr").write_inner_content(|pr| {
+            pr.create_element("m:begChr")
+                .with_attribute(("m:val", effective_open))
+                .write_empty()?;
+            pr.create_element("m:endChr")
+                .with_attribute(("m:val", effective_close))
+                .write_empty()?;
+            Ok(())
+        })?;
+        w.create_element("m:e").write_inner_content(|e| {
+            e.create_element("m:eqArr").write_inner_content(|arr| {
+                for child in &cases.children {
+                    arr.create_element("m:e").write_inner_content(|ce| {
+                        convert_content(ce, child)?;
+                        Ok(())
+                    })?;
+                }
+                Ok(())
+            })?;
+            Ok(())
+        })?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
+/// Convert overbrace/underbrace/overbracket/underbracket/overparen/underparen/
+/// overshell/undershell to `m:groupChr`.
+///
+/// If there is an annotation, we wrap it with the group character using
+/// `m:limLow` (for "bot" position) or `m:limUpp` (for "top" position) to
+/// place the annotation below/above the group character structure.
+fn convert_groupchr<W: Write>(
+    writer: &mut Writer<W>,
+    body: &Content,
+    annotation: Option<&Content>,
+    chr: &str,
+    pos: &str,
+) -> std::io::Result<()> {
+    // The groupChr element itself
+    let write_group = |w: &mut Writer<W>| -> std::io::Result<()> {
+        w.create_element("m:groupChr")
+            .write_inner_content(|gc| {
+                gc.create_element("m:groupChrPr")
+                    .write_inner_content(|pr| {
+                        pr.create_element("m:chr")
+                            .with_attribute(("m:val", chr))
+                            .write_empty()?;
+                        pr.create_element("m:pos")
+                            .with_attribute(("m:val", pos))
+                            .write_empty()?;
+                        // vertJc controls where the character sits relative to the base
+                        pr.create_element("m:vertJc")
+                            .with_attribute(("m:val", pos))
+                            .write_empty()?;
+                        Ok(())
+                    })?;
+                gc.create_element("m:e").write_inner_content(|e| {
+                    convert_content(e, body)?;
+                    Ok(())
+                })?;
+                Ok(())
+            })?;
+        Ok(())
+    };
+
+    if let Some(ann) = annotation {
+        // Wrap in m:limLow (bottom annotation) or m:limUpp (top annotation)
+        if pos == "bot" {
+            writer
+                .create_element("m:limLow")
+                .write_inner_content(|w| {
+                    w.create_element("m:e").write_inner_content(|e| {
+                        write_group(e)?;
+                        Ok(())
+                    })?;
+                    w.create_element("m:lim").write_inner_content(|lim| {
+                        convert_content(lim, ann)?;
+                        Ok(())
+                    })?;
+                    Ok(())
+                })?;
+        } else {
+            writer
+                .create_element("m:limUpp")
+                .write_inner_content(|w| {
+                    w.create_element("m:e").write_inner_content(|e| {
+                        write_group(e)?;
+                        Ok(())
+                    })?;
+                    w.create_element("m:lim").write_inner_content(|lim| {
+                        convert_content(lim, ann)?;
+                        Ok(())
+                    })?;
+                    Ok(())
+                })?;
+        }
+    } else {
+        write_group(writer)?;
+    }
     Ok(())
 }
 
