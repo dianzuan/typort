@@ -5,7 +5,7 @@
 
 use typort_ooxml::document::Run;
 use typst::foundations::Content;
-use typst_library::foundations::SequenceElem;
+use typst_library::foundations::{SequenceElem, SymbolElem};
 use typst_library::model::{EmphElem, StrongElem};
 use typst_library::text::{SpaceElem, TextElem};
 
@@ -43,6 +43,11 @@ fn walk_content(content: &Content, ctx: &InlineCtx, runs: &mut Vec<Run>) {
         walk_content(&emph.body, &inner, runs);
     } else if let Some(text) = content.to_packed::<TextElem>() {
         let mut run = Run::new(text.text.as_str());
+        run.bold = ctx.bold;
+        run.italic = ctx.italic;
+        runs.push(run);
+    } else if let Some(sym) = content.to_packed::<SymbolElem>() {
+        let mut run = Run::new(sym.text.as_str());
         run.bold = ctx.bold;
         run.italic = ctx.italic;
         runs.push(run);

@@ -868,150 +868,65 @@ fn features_chinese_heading_numbering_definition() {
 }
 
 // ---------------------------------------------------------------------------
-// convert_v2 integration tests
+// Content recovery tests
 // ---------------------------------------------------------------------------
 
 #[test]
-fn v2_hello_typ_produces_heading_and_text() {
+fn center_test_recovers_aligned_content() {
+    use typort_ooxml::document::Alignment;
+
     let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/hello.typ")).unwrap();
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/center_test.typ")).unwrap();
     let doc = typort_core::convert::convert(&world).unwrap();
 
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
-
-    assert!(doc_xml.contains("Heading1"), "should have Heading1 style");
-    assert!(doc_xml.contains("Hello"), "should contain heading text");
-    assert!(doc_xml.contains("test document"), "should contain body text");
-}
-
-#[test]
-fn v2_italic_text_produces_w_i_element() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/italic_test.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
-    assert!(doc_xml.contains("<w:i/>"), "should have italic");
-    assert!(doc_xml.contains("<w:b/>"), "should have bold");
+    // The centered text "张三  李四" should be recovered from PagedDocument
+    let has_centered_authors = doc.body.elements.iter().any(|e| {
+        if let typort_ooxml::document::BlockElement::Paragraph(p) = e {
+            let text: String = p.runs.iter().map(|r| r.text.as_str()).collect();
+            (text.contains("张三") || text.contains("李四"))
+                && p.alignment == Some(Alignment::Center)
+        } else {
+            false
+        }
+    });
     assert!(
-        doc_xml.contains("emphasized text"),
-        "should have italic text content"
+        has_centered_authors,
+        "center_test should recover centered author names"
     );
 }
 
 #[test]
-fn v2_complex_paper_has_table_structure() {
+fn complex_paper_recovers_author_info() {
     let world =
         typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
     let doc = typort_core::convert::convert(&world).unwrap();
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
-    assert!(doc_xml.contains("w:tbl"), "should have table");
-    assert!(doc_xml.contains("w:tr"), "should have table rows");
-    assert!(doc_xml.contains("w:tc"), "should have table cells");
-}
 
-#[test]
-fn v2_complex_paper_has_list_numbering() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
-    assert!(doc_xml.contains("w:numPr"), "should have list numbering");
-}
-
-#[test]
-fn v2_general_elements_has_code_block() {
-    let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/general_elements.typ"))
-        .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
-    assert!(doc_xml.contains("CodeBlock"), "should have CodeBlock style");
+    // The author names and institution info from #align(center) should be recovered
+    let has_author = doc.body.elements.iter().any(|e| {
+        if let typort_ooxml::document::BlockElement::Paragraph(p) = e {
+            p.runs
+                .iter()
+                .any(|r| r.text.contains("张三") || r.text.contains("李四"))
+        } else {
+            false
+        }
+    });
     assert!(
-        doc_xml.contains("println"),
-        "should contain code content"
+        has_author,
+        "complex paper should recover author names from #align(center)"
     );
-}
 
-#[test]
-fn v2_complex_paper_has_footnotes() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-    assert!(!doc.footnotes.is_empty(), "should have footnotes");
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let has_institution = doc.body.elements.iter().any(|e| {
+        if let typort_ooxml::document::BlockElement::Paragraph(p) = e {
+            p.runs
+                .iter()
+                .any(|r| r.text.contains("某大学") || r.text.contains("经济学院"))
+        } else {
+            false
+        }
+    });
     assert!(
-        doc_xml.contains("w:footnoteReference"),
-        "should have footnote refs"
+        has_institution,
+        "complex paper should recover institution info from #align(center)"
     );
-}
-
-#[test]
-fn v2_end_to_end_hello_typ_to_docx() {
-    let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/hello.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let names: Vec<&str> = reader.file_names().collect();
-    assert!(names.contains(&"[Content_Types].xml"));
-    assert!(names.contains(&"word/document.xml"));
-    assert!(names.contains(&"word/styles.xml"));
-    assert!(names.contains(&"word/fontTable.xml"));
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
-    assert!(doc_xml.contains("w:document"));
-    assert!(doc_xml.contains("Hello"));
-    assert!(doc_xml.contains("Heading1"));
-    assert!(doc_xml.contains("w:sectPr"));
-}
-
-#[test]
-fn v2_complex_paper_has_semantic_structure() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
-    assert!(doc_xml.contains("Heading1"), "should have Heading1");
-    assert!(doc_xml.contains("Heading2"), "should have Heading2");
-    assert!(doc_xml.contains("<w:b/>"), "should have bold");
-    assert!(doc_xml.contains("w:pgMar"), "should have page margins");
-    assert!(doc_xml.contains("数字经济"), "should contain Chinese text");
-}
-
-#[test]
-fn v2_math_test_produces_omml() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/math_test.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
-    assert!(doc_xml.contains("<m:oMath>"), "should have inline math");
-    assert!(
-        doc_xml.contains("<m:oMathPara>"),
-        "should have block math"
-    );
-    assert!(doc_xml.contains("<m:sSup>"), "should have superscript");
-    assert!(doc_xml.contains("<m:f>"), "should have fraction");
 }

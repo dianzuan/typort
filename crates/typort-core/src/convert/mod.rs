@@ -8,12 +8,15 @@
 pub mod inline;
 pub mod page;
 
+use std::collections::{BTreeMap, HashMap};
+
 use typort_ooxml::document::{
-    BlockElement, Document, Paragraph, ParagraphStyle, Run, Table, TableCell, TableRow, VMerge,
+    Alignment, BlockElement, Document, FootnoteFormat, Paragraph, ParagraphStyle,
+    Run, Table, TableCell, TableRow, VMerge,
 };
 use typst::foundations::StyleChain;
 use typst::introspection::Tag;
-use typst::layout::PagedDocument;
+use typst::layout::{Frame, FrameItem, PagedDocument, Point};
 use typst::model::Numbering;
 use typst_html::{HtmlDocument, HtmlElement, HtmlNode};
 use typst_library::math::EquationElem;
@@ -67,10 +70,18 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
     let mut eq_state = EquationState::default();
     walk_tags(&body.children, &html_doc, &mut doc, &mut eq_state);
 
-    // 6. Extract title from first heading
+    // 6. Detect footnote format (circled numbers)
+    detect_footnote_format(&body.children, &mut doc);
+
+    // 7. Recover missing content from PagedDocument (e.g. #align(center) blocks)
+    if let Some(paged) = &paged_doc {
+        recover_missing_content(paged, &mut doc);
+    }
+
+    // 8. Extract title from first heading
     extract_title_from_first_heading(&mut doc);
 
-    // 7. Post-processing: suppress indent after headings, bibliography hanging indent
+    // 9. Post-processing: suppress indent after headings, bibliography hanging indent
     apply_paragraph_formatting(&mut doc);
 
     Ok(doc)
@@ -99,6 +110,9 @@ fn walk_tags(children: &[HtmlNode], html_doc: &HtmlDocument, doc: &mut Document,
                                     eq_state.eq_in_chapter = 0;
                                 }
                             }
+                            // Skip past the heading's inner HTML elements to the matching End tag
+                            let end = find_tag_end(children, i, tag.location());
+                            i = end;
                         }
                         "par" => {
                             let end = find_tag_end(children, i, tag.location());
@@ -194,8 +208,17 @@ fn handle_html_element(
             walk_tags(&elem.children, html_doc, doc, eq_state);
         }
         _ => {
-            // Recurse into other HTML elements
+            // Check for alignment on this element and apply to child paragraphs
+            let alignment = detect_alignment(elem);
+            let start_idx = doc.body.elements.len();
             walk_tags(&elem.children, html_doc, doc, eq_state);
+            if let Some(align) = alignment {
+                for element in &mut doc.body.elements[start_idx..] {
+                    if let BlockElement::Paragraph(para) = element {
+                        para.alignment = Some(align.clone());
+                    }
+                }
+            }
         }
     }
 }
@@ -399,8 +422,21 @@ fn handle_inline_html_element(
         "a" if has_attr_value(elem, "role", "doc-noteref") => {
             // Already handled by Tag::Start("footnote")
         }
-        "sup" | "sub" => {
-            // Skip, consumed by footnote
+        "sup" => {
+            let mut tmp = Paragraph::new();
+            collect_html_inlines(&elem.children, &mut tmp, false, false, false);
+            for mut run in tmp.runs {
+                run.superscript = true;
+                para.push_run(run);
+            }
+        }
+        "sub" => {
+            let mut tmp = Paragraph::new();
+            collect_html_inlines(&elem.children, &mut tmp, false, false, false);
+            for mut run in tmp.runs {
+                run.subscript = true;
+                para.push_run(run);
+            }
         }
         _ => {
             collect_par_inlines(&elem.children, html_doc, doc, para, eq_state);
@@ -1032,5 +1068,303 @@ fn collect_footnote_text(children: &[HtmlNode], runs: &mut Vec<Run>) {
             }
             HtmlNode::Tag(_) | HtmlNode::Frame(_) => {}
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Alignment detection (I5)
+// ---------------------------------------------------------------------------
+
+/// Detect paragraph alignment from an HTML element's `style` attribute.
+fn detect_alignment(elem: &HtmlElement) -> Option<Alignment> {
+    let style_val = get_attr_value(elem, "style")?;
+    if style_val.contains("text-align: center") || style_val.contains("text-align:center") {
+        Some(Alignment::Center)
+    } else if style_val.contains("text-align: right") || style_val.contains("text-align:right") {
+        Some(Alignment::Right)
+    } else {
+        None
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Footnote format detection (I3)
+// ---------------------------------------------------------------------------
+
+/// Detect whether footnotes use circled number format (①②③) by scanning the
+/// HTML DOM for `<a role="doc-noteref">` containing `<sup>` with circled numbers.
+fn detect_footnote_format(children: &[HtmlNode], doc: &mut Document) {
+    for child in children {
+        if let HtmlNode::Element(elem) = child {
+            if has_attr_value(elem, "role", "doc-noteref")
+                && let Some(text) = get_text_content(&elem.children)
+                && parse_circled_number(text.trim()).is_some()
+            {
+                doc.style.footnote_format = FootnoteFormat::CircledNumber;
+                return;
+            }
+            for inner in &elem.children {
+                if let HtmlNode::Element(sup) = inner
+                    && tag_name(sup) == "sup"
+                    && let Some(text) = get_text_content(&sup.children)
+                    && parse_circled_number(text.trim()).is_some()
+                {
+                    doc.style.footnote_format = FootnoteFormat::CircledNumber;
+                    return;
+                }
+            }
+            detect_footnote_format(&elem.children, doc);
+            if doc.style.footnote_format == FootnoteFormat::CircledNumber {
+                return;
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Content recovery from PagedDocument (I2)
+// ---------------------------------------------------------------------------
+
+/// A text line extracted from a `PagedDocument` frame, preserving run-level info.
+#[derive(Debug, Clone)]
+struct FrameLine {
+    text: String,
+    runs: Vec<Run>,
+}
+
+/// A text fragment from a rendered frame with position and size info.
+struct FrameTextItem {
+    y: f64,
+    x: f64,
+    text: String,
+    size_pt: f64,
+}
+
+/// Recover content that exists in the `PagedDocument` but was lost from the `HtmlDocument` DOM.
+///
+/// This handles the case where `#align(center)[...]` content completely vanishes from the
+/// HTML semantic output (no show rule exists for `AlignElem` in Typst's HTML target). We detect
+/// the missing text by comparing the paged output with our converted document, then insert
+/// the missing lines as centered paragraphs at the appropriate position.
+fn recover_missing_content(paged: &PagedDocument, doc: &mut Document) {
+    // Only look at the FIRST PAGE for title-area recovery (author/institution info).
+    let first_page_lines = extract_lines_from_first_page(paged);
+    if first_page_lines.is_empty() {
+        return;
+    }
+
+    let title_line_count = count_title_lines(&first_page_lines, doc);
+    let body_start_line = find_body_start_line(&first_page_lines, doc);
+    let full_doc_text = extract_doc_text(doc);
+
+    let mut missing = Vec::new();
+    for (i, line) in first_page_lines.iter().enumerate() {
+        if i < title_line_count || i >= body_start_line {
+            continue;
+        }
+        if line.text.chars().count() < 2 {
+            continue;
+        }
+        if !full_doc_text.contains(&line.text) {
+            missing.push(line.clone());
+        }
+    }
+
+    if !missing.is_empty() {
+        insert_missing_at_position(doc, &missing);
+    }
+}
+
+/// Extract text lines from the first page of a `PagedDocument`.
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+fn extract_lines_from_first_page(paged: &PagedDocument) -> Vec<FrameLine> {
+    let mut all_lines = Vec::new();
+
+    let body_size = paged.pages.first().map_or(10.5, |p| {
+        let mut items = Vec::new();
+        collect_text_items_with_pos(&p.frame, Point::zero(), &mut items);
+        let mut sizes: HashMap<i32, usize> = HashMap::new();
+        for item in &items {
+            *sizes.entry((item.size_pt * 10.0) as i32).or_default() += item.text.len();
+        }
+        sizes
+            .into_iter()
+            .max_by_key(|(_, c)| *c)
+            .map_or(10.5, |(s, _)| f64::from(s) / 10.0)
+    });
+
+    for page in paged.pages.iter().take(1) {
+        let mut text_items = Vec::new();
+        collect_text_items_with_pos(&page.frame, Point::zero(), &mut text_items);
+
+        let mut y_groups: BTreeMap<i64, Vec<&FrameTextItem>> = BTreeMap::new();
+        for item in &text_items {
+            // Use 8pt tolerance so superscript text (offset ~3-5pt up) stays grouped
+            // with its base text on the same line
+            let y_key = (item.y / 8.0).round() as i64;
+            y_groups.entry(y_key).or_default().push(item);
+        }
+
+        for (_, mut items) in y_groups {
+            items.sort_by(|a, b| a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal));
+            let mut runs = Vec::new();
+            let mut full_text = String::new();
+            for item in &items {
+                let is_super = item.size_pt < body_size * 0.8;
+                let mut run = Run::new(&item.text);
+                run.superscript = is_super;
+                runs.push(run);
+                full_text.push_str(&item.text);
+            }
+            let trimmed = full_text.trim().to_string();
+            if !trimmed.is_empty() {
+                all_lines.push(FrameLine {
+                    text: trimmed,
+                    runs,
+                });
+            }
+        }
+    }
+    all_lines
+}
+
+/// Recursively collect text items from a frame with their absolute positions.
+fn collect_text_items_with_pos(frame: &Frame, offset: Point, items: &mut Vec<FrameTextItem>) {
+    for (pos, item) in frame.items() {
+        let abs_x = offset.x + pos.x;
+        let abs_y = offset.y + pos.y;
+        match item {
+            FrameItem::Text(text_item) => {
+                let text = text_item.text.to_string();
+                if !text.is_empty() {
+                    items.push(FrameTextItem {
+                        y: abs_y.to_pt(),
+                        x: abs_x.to_pt(),
+                        text,
+                        size_pt: text_item.size.to_pt(),
+                    });
+                }
+            }
+            FrameItem::Group(group) => {
+                let new_offset = Point::new(abs_x, abs_y);
+                collect_text_items_with_pos(&group.frame, new_offset, items);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Count how many leading lines on page 1 correspond to headings in our document.
+fn count_title_lines(paged_lines: &[FrameLine], doc: &Document) -> usize {
+    let mut count = 0;
+    for line in paged_lines {
+        let is_heading = doc.body.elements.iter().any(|e| {
+            if let BlockElement::Paragraph(p) = e
+                && matches!(p.style, Some(ParagraphStyle::Heading(_)))
+            {
+                p.runs.iter().any(|r| line.text.contains(&r.text))
+            } else {
+                false
+            }
+        });
+        if is_heading {
+            count += 1;
+        } else {
+            break;
+        }
+    }
+    count
+}
+
+/// Find which paged-line index corresponds to the start of body text.
+fn find_body_start_line(paged_lines: &[FrameLine], doc: &Document) -> usize {
+    let first_body_text = doc.body.elements.iter().find_map(|e| {
+        if let BlockElement::Paragraph(p) = e
+            && !matches!(p.style, Some(ParagraphStyle::Heading(_)))
+        {
+            p.runs.first().map(|r| r.text.clone())
+        } else {
+            None
+        }
+    });
+
+    if let Some(body_text) = first_body_text {
+        let search_prefix: String = body_text.chars().take(10).collect();
+        for (i, line) in paged_lines.iter().enumerate() {
+            if line.text.contains(&search_prefix) {
+                return i;
+            }
+        }
+    }
+    paged_lines.len()
+}
+
+/// Extract all text from the Document model as a single normalized string.
+fn extract_doc_text(doc: &Document) -> String {
+    let mut text = String::new();
+    for elem in &doc.body.elements {
+        match elem {
+            BlockElement::Paragraph(p) => {
+                for run in &p.runs {
+                    text.push_str(&run.text);
+                }
+            }
+            BlockElement::Table(t) => {
+                for row in &t.rows {
+                    for cell in &row.cells {
+                        for para in &cell.paragraphs {
+                            for run in &para.runs {
+                                text.push_str(&run.text);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    text
+}
+
+/// Find where the title headings end in the document (first non-heading element).
+fn find_title_section_end(doc: &Document) -> usize {
+    for (i, elem) in doc.body.elements.iter().enumerate() {
+        if let BlockElement::Paragraph(p) = elem {
+            if !matches!(p.style, Some(ParagraphStyle::Heading(_))) {
+                return i;
+            }
+        } else {
+            return i;
+        }
+    }
+    doc.body.elements.len()
+}
+
+/// Insert missing lines as centered paragraphs at the correct position in the document.
+///
+/// The insertion point is after the last consecutive heading at the start of the document,
+/// before the first non-heading paragraph. This matches the typical academic paper structure:
+/// - Title heading
+/// - Subtitle heading (optional)
+/// - [INSERT HERE: author/institution info]
+/// - Abstract paragraph
+/// - Body content
+fn insert_missing_at_position(doc: &mut Document, missing_lines: &[FrameLine]) {
+    let insert_idx = find_title_section_end(doc);
+
+    let mut paragraphs: Vec<BlockElement> = Vec::new();
+    for line in missing_lines {
+        let mut para = Paragraph::new();
+        para.alignment = Some(Alignment::Center);
+        para.suppress_indent = true;
+        for run in &line.runs {
+            para.push_run(run.clone());
+        }
+        paragraphs.push(BlockElement::Paragraph(para));
+    }
+
+    if !paragraphs.is_empty() {
+        let tail = doc.body.elements.split_off(insert_idx);
+        doc.body.elements.extend(paragraphs);
+        doc.body.elements.extend(tail);
     }
 }
