@@ -162,9 +162,6 @@ fn write_style_heading<W: Write>(
             s.create_element("w:pPr").write_inner_content(|ppr| {
                 ppr.create_element("w:keepNext").write_empty()?;
                 ppr.create_element("w:widowControl").write_empty()?;
-                if level == 1 {
-                    ppr.create_element("w:pageBreakBefore").write_empty()?;
-                }
                 let outline_level = (level - 1).to_string();
                 ppr.create_element("w:outlineLvl")
                     .with_attribute(("w:val", outline_level.as_str()))

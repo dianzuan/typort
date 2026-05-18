@@ -183,8 +183,8 @@ fn walk_tags(
                                 continue;
                             }
                             // For figures, insert a bookmark if the content has a label
-                            if elem_name == "figure" {
-                                if let Some(label) = content.label() {
+                            if elem_name == "figure"
+                                && let Some(label) = content.label() {
                                     let label_str = format!("{}", label.resolve());
                                     if !bookmarks.contains(&label_str) {
                                         bookmarks.insert(label_str.clone());
@@ -194,7 +194,6 @@ fn walk_tags(
                                         doc.add_paragraph(bk_para);
                                     }
                                 }
-                            }
                             walk_tags(&children[i + 1..end], html_doc, doc, eq_state, image_queue, bookmarks);
                             i = end;
                         }
@@ -466,13 +465,11 @@ fn handle_inline_tag(
             if let Some(c) = html_doc
                 .introspector
                 .query_first(&typst::foundations::Selector::Location(loc))
-            {
-                if let Some(ref_elem) = c.to_packed::<RefElem>() {
+                && let Some(ref_elem) = c.to_packed::<RefElem>() {
                     let target_label = format!("{}", ref_elem.target.resolve());
                     let display = collect_text_from_nodes(&children[i + 1..end]);
                     para.add_field_ref(target_label, display);
                 }
-            }
             end
         }
         "link" => {
@@ -482,8 +479,7 @@ fn handle_inline_tag(
             if let Some(c) = html_doc
                 .introspector
                 .query_first(&typst::foundations::Selector::Location(loc))
-            {
-                if let Some(link_elem) = c.to_packed::<typst_library::model::LinkElem>() {
+                && let Some(link_elem) = c.to_packed::<typst_library::model::LinkElem>() {
                     let url = match &link_elem.dest {
                         typst_library::model::LinkTarget::Dest(
                             typst_library::model::Destination::Url(u),
@@ -497,7 +493,6 @@ fn handle_inline_tag(
                     let runs = vec![Run::new(&display_text)];
                     para.add_hyperlink(url, runs);
                 }
-            }
             end
         }
         "pagebreak" => {
@@ -961,7 +956,7 @@ fn compute_equation_number(
     }
 }
 
-/// Collect all text content from a slice of HtmlNode (used for cross-reference display text).
+/// Collect all text content from a slice of `HtmlNode` (used for cross-reference display text).
 fn collect_text_from_nodes(nodes: &[HtmlNode]) -> String {
     let mut text = String::new();
     for node in nodes {
@@ -1330,18 +1325,19 @@ fn convert_typst_image(
 
     match img.kind() {
         ImageKind::Raster(raster) => {
+            use typst_library::visualize::ExchangeFormat;
             let bytes = raster.data().to_vec();
             let format = match raster.format() {
-                typst_library::visualize::RasterFormat::Exchange(exchange) => {
-                    // Check if it's PNG by matching the exchange format
-                    let fmt_str = format!("{exchange:?}");
-                    if fmt_str.contains("Png") {
-                        ImageFormat::Png
-                    } else {
-                        ImageFormat::Jpeg
-                    }
+                typst_library::visualize::RasterFormat::Exchange(ExchangeFormat::Png) => {
+                    ImageFormat::Png
                 }
-                _ => ImageFormat::Png, // Default to PNG for other formats
+                typst_library::visualize::RasterFormat::Exchange(ExchangeFormat::Jpg) => {
+                    ImageFormat::Jpeg
+                }
+                typst_library::visualize::RasterFormat::Exchange(
+                    ExchangeFormat::Gif | ExchangeFormat::Webp,
+                )
+                | typst_library::visualize::RasterFormat::Pixel(_) => return None,
             };
             Some(ImageData {
                 bytes,
@@ -1350,11 +1346,7 @@ fn convert_typst_image(
                 height_emu,
             })
         }
-        ImageKind::Svg(_) => {
-            // SVG rasterization is not yet supported (P0 future work)
-            None
-        }
-        _ => None,
+        ImageKind::Svg(_) | ImageKind::Pdf(_) => None,
     }
 }
 
