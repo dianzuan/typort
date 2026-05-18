@@ -607,6 +607,144 @@ fn merged_cell_emits_grid_span_and_vmerge() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Math unit integration tests – compile math_unit.typ and assert OMML output
+// ---------------------------------------------------------------------------
+
+fn math_unit_doc_xml() -> String {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/math_unit.typ")).unwrap();
+    let doc = typort_core::convert_html(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap()
+}
+
+#[test]
+fn math_fraction_produces_m_f() {
+    let doc_xml = math_unit_doc_xml();
+    assert!(
+        doc_xml.contains("<m:f>"),
+        "document.xml should contain <m:f> for fraction"
+    );
+    assert!(
+        doc_xml.contains("<m:num>"),
+        "document.xml should contain <m:num> for fraction numerator"
+    );
+    assert!(
+        doc_xml.contains("<m:den>"),
+        "document.xml should contain <m:den> for fraction denominator"
+    );
+}
+
+#[test]
+fn math_square_root_produces_m_rad() {
+    let doc_xml = math_unit_doc_xml();
+    assert!(
+        doc_xml.contains("<m:rad>"),
+        "document.xml should contain <m:rad> for square root"
+    );
+    assert!(
+        doc_xml.contains("<m:degHide m:val=\"1\"/>"),
+        "square root should hide degree with <m:degHide m:val=\"1\"/>"
+    );
+}
+
+#[test]
+fn math_cube_root_has_degree() {
+    let doc_xml = math_unit_doc_xml();
+    // There should be a <m:rad> that contains <m:deg> with content (the index "3")
+    assert!(
+        doc_xml.contains("<m:deg>"),
+        "cube root should have <m:deg> element for the index"
+    );
+    // The cube root's degree should contain the text "3"
+    assert!(
+        doc_xml.contains("<m:t>3</m:t>"),
+        "cube root degree should contain the text '3'"
+    );
+}
+
+#[test]
+fn math_subscript_produces_m_ssub() {
+    let doc_xml = math_unit_doc_xml();
+    assert!(
+        doc_xml.contains("<m:sSub>"),
+        "document.xml should contain <m:sSub> for subscript"
+    );
+}
+
+#[test]
+fn math_superscript_produces_m_ssup() {
+    let doc_xml = math_unit_doc_xml();
+    assert!(
+        doc_xml.contains("<m:sSup>"),
+        "document.xml should contain <m:sSup> for superscript"
+    );
+}
+
+#[test]
+fn math_sub_and_sup_produces_m_ssubsup() {
+    let doc_xml = math_unit_doc_xml();
+    assert!(
+        doc_xml.contains("<m:sSubSup>"),
+        "document.xml should contain <m:sSubSup> for combined sub+superscript"
+    );
+}
+
+#[test]
+fn math_summation_produces_m_nary() {
+    let doc_xml = math_unit_doc_xml();
+    assert!(
+        doc_xml.contains("<m:nary>"),
+        "document.xml should contain <m:nary> for summation"
+    );
+    assert!(
+        doc_xml.contains("<m:chr m:val=\"\u{2211}\"/>"),
+        "summation should have <m:chr m:val=\"\\u{{2211}}\"/> (summation symbol)"
+    );
+}
+
+#[test]
+fn math_product_produces_m_nary() {
+    let doc_xml = math_unit_doc_xml();
+    assert!(
+        doc_xml.contains("<m:chr m:val=\"\u{220F}\"/>"),
+        "product should have <m:chr m:val=\"\\u{{220F}}\"/> (product symbol)"
+    );
+}
+
+#[test]
+fn math_nested_fraction() {
+    let doc_xml = math_unit_doc_xml();
+    // Count occurrences of <m:f> — should be at least 3: the simple frac, and 2 from nested
+    let count = doc_xml.matches("<m:f>").count();
+    assert!(
+        count >= 3,
+        "should have at least 3 <m:f> elements (1 simple + 2 nested), got {count}"
+    );
+}
+
+#[test]
+fn math_greek_letters() {
+    let doc_xml = math_unit_doc_xml();
+    assert!(
+        doc_xml.contains("<m:t>\u{03B1}</m:t>"),
+        "should contain Greek alpha (\u{03B1})"
+    );
+    assert!(
+        doc_xml.contains("<m:t>\u{03B2}</m:t>"),
+        "should contain Greek beta (\u{03B2})"
+    );
+    assert!(
+        doc_xml.contains("<m:t>\u{03B3}</m:t>"),
+        "should contain Greek gamma (\u{03B3})"
+    );
+}
+
 #[test]
 fn features_footnote_restart_and_font_hint() {
     let world =
@@ -727,4 +865,25 @@ fn features_chinese_heading_numbering_definition() {
         num_xml.contains("w:numId=\"3\""),
         "numbering.xml should have numId 3 instance for Chinese headings"
     );
+}
+
+// ---------------------------------------------------------------------------
+// convert_v2 integration tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn v2_hello_typ_produces_heading_and_text() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/hello.typ")).unwrap();
+    let doc = typort_core::convert_v2::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    assert!(doc_xml.contains("Heading1"), "should have Heading1 style");
+    assert!(doc_xml.contains("Hello"), "should contain heading text");
+    assert!(doc_xml.contains("test document"), "should contain body text");
 }
