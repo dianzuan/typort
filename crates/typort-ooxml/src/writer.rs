@@ -459,7 +459,7 @@ fn write_section_properties<W: Write>(
         // linePitch = body font size in twips × line spacing factor.
         // body_size_half_pt is in half-points; convert to twips: half_pt × 10.
         // line_spacing is in 240ths of a line (240 = 1.0×, 360 = 1.5×).
-        let font_twips = u32::from(style.body_size_half_pt) * 10;
+        let font_twips = style.body_size_half_pt * 10;
         let line_pitch = font_twips * style.line_spacing / 240;
         let line_pitch_str = line_pitch.to_string();
         w.create_element("w:docGrid")

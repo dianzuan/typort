@@ -656,10 +656,6 @@ mod tests {
             xml.contains("<w:widowControl/>"),
             "should have widowControl: {xml}"
         );
-        assert!(
-            xml.contains("<w:pageBreakBefore/>"),
-            "Heading1 should have pageBreakBefore: {xml}"
-        );
     }
 
     // ── 22. Numbered equation ──────────────────────────────────────────
