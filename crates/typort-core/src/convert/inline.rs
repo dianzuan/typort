@@ -139,9 +139,7 @@ mod sc_test {
 
     #[test]
     fn smallcaps_detected_in_extract_runs() {
-        let inner = Content::sequence(vec![
-            TextElem::packed("hello"),
-        ]);
+        let inner = Content::sequence(vec![TextElem::packed("hello")]);
         let sc = typst_library::text::SmallcapsElem::new(inner).pack();
         let runs = extract_runs(&sc);
         assert!(!runs.is_empty(), "should extract runs from SmallcapsElem");

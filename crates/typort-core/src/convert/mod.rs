@@ -96,7 +96,15 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
     //    based on the pre-computed page_breaks set from step 6).
     let mut eq_state = EquationState::default();
     let mut bookmarks: HashSet<String> = HashSet::new();
-    walk_tags(&body.children, &html_doc, &mut doc, &mut eq_state, &mut image_queue, &mut bookmarks, &page_breaks);
+    walk_tags(
+        &body.children,
+        &html_doc,
+        &mut doc,
+        &mut eq_state,
+        &mut image_queue,
+        &mut bookmarks,
+        &page_breaks,
+    );
 
     // 8. Detect footnote format (circled numbers)
     detect_footnote_format(&body.children, &mut doc);
@@ -191,7 +199,9 @@ fn walk_tags(
                             // Track chapter changes for equation numbering
                             if let Some(c) = html_doc
                                 .introspector
-                                .query_first(&typst::foundations::Selector::Location(tag.location()))
+                                .query_first(&typst::foundations::Selector::Location(
+                                    tag.location(),
+                                ))
                                 .and_then(|c| c.to_packed::<HeadingElem>().cloned())
                             {
                                 let level = c.resolve_level(StyleChain::default()).get();
@@ -208,8 +218,13 @@ fn walk_tags(
                             // Merge subsequent inline equations + par fragments
                             // into a single Word paragraph.
                             i = handle_par_with_inline_equations(
-                                children, i, html_doc, doc, eq_state,
-                                image_queue, bookmarks,
+                                children,
+                                i,
+                                html_doc,
+                                doc,
+                                eq_state,
+                                image_queue,
+                                bookmarks,
                             );
                         }
                         "equation" => {
@@ -224,17 +239,43 @@ fn walk_tags(
                         }
                         "table" => {
                             let end = find_tag_end(children, i, tag.location());
-                            handle_table(&children[i..=end], html_doc, doc, eq_state, image_queue, bookmarks, page_breaks);
+                            handle_table(
+                                &children[i..=end],
+                                html_doc,
+                                doc,
+                                eq_state,
+                                image_queue,
+                                bookmarks,
+                                page_breaks,
+                            );
                             i = end;
                         }
                         "list" => {
                             let end = find_tag_end(children, i, tag.location());
-                            handle_list(&children[i..=end], html_doc, doc, false, eq_state, image_queue, bookmarks, page_breaks);
+                            handle_list(
+                                &children[i..=end],
+                                html_doc,
+                                doc,
+                                false,
+                                eq_state,
+                                image_queue,
+                                bookmarks,
+                                page_breaks,
+                            );
                             i = end;
                         }
                         "enum" => {
                             let end = find_tag_end(children, i, tag.location());
-                            handle_list(&children[i..=end], html_doc, doc, true, eq_state, image_queue, bookmarks, page_breaks);
+                            handle_list(
+                                &children[i..=end],
+                                html_doc,
+                                doc,
+                                true,
+                                eq_state,
+                                image_queue,
+                                bookmarks,
+                                page_breaks,
+                            );
                             i = end;
                         }
                         "image" => {
@@ -252,8 +293,7 @@ fn walk_tags(
                             // Recurse into inner children between Start and End
                             let end = find_tag_end(children, i, tag.location());
                             // Skip doc-endnotes sections
-                            if elem_name == "section"
-                                && is_doc_endnotes_section(&children[i..=end])
+                            if elem_name == "section" && is_doc_endnotes_section(&children[i..=end])
                             {
                                 i = end;
                                 i += 1;
@@ -261,29 +301,38 @@ fn walk_tags(
                             }
                             // For figures, insert a bookmark if the content has a label
                             if elem_name == "figure"
-                                && let Some(label) = content.label() {
-                                    let label_str = format!("{}", label.resolve());
-                                    if !bookmarks.contains(&label_str) {
-                                        bookmarks.insert(label_str.clone());
-                                        let bk_id = doc.next_bookmark_id();
-                                        let mut bk_para = Paragraph::new();
-                                        bk_para.add_bookmark(bk_id, label_str);
-                                        doc.add_paragraph(bk_para);
-                                    }
+                                && let Some(label) = content.label()
+                            {
+                                let label_str = format!("{}", label.resolve());
+                                if !bookmarks.contains(&label_str) {
+                                    bookmarks.insert(label_str.clone());
+                                    let bk_id = doc.next_bookmark_id();
+                                    let mut bk_para = Paragraph::new();
+                                    bk_para.add_bookmark(bk_id, label_str);
+                                    doc.add_paragraph(bk_para);
                                 }
-                            walk_tags(&children[i + 1..end], html_doc, doc, eq_state, image_queue, bookmarks, page_breaks);
+                            }
+                            walk_tags(
+                                &children[i + 1..end],
+                                html_doc,
+                                doc,
+                                eq_state,
+                                image_queue,
+                                bookmarks,
+                                page_breaks,
+                            );
                             i = end;
                         }
                         "outline" => {
                             let depth: u8 = html_doc
                                 .introspector
-                                .query_first(&typst::foundations::Selector::Location(tag.location()))
+                                .query_first(&typst::foundations::Selector::Location(
+                                    tag.location(),
+                                ))
                                 .and_then(|c| c.to_packed::<OutlineElem>().cloned())
                                 .and_then(|o| *o.depth.as_option())
                                 .flatten()
-                                .map_or(3, |d| {
-                                    u8::try_from(d.get()).unwrap_or(3)
-                                });
+                                .map_or(3, |d| u8::try_from(d.get()).unwrap_or(3));
                             let mut para = Paragraph::new();
                             para.add_toc(depth);
                             doc.add_paragraph(para);
@@ -305,7 +354,15 @@ fn walk_tags(
                 // Tag::End is consumed implicitly
             }
             HtmlNode::Element(elem) => {
-                handle_html_element(elem, html_doc, doc, eq_state, image_queue, bookmarks, page_breaks);
+                handle_html_element(
+                    elem,
+                    html_doc,
+                    doc,
+                    eq_state,
+                    image_queue,
+                    bookmarks,
+                    page_breaks,
+                );
             }
             HtmlNode::Text(text, span) => {
                 // Bare text outside of any Tag — emit as a paragraph
@@ -342,7 +399,15 @@ fn handle_html_element(
     let tag = tag_name(elem);
     match tag.as_str() {
         "pre" => convert_code_block(elem, doc),
-        "blockquote" => convert_blockquote(elem, html_doc, doc, eq_state, image_queue, bookmarks, page_breaks),
+        "blockquote" => convert_blockquote(
+            elem,
+            html_doc,
+            doc,
+            eq_state,
+            image_queue,
+            bookmarks,
+            page_breaks,
+        ),
         "dl" => convert_term_list(elem, doc),
         "ol" => convert_html_list(elem, doc, true),
         "ul" => convert_html_list(elem, doc, false),
@@ -361,13 +426,29 @@ fn handle_html_element(
             if has_attr_value(elem, "role", "doc-endnotes") {
                 return;
             }
-            walk_tags(&elem.children, html_doc, doc, eq_state, image_queue, bookmarks, page_breaks);
+            walk_tags(
+                &elem.children,
+                html_doc,
+                doc,
+                eq_state,
+                image_queue,
+                bookmarks,
+                page_breaks,
+            );
         }
         _ => {
             // Check for alignment on this element and apply to child paragraphs
             let alignment = detect_alignment(elem);
             let start_idx = doc.body.elements.len();
-            walk_tags(&elem.children, html_doc, doc, eq_state, image_queue, bookmarks, page_breaks);
+            walk_tags(
+                &elem.children,
+                html_doc,
+                doc,
+                eq_state,
+                image_queue,
+                bookmarks,
+                page_breaks,
+            );
             if let Some(align) = alignment {
                 for element in &mut doc.body.elements[start_idx..] {
                     if let BlockElement::Paragraph(para) = element {
@@ -381,7 +462,12 @@ fn handle_html_element(
 
 /// Handle a `HeadingElem` tag: query the introspector for the full Content,
 /// extract level + body runs, and emit a heading paragraph.
-fn handle_heading(tag: &Tag, html_doc: &HtmlDocument, doc: &mut Document, bookmarks: &mut HashSet<String>) {
+fn handle_heading(
+    tag: &Tag,
+    html_doc: &HtmlDocument,
+    doc: &mut Document,
+    bookmarks: &mut HashSet<String>,
+) {
     let loc = tag.location();
     let Some(content) = html_doc
         .introspector
@@ -448,7 +534,15 @@ fn handle_par(
     let mut para = Paragraph::new();
     // Skip the first Tag::Start("par") and collect inlines from the inner nodes
     let inner = &slice[1..slice.len().saturating_sub(1)];
-    collect_par_inlines(inner, html_doc, doc, &mut para, eq_state, image_queue, bookmarks);
+    collect_par_inlines(
+        inner,
+        html_doc,
+        doc,
+        &mut para,
+        eq_state,
+        image_queue,
+        bookmarks,
+    );
     if !para.inlines.is_empty() {
         doc.add_paragraph(para);
     }
@@ -483,7 +577,11 @@ fn handle_par_with_inline_equations(
     if !is_inline_equation_at(children, next_start, html_doc) {
         handle_par(
             &children[par_start..=par_end],
-            html_doc, doc, eq_state, image_queue, bookmarks,
+            html_doc,
+            doc,
+            eq_state,
+            image_queue,
+            bookmarks,
         );
         return par_end;
     }
@@ -493,7 +591,15 @@ fn handle_par_with_inline_equations(
 
     // Collect inlines from the first par fragment
     let inner = &children[par_start + 1..par_end];
-    collect_par_inlines(inner, html_doc, doc, &mut para, eq_state, image_queue, bookmarks);
+    collect_par_inlines(
+        inner,
+        html_doc,
+        doc,
+        &mut para,
+        eq_state,
+        image_queue,
+        bookmarks,
+    );
 
     // The pattern is strictly: equation -> par -> equation -> par -> ...
     // After each inline equation, we expect a continuation par.
@@ -526,7 +632,15 @@ fn handle_par_with_inline_equations(
         if let HtmlNode::Tag(pt) = &children[cursor] {
             let p_end = find_tag_end(children, cursor, pt.location());
             let p_inner = &children[cursor + 1..p_end];
-            collect_par_inlines(p_inner, html_doc, doc, &mut para, eq_state, image_queue, bookmarks);
+            collect_par_inlines(
+                p_inner,
+                html_doc,
+                doc,
+                &mut para,
+                eq_state,
+                image_queue,
+                bookmarks,
+            );
             cursor = p_end + 1;
         } else {
             break;
@@ -545,11 +659,7 @@ fn handle_par_with_inline_equations(
 
 /// Check if position `idx` in `children` is a `Tag::Start("equation")` for an
 /// **inline** (non-block) equation.
-fn is_inline_equation_at(
-    children: &[HtmlNode],
-    idx: usize,
-    html_doc: &HtmlDocument,
-) -> bool {
+fn is_inline_equation_at(children: &[HtmlNode], idx: usize, html_doc: &HtmlDocument) -> bool {
     let Some(HtmlNode::Tag(tag)) = children.get(idx) else {
         return false;
     };
@@ -611,11 +721,29 @@ fn collect_par_inlines(
             }
             HtmlNode::Tag(tag) => {
                 if let Tag::Start(..) = tag {
-                    i = handle_inline_tag(tag, children, i, html_doc, doc, para, eq_state, image_queue, bookmarks);
+                    i = handle_inline_tag(
+                        tag,
+                        children,
+                        i,
+                        html_doc,
+                        doc,
+                        para,
+                        eq_state,
+                        image_queue,
+                        bookmarks,
+                    );
                 }
             }
             HtmlNode::Element(elem) => {
-                handle_inline_html_element(elem, html_doc, doc, para, eq_state, image_queue, bookmarks);
+                handle_inline_html_element(
+                    elem,
+                    html_doc,
+                    doc,
+                    para,
+                    eq_state,
+                    image_queue,
+                    bookmarks,
+                );
             }
             HtmlNode::Frame(_) => {}
         }
@@ -731,11 +859,12 @@ fn handle_inline_tag(
             if let Some(c) = html_doc
                 .introspector
                 .query_first(&typst::foundations::Selector::Location(loc))
-                && let Some(ref_elem) = c.to_packed::<RefElem>() {
-                    let target_label = format!("{}", ref_elem.target.resolve());
-                    let display = collect_text_from_nodes(&children[i + 1..end]);
-                    para.add_field_ref(target_label, display);
-                }
+                && let Some(ref_elem) = c.to_packed::<RefElem>()
+            {
+                let target_label = format!("{}", ref_elem.target.resolve());
+                let display = collect_text_from_nodes(&children[i + 1..end]);
+                para.add_field_ref(target_label, display);
+            }
             end
         }
         "link" => {
@@ -745,22 +874,23 @@ fn handle_inline_tag(
             if let Some(c) = html_doc
                 .introspector
                 .query_first(&typst::foundations::Selector::Location(loc))
-                && let Some(link_elem) = c.to_packed::<typst_library::model::LinkElem>() {
-                    let url = match &link_elem.dest {
-                        typst_library::model::LinkTarget::Dest(
-                            typst_library::model::Destination::Url(u),
-                        ) => u.to_string(),
-                        _ => String::new(),
-                    };
-                    if url.is_empty() {
-                        return end;
-                    }
-                    // Collect formatted runs from link children, preserving bold/italic/etc.
-                    let runs = collect_formatted_runs_from_nodes(&children[i + 1..end]);
-                    if !runs.is_empty() {
-                        para.add_hyperlink(url, runs);
-                    }
+                && let Some(link_elem) = c.to_packed::<typst_library::model::LinkElem>()
+            {
+                let url = match &link_elem.dest {
+                    typst_library::model::LinkTarget::Dest(
+                        typst_library::model::Destination::Url(u),
+                    ) => u.to_string(),
+                    _ => String::new(),
+                };
+                if url.is_empty() {
+                    return end;
                 }
+                // Collect formatted runs from link children, preserving bold/italic/etc.
+                let runs = collect_formatted_runs_from_nodes(&children[i + 1..end]);
+                if !runs.is_empty() {
+                    para.add_hyperlink(url, runs);
+                }
+            }
             end
         }
         "pagebreak" => {
@@ -901,7 +1031,15 @@ fn handle_inline_html_element(
                     para.add_hyperlink(href, runs);
                 }
             } else {
-                collect_par_inlines(&elem.children, html_doc, doc, para, eq_state, image_queue, bookmarks);
+                collect_par_inlines(
+                    &elem.children,
+                    html_doc,
+                    doc,
+                    para,
+                    eq_state,
+                    image_queue,
+                    bookmarks,
+                );
             }
         }
         "sup" => {
@@ -921,7 +1059,15 @@ fn handle_inline_html_element(
             }
         }
         _ => {
-            collect_par_inlines(&elem.children, html_doc, doc, para, eq_state, image_queue, bookmarks);
+            collect_par_inlines(
+                &elem.children,
+                html_doc,
+                doc,
+                para,
+                eq_state,
+                image_queue,
+                bookmarks,
+            );
         }
     }
 }
@@ -973,14 +1119,25 @@ fn collect_html_inlines_with_doc(
                 if tag == "a" && has_attr_value(elem, "role", "doc-noteref") {
                     continue;
                 }
-                collect_html_inlines_with_doc(&elem.children, para, new_bold, new_italic, new_monospace, html_doc);
+                collect_html_inlines_with_doc(
+                    &elem.children,
+                    para,
+                    new_bold,
+                    new_italic,
+                    new_monospace,
+                    html_doc,
+                );
             }
             HtmlNode::Tag(tag) => {
                 if let Tag::Start(content, _) = tag {
                     let elem_name = content.elem().name();
                     if elem_name == "footnote" {
-                        if let Some(id) = find_footnote_id_in_range(&children[children.iter().position(|c| std::ptr::eq(c, child)).unwrap_or(0)..])
-                        {
+                        if let Some(id) = find_footnote_id_in_range(
+                            &children[children
+                                .iter()
+                                .position(|c| std::ptr::eq(c, child))
+                                .unwrap_or(0)..],
+                        ) {
                             para.add_footnote_ref(id + 1);
                         }
                     } else if elem_name == "equation"
@@ -1003,7 +1160,13 @@ fn collect_html_inlines_with_doc(
 }
 
 /// Handle a block-level equation Tag.
-fn handle_equation(tag: &Tag, html_doc: &HtmlDocument, doc: &mut Document, eq_state: &mut EquationState, bookmarks: &mut HashSet<String>) {
+fn handle_equation(
+    tag: &Tag,
+    html_doc: &HtmlDocument,
+    doc: &mut Document,
+    eq_state: &mut EquationState,
+    bookmarks: &mut HashSet<String>,
+) {
     let loc = tag.location();
     let Some(content) = html_doc
         .introspector
@@ -1092,11 +1255,23 @@ fn handle_table(
     }
     // Fallback: walk inner children normally
     let inner = &slice[1..slice.len().saturating_sub(1)];
-    walk_tags(inner, html_doc, doc, eq_state, image_queue, bookmarks, page_breaks);
+    walk_tags(
+        inner,
+        html_doc,
+        doc,
+        eq_state,
+        image_queue,
+        bookmarks,
+        page_breaks,
+    );
 }
 
 /// Recursively search for a `<table>` element within an HTML element tree.
-fn find_and_convert_table_in_elem(elem: &HtmlElement, doc: &mut Document, html_doc: &HtmlDocument) -> bool {
+fn find_and_convert_table_in_elem(
+    elem: &HtmlElement,
+    doc: &mut Document,
+    html_doc: &HtmlDocument,
+) -> bool {
     for child in &elem.children {
         if let HtmlNode::Element(inner) = child {
             let tag = tag_name(inner);
@@ -1141,15 +1316,19 @@ fn handle_list(
     }
     // Fallback: walk inner children normally
     let inner = &slice[1..slice.len().saturating_sub(1)];
-    walk_tags(inner, html_doc, doc, eq_state, image_queue, bookmarks, page_breaks);
+    walk_tags(
+        inner,
+        html_doc,
+        doc,
+        eq_state,
+        image_queue,
+        bookmarks,
+        page_breaks,
+    );
 }
 
 /// Recursively search for a `<ul>` or `<ol>` element.
-fn find_and_convert_list_in_elem(
-    elem: &HtmlElement,
-    doc: &mut Document,
-    ordered: bool,
-) -> bool {
+fn find_and_convert_list_in_elem(elem: &HtmlElement, doc: &mut Document, ordered: bool) -> bool {
     for child in &elem.children {
         if let HtmlNode::Element(inner) = child {
             let tag = tag_name(inner);
@@ -1220,7 +1399,8 @@ fn postprocess_rowspans(raw_rows: Vec<RawTableRow>) -> Table {
 
         loop {
             // Check if this logical column needs a continuation cell
-            if let Some(&(_, _, colspan)) = active_spans.iter().find(|(c, _, _)| *c == logical_col) {
+            if let Some(&(_, _, colspan)) = active_spans.iter().find(|(c, _, _)| *c == logical_col)
+            {
                 new_cells.push(TableCell {
                     paragraphs: vec![Paragraph::new()],
                     content: Vec::new(),
@@ -1335,7 +1515,11 @@ fn convert_table_row(tr: &HtmlElement, html_doc: &HtmlDocument) -> Option<RawTab
 ///
 /// If the cell contains `<p>` child elements, each `<p>` becomes a separate paragraph.
 /// Otherwise, all inline content is collected into a single paragraph.
-fn convert_cell_paragraphs(td: &HtmlElement, is_header: bool, html_doc: &HtmlDocument) -> Vec<Paragraph> {
+fn convert_cell_paragraphs(
+    td: &HtmlElement,
+    is_header: bool,
+    html_doc: &HtmlDocument,
+) -> Vec<Paragraph> {
     // Check if any direct children are <p> elements
     let has_p_children = td.children.iter().any(|c| {
         if let HtmlNode::Element(el) = c {
@@ -1352,7 +1536,14 @@ fn convert_cell_paragraphs(td: &HtmlElement, is_header: bool, html_doc: &HtmlDoc
                 && tag_name(el) == "p"
             {
                 let mut para = Paragraph::new();
-                collect_html_inlines_with_doc(&el.children, &mut para, is_header, false, false, Some(html_doc));
+                collect_html_inlines_with_doc(
+                    &el.children,
+                    &mut para,
+                    is_header,
+                    false,
+                    false,
+                    Some(html_doc),
+                );
                 if !para.inlines.is_empty() {
                     paragraphs.push(para);
                 }
@@ -1361,14 +1552,28 @@ fn convert_cell_paragraphs(td: &HtmlElement, is_header: bool, html_doc: &HtmlDoc
         if paragraphs.is_empty() {
             // Fallback: collect all content as one paragraph
             let mut para = Paragraph::new();
-            collect_html_inlines_with_doc(&td.children, &mut para, is_header, false, false, Some(html_doc));
+            collect_html_inlines_with_doc(
+                &td.children,
+                &mut para,
+                is_header,
+                false,
+                false,
+                Some(html_doc),
+            );
             vec![para]
         } else {
             paragraphs
         }
     } else {
         let mut para = Paragraph::new();
-        collect_html_inlines_with_doc(&td.children, &mut para, is_header, false, false, Some(html_doc));
+        collect_html_inlines_with_doc(
+            &td.children,
+            &mut para,
+            is_header,
+            false,
+            false,
+            Some(html_doc),
+        );
         vec![para]
     }
 }
@@ -1452,7 +1657,12 @@ fn collect_cell_content_recursive(
                 } else if tag == "p" {
                     let mut para = Paragraph::new();
                     collect_html_inlines_with_doc(
-                        &el.children, &mut para, false, false, false, Some(html_doc),
+                        &el.children,
+                        &mut para,
+                        false,
+                        false,
+                        false,
+                        Some(html_doc),
                     );
                     if !para.inlines.is_empty() {
                         content.push(CellContent::Paragraph(para));
@@ -1511,12 +1721,7 @@ fn convert_html_list(elem: &HtmlElement, doc: &mut Document, ordered: bool) {
     convert_html_list_at_level(elem, doc, ordered, 0);
 }
 
-fn convert_html_list_at_level(
-    elem: &HtmlElement,
-    doc: &mut Document,
-    ordered: bool,
-    level: u32,
-) {
+fn convert_html_list_at_level(elem: &HtmlElement, doc: &mut Document, ordered: bool, level: u32) {
     let list_id = if ordered { 1 } else { 2 };
     for child in &elem.children {
         if let HtmlNode::Element(li) = child
@@ -1526,7 +1731,9 @@ fn convert_html_list_at_level(
             para.list_id = Some(list_id);
             para.list_level = Some(level);
             // Collect only direct inline content, skipping nested sub-lists
-            let non_list_children: Vec<&HtmlNode> = li.children.iter()
+            let non_list_children: Vec<&HtmlNode> = li
+                .children
+                .iter()
                 .filter(|c| {
                     if let HtmlNode::Element(el) = c {
                         let t = tag_name(el);
@@ -1542,10 +1749,13 @@ fn convert_html_list_at_level(
                         para.push_run(Run::new(text.as_str()));
                     }
                     HtmlNode::Element(el) => {
-                        collect_html_inlines(&el.children, &mut para,
+                        collect_html_inlines(
+                            &el.children,
+                            &mut para,
                             tag_name(el) == "strong" || tag_name(el) == "b",
                             tag_name(el) == "em" || tag_name(el) == "i",
-                            tag_name(el) == "code");
+                            tag_name(el) == "code",
+                        );
                     }
                     _ => {}
                 }
@@ -1592,7 +1802,15 @@ fn convert_blockquote(
     page_breaks: &HashSet<Location>,
 ) {
     let start_idx = doc.body.elements.len();
-    walk_tags(&elem.children, html_doc, doc, eq_state, image_queue, bookmarks, page_breaks);
+    walk_tags(
+        &elem.children,
+        html_doc,
+        doc,
+        eq_state,
+        image_queue,
+        bookmarks,
+        page_breaks,
+    );
     // Apply left indent to all paragraphs added by the blockquote
     for element in &mut doc.body.elements[start_idx..] {
         if let BlockElement::Paragraph(para) = element {
@@ -1791,7 +2009,11 @@ fn collect_formatted_runs_inner(
 // ---------------------------------------------------------------------------
 
 /// Find the index of the `Tag::End` matching the given start location.
-fn find_tag_end(children: &[HtmlNode], start_idx: usize, start_loc: typst::introspection::Location) -> usize {
+fn find_tag_end(
+    children: &[HtmlNode],
+    start_idx: usize,
+    start_loc: typst::introspection::Location,
+) -> usize {
     let mut j = start_idx + 1;
     while j < children.len() {
         if let HtmlNode::Tag(end_tag) = &children[j]
@@ -1884,7 +2106,10 @@ fn apply_smallcaps_from_source(world: &TyportWorld, doc: &mut Document) {
             for inline in &mut p.inlines {
                 if let InlineElement::Text(run) = inline {
                     let trimmed = run.text.trim();
-                    if sc_texts.iter().any(|t| trimmed == *t || t.contains(trimmed)) {
+                    if sc_texts
+                        .iter()
+                        .any(|t| trimmed == *t || t.contains(trimmed))
+                    {
                         run.smallcaps = true;
                     }
                 }
@@ -1919,16 +2144,18 @@ fn collect_smallcaps_aliases(node: &typst_syntax::SyntaxNode, aliases: &mut Hash
     use typst_syntax::SyntaxKind;
 
     if node.kind() == SyntaxKind::LetBinding
-        && let Some(binding) = node.cast::<typst_syntax::ast::LetBinding<'_>>() {
-            // Check if the init expression is an identifier that is `smallcaps` or an alias
-            if let Some(typst_syntax::ast::Expr::Ident(init_ident)) = binding.init()
-                && aliases.contains(init_ident.as_str()) {
-                    // The binding names are the new aliases
-                    for ident in binding.kind().bindings() {
-                        aliases.insert(ident.as_str().to_string());
-                    }
-                }
+        && let Some(binding) = node.cast::<typst_syntax::ast::LetBinding<'_>>()
+    {
+        // Check if the init expression is an identifier that is `smallcaps` or an alias
+        if let Some(typst_syntax::ast::Expr::Ident(init_ident)) = binding.init()
+            && aliases.contains(init_ident.as_str())
+        {
+            // The binding names are the new aliases
+            for ident in binding.kind().bindings() {
+                aliases.insert(ident.as_str().to_string());
+            }
         }
+    }
     for child in node.children() {
         collect_smallcaps_aliases(child, aliases);
     }
@@ -1943,28 +2170,28 @@ fn collect_smallcaps_call_texts(
     use typst_syntax::SyntaxKind;
 
     if node.kind() == SyntaxKind::FuncCall
-        && let Some(call) = node.cast::<typst_syntax::ast::FuncCall<'_>>() {
-            // Check if the callee is a smallcaps function or alias
-            let is_smallcaps = match call.callee() {
-                typst_syntax::ast::Expr::Ident(ident) => aliases.contains(ident.as_str()),
-                _ => false,
-            };
-            if is_smallcaps {
-                // Extract text from the content block argument
-                for arg in call.args().items() {
-                    if let typst_syntax::ast::Arg::Pos(
-                        typst_syntax::ast::Expr::ContentBlock(block),
-                    ) = arg
-                    {
-                        let text = collect_markup_text(block.body());
-                        let trimmed = text.trim().to_string();
-                        if !trimmed.is_empty() {
-                            texts.push(trimmed);
-                        }
+        && let Some(call) = node.cast::<typst_syntax::ast::FuncCall<'_>>()
+    {
+        // Check if the callee is a smallcaps function or alias
+        let is_smallcaps = match call.callee() {
+            typst_syntax::ast::Expr::Ident(ident) => aliases.contains(ident.as_str()),
+            _ => false,
+        };
+        if is_smallcaps {
+            // Extract text from the content block argument
+            for arg in call.args().items() {
+                if let typst_syntax::ast::Arg::Pos(typst_syntax::ast::Expr::ContentBlock(block)) =
+                    arg
+                {
+                    let text = collect_markup_text(block.body());
+                    let trimmed = text.trim().to_string();
+                    if !trimmed.is_empty() {
+                        texts.push(trimmed);
                     }
                 }
             }
         }
+    }
     for child in node.children() {
         collect_smallcaps_call_texts(child, aliases, texts);
     }
@@ -2018,7 +2245,13 @@ fn extract_document_metadata(html_doc: &HtmlDocument, doc: &mut Document) {
     }
     if !html_doc.info.author.is_empty() {
         doc.metadata.author = Some(
-            html_doc.info.author.iter().map(typst::ecow::EcoString::as_str).collect::<Vec<_>>().join(", "),
+            html_doc
+                .info
+                .author
+                .iter()
+                .map(typst::ecow::EcoString::as_str)
+                .collect::<Vec<_>>()
+                .join(", "),
         );
     }
 
@@ -2474,7 +2707,10 @@ fn extract_header_footer_text(doc: &Document) -> String {
 ///
 /// Items within `gap_threshold` pt of each other are considered part of the
 /// same cluster. Returns clusters sorted by x-position.
-fn cluster_by_x<'a>(items: &[&'a FrameTextItem], gap_threshold: f64) -> Vec<Vec<&'a FrameTextItem>> {
+fn cluster_by_x<'a>(
+    items: &[&'a FrameTextItem],
+    gap_threshold: f64,
+) -> Vec<Vec<&'a FrameTextItem>> {
     if items.is_empty() {
         return Vec::new();
     }
@@ -2535,7 +2771,10 @@ fn extract_lines_from_all_pages(paged: &PagedDocument) -> Vec<FrameLine> {
         for items in y_groups.values() {
             // Detect x-clusters with a 36pt (~0.5in) gap threshold.
             // Items closer than this are part of the same column.
-            let page_width_pt = paged.pages.first().map_or(595.0, |p| p.frame.width().to_pt());
+            let page_width_pt = paged
+                .pages
+                .first()
+                .map_or(595.0, |p| p.frame.width().to_pt());
             let max_font_size = items.iter().map(|i| i.size_pt).fold(0.0_f64, f64::max);
             // Scale gap threshold with font size: for CJK at 22pt, consecutive
             // characters are ~22pt apart, but word spacing and centering offsets
@@ -2550,7 +2789,8 @@ fn extract_lines_from_all_pages(paged: &PagedDocument) -> Vec<FrameLine> {
             // a real multi-column layout. Real grid columns span a significant
             // portion of the page width each.
             let clusters = if raw_clusters.len() >= 2 {
-                let max_size = raw_clusters.iter()
+                let max_size = raw_clusters
+                    .iter()
                     .flat_map(|c| c.iter().map(|i| i.size_pt))
                     .fold(0.0_f64, f64::max);
                 // If the largest text on this line is significantly bigger than
@@ -2736,9 +2976,10 @@ fn insert_missing_at_position(doc: &mut Document, missing_lines: &[FrameLine]) {
         // Real grid columns each have meaningful content (>= 3 chars).
         // A title split into individual characters will have 1-2 char clusters.
         let is_real_grid = line.x_clusters.len() >= 2
-            && line.x_clusters.iter().all(|c| {
-                c.runs.iter().map(|r| r.text.chars().count()).sum::<usize>() >= 3
-            });
+            && line
+                .x_clusters
+                .iter()
+                .all(|c| c.runs.iter().map(|r| r.text.chars().count()).sum::<usize>() >= 3);
         if is_real_grid {
             // Multi-column line: emit runs from each cluster separated by tabs,
             // with a right-aligned tab stop for the last cluster.
@@ -2788,10 +3029,7 @@ fn insert_missing_at_position(doc: &mut Document, missing_lines: &[FrameLine]) {
 /// 95 % of the page height) are treated as explicit page breaks.  Natural
 /// page overflow (the previous page is full) is ignored because Word will
 /// reflow the content naturally.
-fn collect_page_break_locations(
-    children: &[HtmlNode],
-    paged: &PagedDocument,
-) -> HashSet<Location> {
+fn collect_page_break_locations(children: &[HtmlNode], paged: &PagedDocument) -> HashSet<Location> {
     // 1. Collect all block-level Tag::Start locations in document order.
     let mut locs: Vec<Location> = Vec::new();
     collect_block_tag_locations(children, &mut locs);
@@ -2844,8 +3082,8 @@ fn collect_block_tag_locations(children: &[HtmlNode], out: &mut Vec<Location>) {
                 {
                     let name = content.elem().name();
                     match name {
-                        "heading" | "par" | "equation" | "table" | "list"
-                        | "enum" | "figure" | "image" | "outline" => {
+                        "heading" | "par" | "equation" | "table" | "list" | "enum" | "figure"
+                        | "image" | "outline" => {
                             out.push(tag.location());
                         }
                         "section" => {
@@ -2912,7 +3150,11 @@ fn find_max_content_y_in_frame(frame: &Frame, offset: Point) -> f64 {
 ///
 /// A horizontal rule is detected as a `FrameItem::Shape` with `Geometry::Line`
 /// whose horizontal extent is at least 80% of the page content width.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss)]
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
+)]
 fn insert_horizontal_rules_from_paged(paged: &PagedDocument, doc: &mut Document) {
     let total_pages = paged.pages.len();
     if total_pages == 0 {
@@ -2937,8 +3179,8 @@ fn insert_horizontal_rules_from_paged(paged: &PagedDocument, doc: &mut Document)
 
         for line_y in lines {
             // Normalize to a position across all pages: page_idx + fraction within page
-            let normalized = (f64::from(page_idx as u32) + line_y / page_height)
-                / f64::from(total_pages as u32);
+            let normalized =
+                (f64::from(page_idx as u32) + line_y / page_height) / f64::from(total_pages as u32);
             hrules.push(normalized);
         }
     }
@@ -2953,8 +3195,7 @@ fn insert_horizontal_rules_from_paged(paged: &PagedDocument, doc: &mut Document)
     let full_doc_text = extract_doc_text(doc);
 
     for normalized_pos in &hrules {
-        let approx_idx =
-            (normalized_pos * total_elements as f64).round() as usize;
+        let approx_idx = (normalized_pos * total_elements as f64).round() as usize;
         let insert_idx = approx_idx.min(total_elements);
 
         // Don't insert if we already have a horizontal rule nearby
@@ -2985,12 +3226,7 @@ fn insert_horizontal_rules_from_paged(paged: &PagedDocument, doc: &mut Document)
 }
 
 /// Recursively collect y-positions of horizontal lines from a frame.
-fn collect_horizontal_lines(
-    frame: &Frame,
-    offset: Point,
-    min_width: f64,
-    lines: &mut Vec<f64>,
-) {
+fn collect_horizontal_lines(frame: &Frame, offset: Point, min_width: f64, lines: &mut Vec<f64>) {
     for (pos, item) in frame.items() {
         let abs_x = offset.x + pos.x;
         let abs_y = offset.y + pos.y;

@@ -37,7 +37,9 @@ pub fn write_docx<W: Write + Seek>(
         numbering: doc_has_lists(doc),
         header: doc.header.is_some(),
         footer: doc.footer.is_some() || doc.page_numbering.is_some(),
-        content_width_twips: ps.width_twips.saturating_sub(ps.margin_left + ps.margin_right),
+        content_width_twips: ps
+            .width_twips
+            .saturating_sub(ps.margin_left + ps.margin_right),
     };
     let images = collect_images(doc);
     let has_images = !images.is_empty();
@@ -46,17 +48,13 @@ pub fn write_docx<W: Write + Seek>(
     let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
     zip.start_file("[Content_Types].xml", options)?;
-    zip.write_all(&xml_part(|w| {
-        generate_content_types(w, parts, &images)
-    })?)?;
+    zip.write_all(&xml_part(|w| generate_content_types(w, parts, &images))?)?;
 
     zip.start_file("_rels/.rels", options)?;
     zip.write_all(&xml_part(generate_rels)?)?;
 
     zip.start_file("word/_rels/document.xml.rels", options)?;
-    zip.write_all(&xml_part(|w| {
-        generate_document_rels(w, parts, &images)
-    })?)?;
+    zip.write_all(&xml_part(|w| generate_document_rels(w, parts, &images))?)?;
 
     zip.start_file("word/styles.xml", options)?;
     zip.write_all(&xml_part(|w| {
@@ -554,25 +552,47 @@ fn generate_document_xml(
         numbering: doc_has_lists(doc),
         header: doc.header.is_some(),
         footer: doc.footer.is_some() || doc.page_numbering.is_some(),
-        content_width_twips: ps.width_twips.saturating_sub(ps.margin_left + ps.margin_right),
+        content_width_twips: ps
+            .width_twips
+            .saturating_sub(ps.margin_left + ps.margin_right),
     };
     elem.write_inner_content(|w| {
-            w.create_element("w:body").write_inner_content(|body_w| {
-                for element in &doc.body.elements {
-                    match element {
-                        BlockElement::Paragraph(para) => {
-                            write_paragraph(body_w, para, &doc.style.footnote_format, &doc.style, parts, &image_counter)?;
-                        }
-                        BlockElement::Table(table) => {
-                            write_table(body_w, table, &doc.style.footnote_format, &doc.style, parts, &image_counter)?;
-                        }
+        w.create_element("w:body").write_inner_content(|body_w| {
+            for element in &doc.body.elements {
+                match element {
+                    BlockElement::Paragraph(para) => {
+                        write_paragraph(
+                            body_w,
+                            para,
+                            &doc.style.footnote_format,
+                            &doc.style,
+                            parts,
+                            &image_counter,
+                        )?;
+                    }
+                    BlockElement::Table(table) => {
+                        write_table(
+                            body_w,
+                            table,
+                            &doc.style.footnote_format,
+                            &doc.style,
+                            parts,
+                            &image_counter,
+                        )?;
                     }
                 }
-                write_section_properties(body_w, &doc.page_settings, &doc.style, parts, doc.page_numbering.as_ref())?;
-                Ok(())
-            })?;
+            }
+            write_section_properties(
+                body_w,
+                &doc.page_settings,
+                &doc.style,
+                parts,
+                doc.page_numbering.as_ref(),
+            )?;
             Ok(())
         })?;
+        Ok(())
+    })?;
     Ok(())
 }
 
@@ -753,7 +773,10 @@ fn write_paragraph<W: Write>(
                     ppr.create_element("w:tabs").write_inner_content(|tabs| {
                         tabs.create_element("w:tab")
                             .with_attribute(("w:val", "right"))
-                            .with_attribute(("w:pos", parts.content_width_twips.to_string().as_str()))
+                            .with_attribute((
+                                "w:pos",
+                                parts.content_width_twips.to_string().as_str(),
+                            ))
                             .write_empty()?;
                         Ok(())
                     })?;
@@ -870,10 +893,21 @@ fn write_tab<W: Write>(writer: &mut Writer<W>) -> io::Result<()> {
     Ok(())
 }
 
-fn write_run<W: Write>(writer: &mut Writer<W>, run: &crate::document::Run, code_font: &str) -> io::Result<()> {
+fn write_run<W: Write>(
+    writer: &mut Writer<W>,
+    run: &crate::document::Run,
+    code_font: &str,
+) -> io::Result<()> {
     writer.create_element("w:r").write_inner_content(|w| {
-        let has_rpr = run.bold || run.italic || run.superscript || run.subscript || run.monospace
-            || run.underline || run.strikethrough || run.highlight || run.smallcaps
+        let has_rpr = run.bold
+            || run.italic
+            || run.superscript
+            || run.subscript
+            || run.monospace
+            || run.underline
+            || run.strikethrough
+            || run.highlight
+            || run.smallcaps
             || run.color.is_some();
         if has_rpr {
             w.create_element("w:rPr").write_inner_content(|rpr| {
@@ -1019,11 +1053,25 @@ fn write_table<W: Write>(
                             for item in &cell.content {
                                 match item {
                                     crate::document::CellContent::Paragraph(para) => {
-                                        write_paragraph(tc_w, para, fn_format, doc_style, parts, image_counter)?;
+                                        write_paragraph(
+                                            tc_w,
+                                            para,
+                                            fn_format,
+                                            doc_style,
+                                            parts,
+                                            image_counter,
+                                        )?;
                                         has_trailing_para = true;
                                     }
                                     crate::document::CellContent::Table(nested_tbl) => {
-                                        write_table(tc_w, nested_tbl, fn_format, doc_style, parts, image_counter)?;
+                                        write_table(
+                                            tc_w,
+                                            nested_tbl,
+                                            fn_format,
+                                            doc_style,
+                                            parts,
+                                            image_counter,
+                                        )?;
                                         has_trailing_para = false;
                                     }
                                 }
@@ -1037,7 +1085,14 @@ fn write_table<W: Write>(
                             tc_w.create_element("w:p").write_empty()?;
                         } else {
                             for para in &cell.paragraphs {
-                                write_paragraph(tc_w, para, fn_format, doc_style, parts, image_counter)?;
+                                write_paragraph(
+                                    tc_w,
+                                    para,
+                                    fn_format,
+                                    doc_style,
+                                    parts,
+                                    image_counter,
+                                )?;
                             }
                         }
                         Ok(())
@@ -1327,11 +1382,7 @@ fn write_image_inline<W: Write>(
     Ok(())
 }
 
-fn write_bookmark_start<W: Write>(
-    writer: &mut Writer<W>,
-    id: u32,
-    name: &str,
-) -> io::Result<()> {
+fn write_bookmark_start<W: Write>(writer: &mut Writer<W>, id: u32, name: &str) -> io::Result<()> {
     let id_str = id.to_string();
     writer
         .create_element("w:bookmarkStart")
@@ -1535,9 +1586,9 @@ fn write_footnote_ref<W: Write>(
 
 fn circled_number_char(n: u32) -> String {
     let c = match n {
-        1..=20 => char::from_u32(0x2460 + n - 1),    // ① to ⑳
-        21..=35 => char::from_u32(0x3251 + n - 21),  // ㉑ to ㉟
-        36..=50 => char::from_u32(0x32B1 + n - 36),  // ㊱ to ㊿
+        1..=20 => char::from_u32(0x2460 + n - 1),   // ① to ⑳
+        21..=35 => char::from_u32(0x3251 + n - 21), // ㉑ to ㉟
+        36..=50 => char::from_u32(0x32B1 + n - 36), // ㊱ to ㊿
         _ => None,
     };
     c.map_or_else(|| n.to_string(), |c| c.to_string())

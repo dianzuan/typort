@@ -28,10 +28,7 @@ impl TyportWorld {
     pub fn new(path: &Path) -> std::io::Result<Self> {
         let abs_path = path.canonicalize()?;
         let root = abs_path.parent().unwrap_or(Path::new(".")).to_path_buf();
-        let file_name = abs_path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy();
+        let file_name = abs_path.file_name().unwrap_or_default().to_string_lossy();
         let vpath = VirtualPath::new(format!("/{file_name}"));
         let content = std::fs::read_to_string(&abs_path)?;
         let source = Source::new(FileId::new(None, vpath), content);
@@ -97,8 +94,7 @@ impl World for TyportWorld {
 
     fn file(&self, id: FileId) -> FileResult<Bytes> {
         let path = self.resolve_path(id)?;
-        let data = std::fs::read(&path)
-            .map_err(|_| typst::diag::FileError::NotFound(path))?;
+        let data = std::fs::read(&path).map_err(|_| typst::diag::FileError::NotFound(path))?;
         Ok(Bytes::new(data))
     }
 
