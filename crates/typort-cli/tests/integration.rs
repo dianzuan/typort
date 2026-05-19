@@ -524,6 +524,7 @@ fn table_cell_supports_merged_cell_fields() {
     // Verify that the TableCell struct has the colspan/vmerge fields
     let cell = TableCell {
         paragraphs: vec![Paragraph::new()],
+        content: Vec::new(),
         colspan: 2,
         vmerge: VMerge::Restart,
         width_pct: None,
@@ -534,6 +535,7 @@ fn table_cell_supports_merged_cell_fields() {
     // Verify VMerge::Continue
     let cont_cell = TableCell {
         paragraphs: vec![Paragraph::new()],
+        content: Vec::new(),
         colspan: 1,
         vmerge: VMerge::Continue,
         width_pct: None,
@@ -552,12 +554,14 @@ fn merged_cell_emits_grid_span_and_vmerge() {
                 cells: vec![
                     TableCell {
                         paragraphs: vec![Paragraph::new()],
+                        content: Vec::new(),
                         colspan: 2,
                         vmerge: VMerge::Restart,
                         width_pct: None,
                     },
                     TableCell {
                         paragraphs: vec![Paragraph::new()],
+                        content: Vec::new(),
                         colspan: 1,
                         vmerge: VMerge::None,
                         width_pct: None,
@@ -568,12 +572,14 @@ fn merged_cell_emits_grid_span_and_vmerge() {
                 cells: vec![
                     TableCell {
                         paragraphs: vec![Paragraph::new()],
+                        content: Vec::new(),
                         colspan: 2,
                         vmerge: VMerge::Continue,
                         width_pct: None,
                     },
                     TableCell {
                         paragraphs: vec![Paragraph::new()],
+                        content: Vec::new(),
                         colspan: 1,
                         vmerge: VMerge::None,
                         width_pct: None,
@@ -882,7 +888,7 @@ fn center_test_recovers_aligned_content() {
     // The centered text "张三  李四" should be recovered from PagedDocument
     let has_centered_authors = doc.body.elements.iter().any(|e| {
         if let typort_ooxml::document::BlockElement::Paragraph(p) = e {
-            let text: String = p.runs.iter().map(|r| r.text.as_str()).collect();
+            let text = p.text_content();
             (text.contains("张三") || text.contains("李四"))
                 && p.alignment == Some(Alignment::Center)
         } else {
@@ -904,8 +910,7 @@ fn complex_paper_recovers_author_info() {
     // The author names and institution info from #align(center) should be recovered
     let has_author = doc.body.elements.iter().any(|e| {
         if let typort_ooxml::document::BlockElement::Paragraph(p) = e {
-            p.runs
-                .iter()
+            p.text_runs()
                 .any(|r| r.text.contains("张三") || r.text.contains("李四"))
         } else {
             false
@@ -918,8 +923,7 @@ fn complex_paper_recovers_author_info() {
 
     let has_institution = doc.body.elements.iter().any(|e| {
         if let typort_ooxml::document::BlockElement::Paragraph(p) = e {
-            p.runs
-                .iter()
+            p.text_runs()
                 .any(|r| r.text.contains("某大学") || r.text.contains("经济学院"))
         } else {
             false
@@ -1038,6 +1042,63 @@ fn image_has_nonzero_emu_dimensions() {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// SVG image rasterization tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn svg_image_rasterized_and_embedded() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/svg_test.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+
+    // Check image file exists in ZIP
+    let names: Vec<String> = reader.file_names().map(String::from).collect();
+    assert!(
+        names.iter().any(|n| n.starts_with("word/media/image")),
+        "SVG should be rasterized to PNG and embedded in word/media/, got: {names:?}"
+    );
+
+    // Check document.xml has drawing element
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    assert!(
+        doc_xml.contains("w:drawing"),
+        "SVG image should produce w:drawing element"
+    );
+    assert!(
+        doc_xml.contains("a:blip"),
+        "SVG image should produce a:blip element"
+    );
+}
+
+#[test]
+fn svg_image_has_nonzero_dimensions() {
+    use typort_ooxml::document::{BlockElement, InlineElement};
+
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/svg_test.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut found = false;
+    for e in &doc.body.elements {
+        if let BlockElement::Paragraph(p) = e {
+            for inline in &p.inlines {
+                if let InlineElement::Image(img) = inline {
+                    assert!(img.width_emu > 0, "SVG image width_emu should be > 0");
+                    assert!(img.height_emu > 0, "SVG image height_emu should be > 0");
+                    assert!(!img.bytes.is_empty(), "SVG image bytes should not be empty");
+                    found = true;
+                }
+            }
+        }
+    }
+    assert!(found, "should have found at least one image from SVG rasterization");
 }
 
 // ---------------------------------------------------------------------------
@@ -1205,5 +1266,1763 @@ fn math_vector_produces_m_m_in_delimiters() {
     assert!(
         mr_count >= 3,
         "vector should produce at least 3 <m:mr> rows, got {mr_count}"
+    );
+}
+
+#[test]
+fn math_aligned_equation_produces_standalone_eqarr() {
+    let doc_xml = math_unit_doc_xml();
+    // The math_unit.typ now has an aligned equation: x &= 1 + 2 \ &= 3
+    // This should produce m:eqArr directly inside m:oMath (not wrapped in m:d like cases)
+    // Count eqArr occurrences — should be at least 2 (1 from cases + 1 from aligned eq)
+    let eqarr_count = doc_xml.matches("<m:eqArr>").count();
+    assert!(
+        eqarr_count >= 2,
+        "should have at least 2 <m:eqArr> (cases + aligned equation), got {eqarr_count}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Table of Contents (TOC field code) tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn toc_produces_field_code() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/toc_test.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    assert!(
+        doc_xml.contains("fldCharType=\"begin\""),
+        "TOC should produce fldChar begin"
+    );
+    assert!(
+        doc_xml.contains("TOC"),
+        "TOC should produce TOC instruction text"
+    );
+    assert!(
+        doc_xml.contains("fldCharType=\"end\""),
+        "TOC should produce fldChar end"
+    );
+}
+
+#[test]
+fn toc_document_model_has_toc_inline() {
+    use typort_ooxml::document::{BlockElement, InlineElement};
+
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/toc_test.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let has_toc = doc.body.elements.iter().any(|e| {
+        if let BlockElement::Paragraph(p) = e {
+            p.inlines
+                .iter()
+                .any(|i| matches!(i, InlineElement::FieldToc { .. }))
+        } else {
+            false
+        }
+    });
+    assert!(has_toc, "document model should contain a FieldToc inline element");
+}
+
+// ---------------------------------------------------------------------------
+// Multi-line aligned equation tests (m:eqArr from AlignPointElem + LinebreakElem)
+// ---------------------------------------------------------------------------
+
+fn aligned_equations_doc_xml() -> String {
+    let world = typort_core::TyportWorld::new(Path::new(
+        "../../tests/fixtures/aligned_equations.typ",
+    ))
+    .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap()
+}
+
+#[test]
+fn aligned_equation_produces_m_eqarr() {
+    let doc_xml = aligned_equations_doc_xml();
+    // Multi-line aligned equations should produce m:eqArr
+    assert!(
+        doc_xml.contains("<m:eqArr>"),
+        "document.xml should contain <m:eqArr> for aligned equations"
+    );
+}
+
+#[test]
+fn aligned_equation_has_correct_row_count() {
+    let doc_xml = aligned_equations_doc_xml();
+    // The fixture has:
+    //   - Simple alignment: 2 lines (2 m:e)
+    //   - Multi-line with expressions: 2 lines (2 m:e)
+    //   - Three lines: 3 lines (3 m:e)
+    // Total m:e inside eqArr = 7
+    // But m:e is also used for other purposes (e.g., delimiters, superscripts),
+    // so we count eqArr instances instead.
+    let eqarr_count = doc_xml.matches("<m:eqArr>").count();
+    assert_eq!(
+        eqarr_count, 3,
+        "should have 3 eqArr elements (one per aligned equation), got {eqarr_count}"
+    );
+}
+
+#[test]
+fn aligned_equation_simple_has_two_rows() {
+    let doc_xml = aligned_equations_doc_xml();
+    // Find the first m:eqArr and count its direct m:e children
+    // The simple alignment "x &= 1 + 2 \ &= 3" should have 2 rows
+    if let Some(start) = doc_xml.find("<m:eqArr>") {
+        if let Some(end) = doc_xml[start..].find("</m:eqArr>") {
+            let eqarr_xml = &doc_xml[start..start + end + "</m:eqArr>".len()];
+            let row_count = eqarr_xml.matches("<m:e>").count();
+            assert_eq!(
+                row_count, 2,
+                "simple aligned equation should have 2 rows, got {row_count} in:\n{eqarr_xml}"
+            );
+        } else {
+            panic!("could not find closing </m:eqArr>");
+        }
+    } else {
+        panic!("could not find <m:eqArr> in document.xml");
+    }
+}
+
+#[test]
+fn aligned_equation_three_lines_has_three_rows() {
+    let doc_xml = aligned_equations_doc_xml();
+    // Find the third m:eqArr (3-line equation: a = b+c, = d+e, = f)
+    let mut search_from = 0;
+    for _ in 0..2 {
+        if let Some(pos) = doc_xml[search_from..].find("<m:eqArr>") {
+            search_from += pos + "<m:eqArr>".len();
+        } else {
+            panic!("could not find enough <m:eqArr> elements");
+        }
+    }
+    // Now find the third one
+    if let Some(start_offset) = doc_xml[search_from..].find("<m:eqArr>") {
+        let start = search_from + start_offset;
+        if let Some(end_offset) = doc_xml[start..].find("</m:eqArr>") {
+            let eqarr_xml = &doc_xml[start..start + end_offset + "</m:eqArr>".len()];
+            let row_count = eqarr_xml.matches("<m:e>").count();
+            assert_eq!(
+                row_count, 3,
+                "three-line aligned equation should have 3 rows, got {row_count}"
+            );
+        } else {
+            panic!("could not find closing </m:eqArr>");
+        }
+    } else {
+        panic!("could not find third <m:eqArr>");
+    }
+}
+
+#[test]
+fn aligned_equation_contains_alignment_ampersand() {
+    let doc_xml = aligned_equations_doc_xml();
+    // The alignment point should be emitted as &amp; (XML-escaped ampersand)
+    // inside math runs within eqArr
+    assert!(
+        doc_xml.contains("&amp;"),
+        "aligned equations should contain &amp; for alignment points"
+    );
+}
+
+#[test]
+fn aligned_equation_is_wrapped_in_omathpara() {
+    let doc_xml = aligned_equations_doc_xml();
+    // Block aligned equations should be inside m:oMathPara
+    assert!(
+        doc_xml.contains("<m:oMathPara>"),
+        "block aligned equations should be wrapped in m:oMathPara"
+    );
+    // Each eqArr should be inside oMathPara > oMath
+    // Find a pattern that confirms oMathPara > oMath > eqArr nesting
+    let omathpara_count = doc_xml.matches("<m:oMathPara>").count();
+    let eqarr_count = doc_xml.matches("<m:eqArr>").count();
+    assert_eq!(
+        omathpara_count, eqarr_count,
+        "each eqArr should have a corresponding oMathPara wrapper"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Headers and footers
+// ---------------------------------------------------------------------------
+
+#[test]
+fn header_footer_produces_xml_parts() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/header_footer_test.typ"))
+            .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    // Verify the document model has header and footer content
+    assert!(
+        doc.header.is_some(),
+        "document should detect header from header_footer_test.typ"
+    );
+    assert!(
+        doc.footer.is_some(),
+        "document should detect footer from header_footer_test.typ"
+    );
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let names: Vec<String> = reader.file_names().map(String::from).collect();
+
+    // Check that header/footer XML parts exist in the ZIP
+    assert!(
+        names.iter().any(|n| n == "word/header1.xml"),
+        "should have word/header1.xml in docx, got: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n == "word/footer1.xml"),
+        "should have word/footer1.xml in docx, got: {names:?}"
+    );
+
+    // Verify header content
+    let header_xml =
+        std::io::read_to_string(reader.by_name("word/header1.xml").unwrap()).unwrap();
+    assert!(
+        header_xml.contains("Document Title"),
+        "header1.xml should contain 'Document Title'"
+    );
+
+    // Verify footer content
+    let footer_xml =
+        std::io::read_to_string(reader.by_name("word/footer1.xml").unwrap()).unwrap();
+    assert!(
+        footer_xml.contains("Page footer text"),
+        "footer1.xml should contain 'Page footer text'"
+    );
+}
+
+#[test]
+fn header_footer_text_not_in_body() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/header_footer_test.typ"))
+            .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    // Header/footer text should NOT leak into the document body
+    assert!(
+        !doc_xml.contains("Document Title"),
+        "header text 'Document Title' should not appear in document body"
+    );
+    assert!(
+        !doc_xml.contains("Page footer text"),
+        "footer text 'Page footer text' should not appear in document body"
+    );
+}
+
+#[test]
+fn header_footer_referenced_in_sect_pr() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/header_footer_test.typ"))
+            .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    // The sectPr should reference header and footer
+    assert!(
+        doc_xml.contains("w:headerReference"),
+        "sectPr should contain w:headerReference"
+    );
+    assert!(
+        doc_xml.contains("w:footerReference"),
+        "sectPr should contain w:footerReference"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Columns
+// ---------------------------------------------------------------------------
+
+#[test]
+fn columns_detected_in_document_model() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/columns_test.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    // Verify the document model detected 2 columns
+    assert_eq!(
+        doc.page_settings.columns,
+        Some(2),
+        "columns_test.typ uses #set page(columns: 2), should detect 2 columns"
+    );
+}
+
+#[test]
+fn columns_produces_w_cols_in_xml() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/columns_test.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    // Should have w:cols with w:num="2" in the section properties
+    assert!(
+        doc_xml.contains("w:cols"),
+        "two-column document should produce w:cols element in sectPr"
+    );
+    assert!(
+        doc_xml.contains("w:num=\"2\""),
+        "w:cols should have w:num=\"2\" for a two-column layout"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Section breaks
+// ---------------------------------------------------------------------------
+
+#[test]
+fn section_break_produces_multiple_sect_pr() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/section_break_test.typ"))
+            .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    // Count w:sectPr elements — should be at least 2 (one inline break + final section)
+    let sect_pr_count = doc_xml.matches("<w:sectPr>").count();
+    assert!(
+        sect_pr_count >= 2,
+        "section_break_test should produce at least 2 w:sectPr elements, got {sect_pr_count}"
+    );
+
+    // Verify the section break type is nextPage
+    assert!(
+        doc_xml.contains("<w:type w:val=\"nextPage\"/>"),
+        "section break should have type nextPage"
+    );
+}
+
+#[test]
+fn section_break_document_model_has_section_break() {
+    use typort_ooxml::document::{BlockElement, SectionBreakType};
+
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/section_break_test.typ"))
+            .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    // Find paragraphs with section breaks in the document model
+    let section_breaks: Vec<_> = doc
+        .body
+        .elements
+        .iter()
+        .filter_map(|e| {
+            if let BlockElement::Paragraph(p) = e {
+                p.section_break.as_ref()
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    assert!(
+        !section_breaks.is_empty(),
+        "document model should have at least one section break"
+    );
+    assert_eq!(
+        section_breaks[0].break_type,
+        SectionBreakType::NextPage,
+        "section break should be NextPage type"
+    );
+    assert!(
+        section_breaks[0].page_settings.is_some(),
+        "section break should carry page settings for the ending section"
+    );
+}
+
+#[test]
+fn section_break_has_content_from_both_sections() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/section_break_test.typ"))
+            .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    // Both sections' content should appear in the document
+    assert!(
+        doc_xml.contains("First Section"),
+        "document should contain 'First Section' heading"
+    );
+    assert!(
+        doc_xml.contains("Second Section"),
+        "document should contain 'Second Section' heading"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Nested lists
+// ---------------------------------------------------------------------------
+
+#[test]
+fn nested_list_has_multiple_levels() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/nested_list.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    assert!(
+        doc_xml.contains(r#"w:ilvl w:val="0""#),
+        "should have level 0 list items"
+    );
+    assert!(
+        doc_xml.contains(r#"w:ilvl w:val="1""#),
+        "should have level 1 (nested) list items"
+    );
+    assert!(
+        doc_xml.contains(r#"w:ilvl w:val="2""#),
+        "should have level 2 (doubly nested) list items"
+    );
+}
+
+#[test]
+fn nested_list_document_model_has_levels() {
+    use typort_ooxml::document::BlockElement;
+
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/nested_list.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let levels: Vec<u32> = doc
+        .body
+        .elements
+        .iter()
+        .filter_map(|e| {
+            if let BlockElement::Paragraph(p) = e {
+                p.list_level
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    assert!(
+        levels.contains(&0),
+        "should have list items at level 0"
+    );
+    assert!(
+        levels.contains(&1),
+        "should have list items at level 1"
+    );
+    assert!(
+        levels.contains(&2),
+        "should have list items at level 2"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Inline formatting tests (super, sub, underline, strike, highlight, smallcaps, raw)
+// ---------------------------------------------------------------------------
+
+fn inline_formatting_doc_xml() -> String {
+    let world = typort_core::TyportWorld::new(Path::new(
+        "../../tests/fixtures/inline_formatting.typ",
+    ))
+    .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap()
+}
+
+#[test]
+fn inline_super_produces_text() {
+    let doc_xml = inline_formatting_doc_xml();
+    assert!(
+        doc_xml.contains("superscript"),
+        "document.xml should contain the text 'superscript'"
+    );
+    assert!(
+        doc_xml.contains("w:val=\"superscript\""),
+        "superscript text should have w:vertAlign with val=superscript"
+    );
+}
+
+#[test]
+fn inline_sub_produces_text() {
+    let doc_xml = inline_formatting_doc_xml();
+    assert!(
+        doc_xml.contains("subscript"),
+        "document.xml should contain the text 'subscript'"
+    );
+    assert!(
+        doc_xml.contains("w:val=\"subscript\""),
+        "subscript text should have w:vertAlign with val=subscript"
+    );
+}
+
+#[test]
+fn inline_underline_produces_text() {
+    let doc_xml = inline_formatting_doc_xml();
+    assert!(
+        doc_xml.contains("underlined"),
+        "document.xml should contain the text 'underlined'"
+    );
+    assert!(
+        doc_xml.contains("<w:u w:val=\"single\"/>"),
+        "underlined text should have w:u with val=single"
+    );
+}
+
+#[test]
+fn inline_strike_produces_text() {
+    let doc_xml = inline_formatting_doc_xml();
+    assert!(
+        doc_xml.contains("strikethrough"),
+        "document.xml should contain the text 'strikethrough'"
+    );
+    assert!(
+        doc_xml.contains("<w:strike/>"),
+        "strikethrough text should have w:strike element"
+    );
+}
+
+#[test]
+fn inline_raw_produces_monospace() {
+    let doc_xml = inline_formatting_doc_xml();
+    // Either `inline code` (backtick syntax) or #raw("raw text") should produce monospace
+    assert!(
+        doc_xml.contains("inline code") || doc_xml.contains("raw text"),
+        "document.xml should contain 'inline code' or 'raw text'"
+    );
+    assert!(
+        doc_xml.contains("w:rFonts"),
+        "raw/code text should have a font override (w:rFonts)"
+    );
+}
+
+#[test]
+fn inline_highlight_produces_text() {
+    let doc_xml = inline_formatting_doc_xml();
+    assert!(
+        doc_xml.contains("highlighted"),
+        "document.xml should contain the text 'highlighted'"
+    );
+    assert!(
+        doc_xml.contains("<w:highlight w:val=\"yellow\"/>"),
+        "highlighted text should have w:highlight with val=yellow"
+    );
+}
+
+#[test]
+fn inline_smallcaps_text_preserved() {
+    let doc_xml = inline_formatting_doc_xml();
+    // SmallcapsElem doesn't have the Tagged trait in Typst 0.14.2, so it won't
+    // produce Tag::Start/Tag::End. The text content is preserved but the
+    // formatting is not yet applied.  When Typst adds Tagged to SmallcapsElem,
+    // the handler will automatically start emitting w:smallCaps.
+    assert!(
+        doc_xml.contains("Small Caps"),
+        "document.xml should preserve the text 'Small Caps' even without formatting"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Page break detection from PagedDocument
+// ---------------------------------------------------------------------------
+
+#[test]
+fn pagebreak_inserts_w_br_page() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/pagebreak_test.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    // The document should contain a page break element
+    assert!(
+        doc_xml.contains("w:type=\"page\""),
+        "pagebreak_test should produce a w:br with type=page"
+    );
+
+    // Both sections' content should be present
+    assert!(
+        doc_xml.contains("First Section"),
+        "document should contain 'First Section' heading"
+    );
+    assert!(
+        doc_xml.contains("Second Section"),
+        "document should contain 'Second Section' heading"
+    );
+}
+
+#[test]
+fn pagebreak_document_model_has_pagebreak_inline() {
+    use typort_ooxml::document::{BlockElement, InlineElement};
+
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/pagebreak_test.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    // At least one paragraph should contain a PageBreak inline element
+    let has_pagebreak = doc.body.elements.iter().any(|e| {
+        if let BlockElement::Paragraph(p) = e {
+            p.inlines
+                .iter()
+                .any(|i| matches!(i, InlineElement::PageBreak))
+        } else {
+            false
+        }
+    });
+    assert!(
+        has_pagebreak,
+        "document model should contain at least one PageBreak inline element"
+    );
+}
+
+/// Regression test: a `#pagebreak()` after content filling >85% of the page
+/// must still produce a page break.  The old 85%-height heuristic missed this;
+/// the introspector-based approach detects it correctly.
+#[test]
+fn pagebreak_after_nearly_full_page_is_detected() {
+    use typort_ooxml::document::{BlockElement, InlineElement};
+
+    let world = typort_core::TyportWorld::new(Path::new(
+        "../../tests/fixtures/pagebreak_full_page.typ",
+    ))
+    .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    // The document model must contain at least one PageBreak inline element.
+    let has_pagebreak = doc.body.elements.iter().any(|e| {
+        if let BlockElement::Paragraph(p) = e {
+            p.inlines
+                .iter()
+                .any(|i| matches!(i, InlineElement::PageBreak))
+        } else {
+            false
+        }
+    });
+    assert!(
+        has_pagebreak,
+        "pagebreak after >85%-full page must be detected"
+    );
+
+    // Verify the content from page two is present.
+    let has_page2_text = doc.body.elements.iter().any(|e| {
+        if let BlockElement::Paragraph(p) = e {
+            p.text_runs().any(|r| r.text.contains("page two"))
+        } else {
+            false
+        }
+    });
+    assert!(
+        has_page2_text,
+        "document should contain text from page two"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Horizontal rule detection from PagedDocument
+// ---------------------------------------------------------------------------
+
+#[test]
+fn hrule_produces_paragraph_with_bottom_border() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/hrule_test.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    // The document should contain a paragraph border for horizontal rules
+    assert!(
+        doc_xml.contains("w:pBdr"),
+        "hrule_test should produce a w:pBdr element for horizontal rules"
+    );
+    assert!(
+        doc_xml.contains("w:bottom"),
+        "hrule_test should produce a w:bottom border element"
+    );
+}
+
+#[test]
+fn hrule_document_model_has_horizontal_rule_flag() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/hrule_test.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    // At least one paragraph should have the horizontal_rule flag set
+    let has_hrule = doc.body.elements.iter().any(|e| {
+        if let typort_ooxml::document::BlockElement::Paragraph(p) = e {
+            p.horizontal_rule
+        } else {
+            false
+        }
+    });
+    assert!(
+        has_hrule,
+        "document model should contain at least one paragraph with horizontal_rule=true"
+    );
+}
+
+#[test]
+fn hrule_content_is_preserved() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/hrule_test.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    // The text around the horizontal rules should be preserved
+    assert!(
+        doc_xml.contains("above the line"),
+        "document should contain text 'above the line'"
+    );
+    assert!(
+        doc_xml.contains("below the line"),
+        "document should contain text 'below the line'"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Math in headings
+// ---------------------------------------------------------------------------
+
+#[test]
+fn math_in_heading_produces_omml() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/math_in_heading.typ"))
+            .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    assert!(
+        doc_xml.contains("m:oMath"),
+        "heading with inline math should produce m:oMath element"
+    );
+    assert!(
+        doc_xml.contains("Heading2"),
+        "should still be a heading"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Footnotes inside table cells
+// ---------------------------------------------------------------------------
+
+#[test]
+fn footnote_in_table_cell_has_reference() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/footnote_in_table.typ"))
+            .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    assert!(
+        doc_xml.contains("w:footnoteReference"),
+        "footnote inside table cell should produce w:footnoteReference"
+    );
+
+    let fn_xml = std::io::read_to_string(reader.by_name("word/footnotes.xml").unwrap()).unwrap();
+    assert!(
+        fn_xml.contains("inside a table cell"),
+        "footnotes.xml should contain the footnote text from the table cell"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Bug fix: Rowspan generates vMerge continue cells
+// ---------------------------------------------------------------------------
+
+#[test]
+fn rowspan_produces_vmerge_continue_cells() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/rowspan_test.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    // The first cell of row 0 has rowspan=2 -> vMerge restart
+    assert!(
+        doc_xml.contains("<w:vMerge w:val=\"restart\"/>"),
+        "rowspan start cell should have w:vMerge val=restart"
+    );
+    // Row 1 should have a vMerge continue cell (empty w:vMerge)
+    assert!(
+        doc_xml.contains("<w:vMerge/>"),
+        "continuation row should have w:vMerge (continue) for the merged cell"
+    );
+}
+
+#[test]
+fn rowspan_all_rows_have_equal_cell_count() {
+    use typort_ooxml::document::BlockElement;
+
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/rowspan_test.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    // Find the table in the document model
+    let table = doc.body.elements.iter().find_map(|e| {
+        if let BlockElement::Table(t) = e {
+            Some(t)
+        } else {
+            None
+        }
+    });
+    let table = table.expect("should have a table");
+
+    // All rows should have the same number of logical columns
+    let col_counts: Vec<u32> = table
+        .rows
+        .iter()
+        .map(|r| r.cells.iter().map(|c| c.colspan).sum())
+        .collect();
+    assert_eq!(
+        col_counts.len(),
+        3,
+        "table should have 3 rows, got {}",
+        col_counts.len()
+    );
+    assert!(
+        col_counts.iter().all(|&c| c == col_counts[0]),
+        "all rows should have the same logical column count, got: {col_counts:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Bug fix: Multi-paragraph table cells
+// ---------------------------------------------------------------------------
+
+#[test]
+fn multi_paragraph_cell_has_multiple_paragraphs() {
+    use typort_ooxml::document::BlockElement;
+
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/multi_para_cell.typ"))
+            .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    // Find the table in the document model
+    let table = doc.body.elements.iter().find_map(|e| {
+        if let BlockElement::Table(t) = e {
+            Some(t)
+        } else {
+            None
+        }
+    });
+    let table = table.expect("should have a table");
+
+    // The second cell (index 1) should have 2 paragraphs
+    let row = &table.rows[0];
+    assert!(
+        row.cells.len() >= 2,
+        "first row should have at least 2 cells"
+    );
+    let multi_cell = &row.cells[1];
+    assert!(
+        multi_cell.paragraphs.len() >= 2,
+        "cell with two paragraphs should have >= 2 Paragraph objects, got {}",
+        multi_cell.paragraphs.len()
+    );
+}
+
+#[test]
+fn multi_paragraph_cell_produces_multiple_w_p_in_tc() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/multi_para_cell.typ"))
+            .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    assert!(
+        doc_xml.contains("First paragraph"),
+        "should contain first paragraph text"
+    );
+    assert!(
+        doc_xml.contains("Second paragraph"),
+        "should contain second paragraph text"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Bug fix: Footnote content formatting preserved
+// ---------------------------------------------------------------------------
+
+#[test]
+fn formatted_footnote_preserves_bold_and_italic() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/formatted_footnote.typ"))
+            .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    // Check the footnote content runs preserve formatting
+    assert!(
+        !doc.footnotes.is_empty(),
+        "should have at least one footnote"
+    );
+    let fn_content = &doc.footnotes[0].content;
+    let has_bold = fn_content.iter().any(|r| r.bold);
+    let has_italic = fn_content.iter().any(|r| r.italic);
+    assert!(
+        has_bold,
+        "footnote content should have a bold run"
+    );
+    assert!(
+        has_italic,
+        "footnote content should have an italic run"
+    );
+}
+
+#[test]
+fn formatted_footnote_xml_has_formatting_elements() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/formatted_footnote.typ"))
+            .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let fn_xml = std::io::read_to_string(reader.by_name("word/footnotes.xml").unwrap()).unwrap();
+
+    assert!(
+        fn_xml.contains("<w:b/>"),
+        "footnotes.xml should contain <w:b/> for bold formatting"
+    );
+    assert!(
+        fn_xml.contains("<w:i/>"),
+        "footnotes.xml should contain <w:i/> for italic formatting"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Bug fix: Bold preserved inside hyperlinks
+// ---------------------------------------------------------------------------
+
+#[test]
+fn bold_link_preserves_formatting_in_hyperlink() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/bold_link.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    // The hyperlink should exist
+    assert!(
+        doc_xml.contains("HYPERLINK"),
+        "should have HYPERLINK field"
+    );
+    assert!(
+        doc_xml.contains("https://example.com"),
+        "should have the URL"
+    );
+    // The bold formatting should be preserved inside the fldSimple
+    assert!(
+        doc_xml.contains("Bold link text"),
+        "should have the display text"
+    );
+    assert!(
+        doc_xml.contains("<w:b/>"),
+        "hyperlink runs should have <w:b/> for bold formatting"
+    );
+}
+
+#[test]
+fn bold_link_document_model_has_bold_runs() {
+    use typort_ooxml::document::{BlockElement, InlineElement};
+
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/bold_link.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    // Find the hyperlink inline element and check its runs are bold
+    let has_bold_link = doc.body.elements.iter().any(|e| {
+        if let BlockElement::Paragraph(p) = e {
+            p.inlines.iter().any(|i| {
+                if let InlineElement::Hyperlink { runs, .. } = i {
+                    runs.iter().any(|r| r.bold && r.text.contains("Bold link text"))
+                } else {
+                    false
+                }
+            })
+        } else {
+            false
+        }
+    });
+    assert!(
+        has_bold_link,
+        "document model should have a Hyperlink with bold runs containing 'Bold link text'"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Grid layout recovery tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn grid_content_recovered_in_output() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/grid_test.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    // All grid text should appear in the output
+    assert!(
+        doc_xml.contains("Left column text"),
+        "document.xml should contain 'Left column text' from grid"
+    );
+    assert!(
+        doc_xml.contains("Right column text"),
+        "document.xml should contain 'Right column text' from grid"
+    );
+    assert!(
+        doc_xml.contains("Row 2 left"),
+        "document.xml should contain 'Row 2 left' from grid"
+    );
+    assert!(
+        doc_xml.contains("Row 2 right"),
+        "document.xml should contain 'Row 2 right' from grid"
+    );
+    // Normal text after grid should also be present
+    assert!(
+        doc_xml.contains("Some normal text after grid"),
+        "document.xml should contain text after the grid"
+    );
+}
+
+#[test]
+fn grid_multi_column_has_tab_stops() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/grid_test.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    // Multi-column grid lines should produce tab stops in the XML
+    assert!(
+        doc_xml.contains("<w:tab"),
+        "grid layout should produce tab elements in the output"
+    );
+}
+
+#[test]
+fn grid_document_model_has_tab_inlines() {
+    use typort_ooxml::document::{BlockElement, InlineElement};
+
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/grid_test.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    // Find paragraphs with Tab inline elements (multi-column grid lines)
+    let has_tab = doc.body.elements.iter().any(|e| {
+        if let BlockElement::Paragraph(p) = e {
+            p.inlines.iter().any(|i| matches!(i, InlineElement::Tab))
+        } else {
+            false
+        }
+    });
+    assert!(
+        has_tab,
+        "document model should have Tab inline elements for multi-column grid lines"
+    );
+
+    // Paragraphs with Tab should also have tab_stops set
+    let has_tab_stops = doc.body.elements.iter().any(|e| {
+        if let BlockElement::Paragraph(p) = e {
+            !p.tab_stops.is_empty()
+        } else {
+            false
+        }
+    });
+    assert!(
+        has_tab_stops,
+        "document model should have tab_stops for multi-column grid lines"
+    );
+}
+
+// ── Page numbering integration test ────────────────────────────────────
+
+#[test]
+fn page_numbering_typ_generates_page_field_footer() {
+    let world = typort_core::TyportWorld::new(Path::new(
+        "../../tests/fixtures/page_numbering.typ",
+    ))
+    .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    // Page numbering should be detected
+    assert!(
+        doc.page_numbering.is_some(),
+        "should detect page numbering from #set page(numbering: \"1\")"
+    );
+
+    // Static footer should NOT be set (page number is handled by page_numbering)
+    assert!(
+        doc.footer.is_none(),
+        "static footer should be None when page numbering is detected"
+    );
+
+    // Write to docx and verify footer XML
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let names: Vec<String> = reader.file_names().map(String::from).collect();
+
+    assert!(
+        names.iter().any(|n| n == "word/footer1.xml"),
+        "docx should contain word/footer1.xml, got: {names:?}"
+    );
+
+    let footer_xml =
+        std::io::read_to_string(reader.by_name("word/footer1.xml").unwrap()).unwrap();
+
+    // Footer should contain PAGE field code
+    assert!(
+        footer_xml.contains(" PAGE "),
+        "footer1.xml should contain PAGE instrText: {footer_xml}"
+    );
+    assert!(
+        footer_xml.contains(r#"w:fldCharType="begin"#),
+        "footer should contain fldChar begin: {footer_xml}"
+    );
+    assert!(
+        footer_xml.contains(r#"w:fldCharType="end"#),
+        "footer should contain fldChar end: {footer_xml}"
+    );
+
+    // Document body should reference the footer
+    let doc_xml =
+        std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    assert!(
+        doc_xml.contains("w:footerReference"),
+        "sectPr should reference footer: {doc_xml}"
+    );
+    // Should have pgNumType
+    assert!(
+        doc_xml.contains("w:pgNumType"),
+        "sectPr should contain pgNumType: {doc_xml}"
+    );
+}
+
+#[test]
+fn math_in_table_cells_is_preserved() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/math_in_table.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    // The table must exist
+    assert!(
+        doc_xml.contains("w:tbl"),
+        "document.xml should contain a table"
+    );
+
+    // Math content must appear inside table cells (inside w:tc elements)
+    // Look for OMML math elements that should be generated for $x$, $x^2 + 1$
+    assert!(
+        doc_xml.contains("<m:oMath>"),
+        "document.xml should contain <m:oMath> for inline math in table cells: {doc_xml}"
+    );
+
+    // Verify the plain text cells are also present
+    assert!(
+        doc_xml.contains("Variable"),
+        "table should contain 'Variable' header text"
+    );
+    assert!(
+        doc_xml.contains("Formula"),
+        "table should contain 'Formula' header text"
+    );
+    assert!(
+        doc_xml.contains("3.14"),
+        "table should contain '3.14' value text"
+    );
+}
+
+#[test]
+fn figure_caption_is_single_paragraph() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/figure_caption.typ"))
+            .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    // Count how many paragraphs contain parts of the caption text.
+    // The caption "Table 1: A simple data table" should NOT be split into
+    // separate paragraphs like "Table", "1", ":", "A simple data table".
+    // Instead it should be a single paragraph containing all parts.
+
+    // Split document XML on paragraph boundaries to inspect per-paragraph content
+    let para_texts: Vec<String> = doc_xml
+        .split("<w:p>")
+        .skip(1) // skip everything before the first <w:p>
+        .map(|p| {
+            // Extract text content from <w:t ...>...</w:t> elements within this paragraph
+            let mut text = String::new();
+            for part in p.split("<w:t") {
+                if let Some(rest) = part.strip_prefix(">").or_else(|| {
+                    part.find('>').map(|i| &part[i + 1..])
+                }) {
+                    if let Some(end) = rest.find("</w:t>") {
+                        text.push_str(&rest[..end]);
+                    }
+                }
+            }
+            text
+        })
+        .collect();
+
+    // Find paragraphs that contain caption-related text
+    let caption_paras: Vec<&String> = para_texts
+        .iter()
+        .filter(|t| t.contains("A simple data table"))
+        .collect();
+
+    assert!(
+        !caption_paras.is_empty(),
+        "should find at least one paragraph with caption text 'A simple data table', got paragraphs: {para_texts:?}"
+    );
+
+    // The key assertion: the paragraph containing "A simple data table"
+    // should also contain "Table" (the figure kind prefix), proving they
+    // are combined into a single paragraph, not split apart.
+    let combined = caption_paras.iter().any(|t| {
+        t.contains("Table") && t.contains("A simple data table")
+    });
+    assert!(
+        combined,
+        "caption text and figure prefix should be in the same paragraph, but got separate paragraphs: {caption_paras:?}"
+    );
+}
+
+// ---- Inline math in text (paragraph splitting regression) ----
+
+/// Helper: generate document.xml for inline_math_in_text.typ fixture.
+fn inline_math_in_text_doc_xml() -> String {
+    let world = typort_core::TyportWorld::new(Path::new(
+        "../../tests/fixtures/inline_math_in_text.typ",
+    ))
+    .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap()
+}
+
+#[test]
+fn inline_math_produces_single_paragraph() {
+    let doc_xml = inline_math_in_text_doc_xml();
+
+    // Count <w:p> elements — should be exactly 1 (the single sentence)
+    let p_count = doc_xml.matches("<w:p>").count()
+        + doc_xml.matches("<w:p ").count();
+    assert_eq!(
+        p_count, 1,
+        "sentence with inline math should produce exactly 1 paragraph, got {p_count}: {doc_xml}"
+    );
+}
+
+#[test]
+fn inline_math_has_omath_not_omathpara() {
+    let doc_xml = inline_math_in_text_doc_xml();
+
+    // Inline math should use <m:oMath>, NOT <m:oMathPara>
+    assert!(
+        doc_xml.contains("<m:oMath>"),
+        "inline math should produce <m:oMath> elements"
+    );
+    assert!(
+        !doc_xml.contains("<m:oMathPara>"),
+        "inline math should NOT produce <m:oMathPara> (that's for block equations)"
+    );
+}
+
+#[test]
+fn inline_math_text_runs_are_preserved() {
+    let doc_xml = inline_math_in_text_doc_xml();
+
+    // All text fragments should be present
+    assert!(
+        doc_xml.contains("Where"),
+        "text run 'Where' should be present"
+    );
+    assert!(
+        doc_xml.contains("is the dependent variable and"),
+        "text run 'is the dependent variable and' should be present"
+    );
+    assert!(
+        doc_xml.contains("is the explanatory variable."),
+        "text run 'is the explanatory variable.' should be present"
+    );
+}
+
+#[test]
+fn inline_math_interleaved_with_text_in_same_paragraph() {
+    let doc_xml = inline_math_in_text_doc_xml();
+
+    // Find the single <w:p> and verify it contains both text and math
+    // by checking that text runs and math elements are siblings inside one <w:p>
+    let p_start = doc_xml.find("<w:p>").expect("should have a <w:p>");
+    let p_end = doc_xml[p_start..].find("</w:p>").expect("should have </w:p>") + p_start;
+    let p_content = &doc_xml[p_start..p_end];
+
+    // Should contain both text runs and math
+    assert!(
+        p_content.contains("<w:r>") && p_content.contains("<m:oMath>"),
+        "the single paragraph should contain both <w:r> text runs and <m:oMath> elements"
+    );
+
+    // Should contain at least 2 math elements (for $y$ and $x$)
+    let math_count = p_content.matches("<m:oMath>").count();
+    assert!(
+        math_count >= 2,
+        "should have at least 2 inline math elements, got {math_count}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Visual regression: Typst PDF vs typort docx→PDF pixel comparison
+// ---------------------------------------------------------------------------
+
+/// Compile a .typ to PDF via Typst's native renderer (ground truth).
+fn typst_to_pdf(typ_path: &Path) -> Vec<u8> {
+    let world = typort_core::TyportWorld::new(typ_path).unwrap();
+    let paged = typst::compile::<typst::layout::PagedDocument>(&world)
+        .output
+        .unwrap();
+    typst_pdf::pdf(&paged, &typst_pdf::PdfOptions::default()).unwrap()
+}
+
+/// Convert .typ → .docx → PDF (via LibreOffice), return PDF bytes.
+fn typort_to_pdf_via_docx(typ_path: &Path, label: &str) -> Option<Vec<u8>> {
+    let world = typort_core::TyportWorld::new(typ_path).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+    let tmp_dir = std::env::temp_dir().join("typort_visual_test");
+    std::fs::create_dir_all(&tmp_dir).ok()?;
+    let docx_path = tmp_dir.join(format!("{label}.docx"));
+    let f = std::fs::File::create(&docx_path).ok()?;
+    typort_ooxml::write_docx(&doc, std::io::BufWriter::new(f)).ok()?;
+
+    let status = std::process::Command::new("libreoffice")
+        .args(["--headless", "--convert-to", "pdf", "--outdir"])
+        .arg(&tmp_dir)
+        .arg(&docx_path)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .ok()?;
+    if !status.success() {
+        return None;
+    }
+    std::fs::read(tmp_dir.join(format!("{label}.pdf"))).ok()
+}
+
+/// Render a PDF page to a PNG image using pdftoppm.
+fn pdf_page_to_png(pdf_bytes: &[u8], page: u32, label: &str) -> Option<std::path::PathBuf> {
+    let tmp_dir = std::env::temp_dir().join("typort_visual_test");
+    std::fs::create_dir_all(&tmp_dir).ok()?;
+    let pdf_path = tmp_dir.join(format!("{label}.pdf"));
+    std::fs::write(&pdf_path, pdf_bytes).ok()?;
+    let out_prefix = tmp_dir.join(format!("{label}_page"));
+    let page_str = page.to_string();
+    let status = std::process::Command::new("pdftoppm")
+        .args(["-png", "-r", "150", "-f", &page_str, "-l", &page_str])
+        .arg(&pdf_path)
+        .arg(&out_prefix)
+        .status()
+        .ok()?;
+    if !status.success() {
+        return None;
+    }
+    let png_name = format!("{label}_page-{page:0>2}.png",);
+    let png_path = tmp_dir.join(&png_name);
+    if png_path.exists() {
+        Some(png_path)
+    } else {
+        // pdftoppm may use different padding
+        let alt = tmp_dir.join(format!("{label}_page-{page}.png"));
+        if alt.exists() { Some(alt) } else { None }
+    }
+}
+
+/// Compare two PNG images using ImageMagick, return the normalized difference (0.0 = identical).
+fn compare_images(a: &Path, b: &Path) -> Option<f64> {
+    let output = std::process::Command::new("compare")
+        .args(["-metric", "RMSE"])
+        .arg(a)
+        .arg(b)
+        .arg("/dev/null")
+        .output()
+        .ok()?;
+    // ImageMagick outputs metric to stderr: "1234.5 (0.0188)"
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let paren_start = stderr.find('(')?;
+    let paren_end = stderr.find(')')?;
+    stderr[paren_start + 1..paren_end].parse::<f64>().ok()
+}
+
+#[test]
+fn visual_regression_hello() {
+    let path = Path::new("../../tests/fixtures/hello.typ");
+    let ground_truth = typst_to_pdf(path);
+    let Some(docx_pdf) = typort_to_pdf_via_docx(path, "hello") else {
+        eprintln!("SKIP: LibreOffice not available for visual regression");
+        return;
+    };
+
+    let Some(gt_png) = pdf_page_to_png(&ground_truth, 1, "gt_hello") else {
+        eprintln!("SKIP: pdftoppm not available");
+        return;
+    };
+    let Some(docx_png) = pdf_page_to_png(&docx_pdf, 1, "docx_hello") else {
+        eprintln!("SKIP: pdftoppm failed for docx PDF");
+        return;
+    };
+
+    if let Some(diff) = compare_images(&gt_png, &docx_png) {
+        eprintln!("hello.typ visual diff: {diff:.4} (0=identical, <0.15=acceptable)");
+        assert!(
+            diff < 0.30,
+            "visual regression too high for hello.typ: {diff:.4}"
+        );
+    }
+}
+
+#[test]
+fn visual_regression_complex_paper() {
+    let path = Path::new("../../tests/fixtures/complex_paper.typ");
+    let ground_truth = typst_to_pdf(path);
+    let Some(docx_pdf) = typort_to_pdf_via_docx(path, "complex") else {
+        eprintln!("SKIP: LibreOffice not available");
+        return;
+    };
+
+    let Some(gt_png) = pdf_page_to_png(&ground_truth, 1, "gt_complex") else {
+        return;
+    };
+    let Some(docx_png) = pdf_page_to_png(&docx_pdf, 1, "docx_complex") else {
+        return;
+    };
+
+    if let Some(diff) = compare_images(&gt_png, &docx_png) {
+        eprintln!("complex_paper.typ visual diff: {diff:.4}");
+        assert!(
+            diff < 0.35,
+            "visual regression too high for complex_paper.typ: {diff:.4}"
+        );
+    }
+}
+
+// ---------- equation label bookmark tests (#15) ----------
+
+#[test]
+fn equation_label_produces_bookmark() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/equation_label.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    assert!(
+        doc_xml.contains("w:bookmarkStart") && doc_xml.contains("eq:pythagoras"),
+        "document.xml should contain a bookmarkStart with name eq:pythagoras"
+    );
+    assert!(
+        doc_xml.contains("w:bookmarkEnd"),
+        "document.xml should contain a bookmarkEnd for the equation bookmark"
+    );
+}
+
+#[test]
+fn equation_label_cross_reference_produces_ref_field() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/equation_label.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    assert!(
+        doc_xml.contains("REF eq:pythagoras"),
+        "document.xml should contain a REF field code pointing at eq:pythagoras"
+    );
+}
+
+// ---------- document title metadata tests (#16) ----------
+
+#[test]
+fn doc_title_from_set_document() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/doc_title.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let core_xml = std::io::read_to_string(reader.by_name("docProps/core.xml").unwrap()).unwrap();
+
+    assert!(
+        core_xml.contains("My Custom Title"),
+        "core.xml dc:title should be 'My Custom Title', not the first heading. Got: {core_xml}"
+    );
+    assert!(
+        !core_xml.contains("First Heading"),
+        "core.xml dc:title should NOT fall back to the first heading when #set document(title:) is used"
+    );
+}
+
+#[test]
+fn doc_author_from_set_document() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/doc_title.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let core_xml = std::io::read_to_string(reader.by_name("docProps/core.xml").unwrap()).unwrap();
+
+    assert!(
+        core_xml.contains("Author Name"),
+        "core.xml dc:creator should be 'Author Name'. Got: {core_xml}"
+    );
+}
+
+#[test]
+fn show_rule_heading_centered() {
+    let world = typort_core::TyportWorld::new(Path::new(
+        "../../tests/fixtures/centered_heading.typ",
+    ))
+    .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    // The heading should be detected as centered from the PagedDocument
+    // Look for a Heading1 paragraph with center alignment
+    assert!(
+        doc_xml.contains(r#"<w:jc w:val="center"/>"#),
+        "centered heading should have w:jc center. Got:\n{doc_xml}"
+    );
+}
+
+#[test]
+fn show_rule_colored_bold() {
+    let world = typort_core::TyportWorld::new(Path::new(
+        "../../tests/fixtures/colored_text.typ",
+    ))
+    .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    // The bold text should have red color.
+    // Typst's `red` is #ff4136, not #ff0000.
+    assert!(
+        doc_xml.contains(r#"<w:color w:val="FF4136"/>"#),
+        "red bold text should have w:color FF4136. Got:\n{doc_xml}"
+    );
+}
+
+#[test]
+fn large_title_not_split_by_tabs() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/large_title_test.typ"))
+            .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    // The large centered title "大标题测试文档" should NOT be split by tab characters.
+    // Previously, large CJK characters at 22pt exceeded the x-cluster gap threshold,
+    // causing each character to be treated as a separate column.
+    assert!(
+        !doc_xml.contains("<w:tab/>"),
+        "large title should not contain tab separators. Got:\n{doc_xml}"
+    );
+
+    // The title characters should all be present
+    assert!(
+        doc_xml.contains('大') && doc_xml.contains('标') && doc_xml.contains('文'),
+        "title characters should be in the output"
+    );
+}
+
+#[test]
+fn nested_table_produces_nested_w_tbl() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/nested_table_test.typ"))
+            .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    // There should be 2 w:tbl elements: the outer table and the nested inner table
+    let table_count = doc_xml.matches("<w:tbl>").count();
+    assert_eq!(
+        table_count, 2,
+        "should have 2 w:tbl elements (outer + nested), got {table_count}"
+    );
+
+    // Both inner cell texts should be present
+    assert!(
+        doc_xml.contains("Inner A"),
+        "nested table should contain 'Inner A'"
+    );
+    assert!(
+        doc_xml.contains("Inner B"),
+        "nested table should contain 'Inner B'"
+    );
+
+    // Outer cell text should be present
+    assert!(
+        doc_xml.contains("Outer A"),
+        "outer table should contain 'Outer A'"
+    );
+}
+
+#[test]
+fn nested_table_document_model_has_cell_content() {
+    use typort_ooxml::document::{BlockElement, CellContent};
+
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/nested_table_test.typ"))
+            .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    // Find the table in the document model
+    let table = doc.body.elements.iter().find_map(|e| {
+        if let BlockElement::Table(t) = e {
+            Some(t)
+        } else {
+            None
+        }
+    });
+    assert!(table.is_some(), "document should contain a table");
+
+    let table = table.unwrap();
+    assert_eq!(table.rows.len(), 1, "outer table should have 1 row");
+    assert_eq!(
+        table.rows[0].cells.len(),
+        2,
+        "outer table row should have 2 cells"
+    );
+
+    // Second cell should have nested table content
+    let cell_with_nested = &table.rows[0].cells[1];
+    let has_nested_table = cell_with_nested
+        .content
+        .iter()
+        .any(|c| matches!(c, CellContent::Table(_)));
+    assert!(
+        has_nested_table,
+        "second cell should have a nested table in its content"
     );
 }

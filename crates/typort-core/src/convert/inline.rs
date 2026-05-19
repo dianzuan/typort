@@ -6,14 +6,15 @@
 use typort_ooxml::document::Run;
 use typst::foundations::Content;
 use typst_library::foundations::{SequenceElem, SymbolElem};
-use typst_library::model::{EmphElem, StrongElem};
-use typst_library::text::{SpaceElem, TextElem};
+use typst_library::model::{EmphElem, ParElem, StrongElem};
+use typst_library::text::{SmallcapsElem, SpaceElem, TextElem};
 
 /// Formatting state accumulated while walking the Content tree.
 #[derive(Clone, Default)]
 struct InlineCtx {
     bold: bool,
     italic: bool,
+    smallcaps: bool,
 }
 
 /// Extract a flat list of [`Run`] from a `Content` body.
@@ -41,15 +42,31 @@ fn walk_content(content: &Content, ctx: &InlineCtx, runs: &mut Vec<Run>) {
         let mut inner = ctx.clone();
         inner.italic = true;
         walk_content(&emph.body, &inner, runs);
+    } else if let Some(sc) = content.to_packed::<SmallcapsElem>() {
+        let mut inner = ctx.clone();
+        inner.smallcaps = true;
+        walk_content(&sc.body, &inner, runs);
+    } else if let Some(par) = content.to_packed::<ParElem>() {
+        walk_content(&par.body, ctx, runs);
     } else if let Some(text) = content.to_packed::<TextElem>() {
         let mut run = Run::new(text.text.as_str());
         run.bold = ctx.bold;
         run.italic = ctx.italic;
+        run.smallcaps = ctx.smallcaps;
+        let sp = content.span();
+        if !sp.is_detached() {
+            run.span = Some(sp);
+        }
         runs.push(run);
     } else if let Some(sym) = content.to_packed::<SymbolElem>() {
         let mut run = Run::new(sym.text.as_str());
         run.bold = ctx.bold;
         run.italic = ctx.italic;
+        run.smallcaps = ctx.smallcaps;
+        let sp = content.span();
+        if !sp.is_detached() {
+            run.span = Some(sp);
+        }
         runs.push(run);
     } else if content.to_packed::<SpaceElem>().is_some() {
         // Merge a space into the previous run when possible, otherwise emit a new run.
@@ -112,5 +129,22 @@ mod tests {
         assert_eq!(runs.len(), 2);
         assert_eq!(runs[0].text, "a ");
         assert_eq!(runs[1].text, "b");
+    }
+}
+
+#[cfg(test)]
+mod sc_test {
+    use super::*;
+    use typst::foundations::{Content, NativeElement};
+
+    #[test]
+    fn smallcaps_detected_in_extract_runs() {
+        let inner = Content::sequence(vec![
+            TextElem::packed("hello"),
+        ]);
+        let sc = typst_library::text::SmallcapsElem::new(inner).pack();
+        let runs = extract_runs(&sc);
+        assert!(!runs.is_empty(), "should extract runs from SmallcapsElem");
+        assert!(runs[0].smallcaps, "run should have smallcaps=true");
     }
 }

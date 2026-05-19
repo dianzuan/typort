@@ -12,7 +12,7 @@ use typst_library::math::{
     OpElem, OverbraceElem, OverbracketElem, OverlineElem, OverparenElem, OvershellElem, RootElem,
     UnderbraceElem, UnderbracketElem, UnderlineElem, UnderparenElem, UndershellElem, VecElem,
 };
-use typst_library::text::{SpaceElem, TextElem};
+use typst_library::text::{LinebreakElem, SpaceElem, TextElem};
 
 /// Convert a Typst `EquationElem` Content into an OMML XML string.
 ///
@@ -50,9 +50,81 @@ pub fn equation_to_omml(content: &Content) -> String {
 
 fn write_omath<W: Write>(writer: &mut Writer<W>, body: &Content) -> std::io::Result<()> {
     writer.create_element("m:oMath").write_inner_content(|w| {
-        convert_content(w, body)?;
+        // Check if the body is a multi-line aligned equation (has AlignPointElem + LinebreakElem)
+        if is_aligned_equation(body) {
+            convert_eq_array(w, body)?;
+        } else {
+            convert_content(w, body)?;
+        }
         Ok(())
     })?;
+    Ok(())
+}
+
+/// Check if a content tree represents a multi-line aligned equation.
+///
+/// Returns `true` when the top-level sequence contains both `AlignPointElem`
+/// (alignment `&`) and `LinebreakElem` (line break `\`).
+fn is_aligned_equation(content: &Content) -> bool {
+    if let Some(seq) = content.to_packed::<SequenceElem>() {
+        let has_align = seq
+            .children
+            .iter()
+            .any(|c| c.to_packed::<AlignPointElem>().is_some());
+        let has_linebreak = seq
+            .children
+            .iter()
+            .any(|c| c.to_packed::<LinebreakElem>().is_some());
+        has_align && has_linebreak
+    } else {
+        false
+    }
+}
+
+/// Convert a multi-line aligned equation to `m:eqArr`.
+///
+/// The body is split at `LinebreakElem` boundaries into rows. Each row
+/// becomes an `<m:e>` inside the equation array. Within each row,
+/// `AlignPointElem` is emitted as an ampersand `&` character which OMML
+/// uses as an alignment tab stop inside `eqArr`.
+fn convert_eq_array<W: Write>(writer: &mut Writer<W>, body: &Content) -> std::io::Result<()> {
+    let seq = body
+        .to_packed::<SequenceElem>()
+        .expect("aligned equation body must be a SequenceElem");
+
+    // Split children at LinebreakElem boundaries
+    let mut rows: Vec<Vec<&Content>> = vec![Vec::new()];
+    for child in &seq.children {
+        if child.to_packed::<LinebreakElem>().is_some() {
+            rows.push(Vec::new());
+        } else {
+            rows.last_mut().unwrap().push(child);
+        }
+    }
+
+    // Remove trailing empty rows (can happen if there's a trailing linebreak)
+    while rows.last().is_some_and(Vec::is_empty) {
+        rows.pop();
+    }
+
+    writer
+        .create_element("m:eqArr")
+        .write_inner_content(|arr| {
+            for row in &rows {
+                arr.create_element("m:e").write_inner_content(|e| {
+                    for child in row {
+                        if child.to_packed::<AlignPointElem>().is_some() {
+                            // Emit ampersand as OMML alignment tab inside eqArr
+                            write_math_run(e, "\u{0026}")?;
+                        } else {
+                            convert_content(e, child)?;
+                        }
+                    }
+                    Ok(())
+                })?;
+            }
+            Ok(())
+        })?;
     Ok(())
 }
 

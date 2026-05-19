@@ -4,10 +4,6 @@
 pub mod convert;
 pub mod world;
 
-mod realize_test;
-#[cfg(test)]
-mod spike_introspector;
-
 pub use convert::convert;
 pub use world::{TyportWorld, compile};
 
@@ -45,8 +41,8 @@ mod tests {
             panic!("expected Paragraph, got Table");
         };
         assert_eq!(p.style, Some(ParagraphStyle::Heading(1)));
-        assert!(!p.runs.is_empty());
-        assert!(p.runs[0].text.contains("Hello"));
+        assert!(!p.inlines.is_empty());
+        assert!(p.text_content().contains("Hello"));
     }
 
     #[test]

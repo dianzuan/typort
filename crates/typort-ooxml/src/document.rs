@@ -58,6 +58,13 @@ pub enum InlineElement {
     Hyperlink { url: String, runs: Vec<Run> },
     /// A page break (`w:br type="page"`).
     PageBreak,
+    /// A Table of Contents field code (`TOC \o "1-N" \h \z \u`).
+    FieldToc {
+        /// Maximum outline depth (e.g. 3 → headings 1–3).
+        max_depth: u8,
+    },
+    /// A tab character (`w:r` containing `w:tab`).
+    Tab,
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +76,15 @@ pub struct Run {
     pub superscript: bool,
     pub subscript: bool,
     pub monospace: bool,
+    pub underline: bool,
+    pub strikethrough: bool,
+    pub highlight: bool,
+    pub smallcaps: bool,
+    /// Text color as a 6-digit hex string (e.g. "FF0000" for red).
+    /// `None` means inherit the default (black).
+    pub color: Option<String>,
+    /// Source span for cross-referencing with `PagedDocument` styling.
+    pub span: Option<typst_syntax::Span>,
 }
 
 impl Run {
@@ -81,6 +97,12 @@ impl Run {
             superscript: false,
             subscript: false,
             monospace: false,
+            underline: false,
+            strikethrough: false,
+            highlight: false,
+            smallcaps: false,
+            color: None,
+            span: None,
         }
     }
 }
@@ -95,8 +117,8 @@ pub struct Footnote {
 }
 
 #[derive(Debug, Clone, Default)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct Paragraph {
-    pub runs: Vec<Run>,
     /// Inline elements including text runs and footnote references.
     pub inlines: Vec<InlineElement>,
     pub style: Option<ParagraphStyle>,
@@ -115,6 +137,14 @@ pub struct Paragraph {
     pub left_indent: Option<u32>,
     /// Apply `CodeBlock` style (monospace, no indent, optional shading).
     pub code_block: bool,
+    /// If set, this paragraph ends a section. The `w:sectPr` is emitted
+    /// inside this paragraph's `w:pPr`.
+    pub section_break: Option<SectionBreak>,
+    /// If true, this paragraph represents a horizontal rule (bottom border).
+    pub horizontal_rule: bool,
+    /// Tab stop positions in twips (e.g., for grid/multi-column recovery).
+    /// Emitted as `<w:tabs><w:tab w:val="right" w:pos="..."/></w:tabs>` in `w:pPr`.
+    pub tab_stops: Vec<u32>,
 }
 
 impl Paragraph {
@@ -125,14 +155,49 @@ impl Paragraph {
 
     pub fn add_run(&mut self, text: &str) {
         let run = Run::new(text);
-        self.inlines.push(InlineElement::Text(run.clone()));
-        self.runs.push(run);
+        self.inlines.push(InlineElement::Text(run));
     }
 
     /// Add a pre-built run to this paragraph.
     pub fn push_run(&mut self, run: Run) {
-        self.inlines.push(InlineElement::Text(run.clone()));
-        self.runs.push(run);
+        self.inlines.push(InlineElement::Text(run));
+    }
+
+    /// Get concatenated text content from all text runs.
+    #[must_use]
+    pub fn text_content(&self) -> String {
+        self.inlines
+            .iter()
+            .filter_map(|i| {
+                if let InlineElement::Text(run) = i {
+                    Some(run.text.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Iterate over text runs (immutable).
+    pub fn text_runs(&self) -> impl Iterator<Item = &Run> + '_ {
+        self.inlines.iter().filter_map(|i| {
+            if let InlineElement::Text(run) = i {
+                Some(run)
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Iterate over text runs (mutable).
+    pub fn text_runs_mut(&mut self) -> impl Iterator<Item = &mut Run> + '_ {
+        self.inlines.iter_mut().filter_map(|i| {
+            if let InlineElement::Text(run) = i {
+                Some(run)
+            } else {
+                None
+            }
+        })
     }
 
     /// Add a footnote reference to this paragraph.
@@ -183,16 +248,37 @@ impl Paragraph {
         self.inlines.push(InlineElement::Hyperlink { url, runs });
     }
 
+    /// Add a Table of Contents field code.
+    pub fn add_toc(&mut self, max_depth: u8) {
+        self.inlines.push(InlineElement::FieldToc { max_depth });
+    }
+
     /// Add a page break.
     pub fn add_page_break(&mut self) {
         self.inlines.push(InlineElement::PageBreak);
     }
+
+    /// Add a tab character.
+    pub fn add_tab(&mut self) {
+        self.inlines.push(InlineElement::Tab);
+    }
 }
 
-/// A table cell containing paragraphs.
+/// Content of a table cell: a mix of paragraphs and nested tables in order.
+#[derive(Debug, Clone)]
+pub enum CellContent {
+    Paragraph(Paragraph),
+    Table(Table),
+}
+
+/// A table cell containing paragraphs and optionally nested tables.
 #[derive(Debug, Clone)]
 pub struct TableCell {
     pub paragraphs: Vec<Paragraph>,
+    /// Ordered cell content (paragraphs + nested tables). When non-empty, this
+    /// is used instead of `paragraphs` for serialisation, allowing cells to
+    /// contain nested `<w:tbl>` elements interleaved with `<w:p>` elements.
+    pub content: Vec<CellContent>,
     /// Number of columns this cell spans (1 = no merge). Maps to `w:gridSpan`.
     pub colspan: u32,
     /// Vertical merge state. Maps to `w:vMerge`.
@@ -237,6 +323,28 @@ pub struct Body {
     pub elements: Vec<BlockElement>,
 }
 
+/// Section break type for multi-section documents.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SectionBreakType {
+    NextPage,
+    Continuous,
+    EvenPage,
+    OddPage,
+}
+
+/// A section break that ends a section, optionally overriding page settings.
+#[derive(Debug, Clone)]
+pub struct SectionBreak {
+    pub break_type: SectionBreakType,
+    pub page_settings: Option<PageSettings>,
+}
+
+/// Header or footer content (a sequence of paragraphs).
+#[derive(Debug, Clone)]
+pub struct HeaderFooter {
+    pub paragraphs: Vec<Paragraph>,
+}
+
 #[derive(Debug, Clone)]
 pub struct PageSettings {
     pub width_twips: u32,
@@ -245,6 +353,10 @@ pub struct PageSettings {
     pub margin_bottom: u32,
     pub margin_left: u32,
     pub margin_right: u32,
+    /// Number of columns in this section (None or 1 = single column).
+    pub columns: Option<u32>,
+    /// Spacing between columns in twips (default 720 = 0.5 inch).
+    pub column_spacing: Option<u32>,
 }
 
 impl Default for PageSettings {
@@ -256,6 +368,8 @@ impl Default for PageSettings {
             margin_bottom: 1440,
             margin_left: 1800, // 3.17cm
             margin_right: 1800,
+            columns: None,
+            column_spacing: None,
         }
     }
 }
@@ -286,6 +400,16 @@ pub enum FootnoteFormat {
     CircledNumber,
 }
 
+/// Page number format for footer page numbering.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PageNumberFormat {
+    Decimal,
+    LowerRoman,
+    UpperRoman,
+    LowerLetter,
+    UpperLetter,
+}
+
 #[derive(Debug, Clone)]
 pub struct DocumentStyle {
     pub body_font_ascii: String,
@@ -294,6 +418,20 @@ pub struct DocumentStyle {
     pub line_spacing: u32,
     pub first_line_indent_twips: u32,
     pub footnote_format: FootnoteFormat,
+    /// Font used for code/raw blocks (detected from Typst rendering).
+    pub code_font: String,
+    /// Font size for code blocks in half-points.
+    pub code_size_half_pt: u32,
+    /// Font size for footnote text in half-points.
+    pub footnote_size_half_pt: u32,
+    /// Heading sizes in half-points, indexed by level (0=h1, 1=h2, ..., 4=h5).
+    pub heading_sizes: [u32; 5],
+    /// Paragraph justification (e.g., "both" for justify, "left" for left-align).
+    pub body_alignment: String,
+    /// Heading spacing before in twips (default 240 = 12pt).
+    pub heading_spacing_before: u32,
+    /// Heading spacing after in twips (default 120 = 6pt).
+    pub heading_spacing_after: u32,
 }
 
 impl Default for DocumentStyle {
@@ -305,6 +443,13 @@ impl Default for DocumentStyle {
             line_spacing: 360,
             first_line_indent_twips: 420,
             footnote_format: FootnoteFormat::default(),
+            code_font: "Courier New".to_string(),
+            code_size_half_pt: 18,
+            footnote_size_half_pt: 18,
+            heading_sizes: [30, 28, 26, 24, 22],
+            body_alignment: "left".to_string(),
+            heading_spacing_before: 240,
+            heading_spacing_after: 120,
         }
     }
 }
@@ -321,6 +466,13 @@ pub struct Document {
     pub style: DocumentStyle,
     /// Counter for generating unique bookmark IDs.
     pub bookmark_counter: u32,
+    /// Default header for the document (written to `word/header1.xml`).
+    pub header: Option<HeaderFooter>,
+    /// Default footer for the document (written to `word/footer1.xml`).
+    pub footer: Option<HeaderFooter>,
+    /// If set, footer contains a PAGE field code with this number format.
+    /// When this is `Some`, a footer is always generated (even if `footer` is `None`).
+    pub page_numbering: Option<PageNumberFormat>,
 }
 
 impl Document {

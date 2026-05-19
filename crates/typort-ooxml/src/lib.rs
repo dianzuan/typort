@@ -4,7 +4,7 @@ pub mod document;
 pub mod styles;
 pub mod writer;
 
-pub use document::{Document, DocumentMetadata, DocumentStyle, FootnoteFormat, ImageData, ImageFormat};
+pub use document::{Document, DocumentMetadata, DocumentStyle, FootnoteFormat, HeaderFooter, ImageData, ImageFormat, PageNumberFormat, SectionBreak, SectionBreakType};
 pub use writer::write_docx;
 
 #[cfg(test)]
@@ -416,6 +416,7 @@ mod tests {
         let mut doc = Document::new();
         let cell = document::TableCell {
             paragraphs: vec![],
+            content: Vec::new(),
             colspan: 1,
             vmerge: document::VMerge::None,
             width_pct: None,
@@ -470,14 +471,14 @@ mod tests {
     // ── 14. Styles.xml ──────────────────────────────────────────────────
 
     #[test]
-    fn styles_xml_normal_has_jc_both_and_first_line_indent() {
+    fn styles_xml_normal_has_jc_left_and_first_line_indent() {
         let doc = Document::new();
         let buf = build_docx(&doc);
         let xml = read_zip_entry(&buf, "word/styles.xml");
-        // Normal style uses justify (both)
+        // Normal style uses left alignment (Typst default is justify: false)
         assert!(
-            xml.contains(r#"<w:jc w:val="both"/>"#),
-            "expected jc both in Normal style: {xml}"
+            xml.contains(r#"<w:jc w:val="left"/>"#),
+            "expected jc left in Normal style: {xml}"
         );
         // Default first-line indent is 420 twips
         assert!(
@@ -992,7 +993,108 @@ mod tests {
         assert_eq!(id2, 1);
     }
 
-    // ── 30. Combined cross-reference round-trip ─────────────────────────
+    // ── 30. Run underline ─────────────────────────────────────────────
+
+    #[test]
+    fn run_underline_produces_w_u_single() {
+        let mut doc = Document::new();
+        let mut para = document::Paragraph::new();
+        let mut run = document::Run::new("underlined");
+        run.underline = true;
+        para.push_run(run);
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        let xml = read_zip_entry(&buf, "word/document.xml");
+        assert!(
+            xml.contains(r#"<w:u w:val="single"/>"#),
+            "expected <w:u w:val=\"single\"/> in: {xml}"
+        );
+        assert!(xml.contains("underlined"));
+    }
+
+    // ── 31. Run strikethrough ──────────────────────────────────────────
+
+    #[test]
+    fn run_strikethrough_produces_w_strike() {
+        let mut doc = Document::new();
+        let mut para = document::Paragraph::new();
+        let mut run = document::Run::new("deleted");
+        run.strikethrough = true;
+        para.push_run(run);
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        let xml = read_zip_entry(&buf, "word/document.xml");
+        assert!(
+            xml.contains("<w:strike/>"),
+            "expected <w:strike/> in: {xml}"
+        );
+        assert!(xml.contains("deleted"));
+    }
+
+    // ── 32. Run highlight ──────────────────────────────────────────────
+
+    #[test]
+    fn run_highlight_produces_w_highlight_yellow() {
+        let mut doc = Document::new();
+        let mut para = document::Paragraph::new();
+        let mut run = document::Run::new("highlighted");
+        run.highlight = true;
+        para.push_run(run);
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        let xml = read_zip_entry(&buf, "word/document.xml");
+        assert!(
+            xml.contains(r#"<w:highlight w:val="yellow"/>"#),
+            "expected <w:highlight w:val=\"yellow\"/> in: {xml}"
+        );
+        assert!(xml.contains("highlighted"));
+    }
+
+    // ── 33. Run smallcaps ──────────────────────────────────────────────
+
+    #[test]
+    fn run_smallcaps_produces_w_smallcaps() {
+        let mut doc = Document::new();
+        let mut para = document::Paragraph::new();
+        let mut run = document::Run::new("Small Caps");
+        run.smallcaps = true;
+        para.push_run(run);
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        let xml = read_zip_entry(&buf, "word/document.xml");
+        assert!(
+            xml.contains("<w:smallCaps/>"),
+            "expected <w:smallCaps/> in: {xml}"
+        );
+        assert!(xml.contains("Small Caps"));
+    }
+
+    // ── 34. Horizontal rule ────────────────────────────────────────────
+
+    #[test]
+    fn horizontal_rule_produces_pbdr_bottom() {
+        let mut doc = Document::new();
+        let mut para = document::Paragraph::new();
+        para.horizontal_rule = true;
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        let xml = read_zip_entry(&buf, "word/document.xml");
+        assert!(
+            xml.contains("<w:pBdr>"),
+            "expected w:pBdr in: {xml}"
+        );
+        assert!(
+            xml.contains(r#"<w:bottom w:val="single" w:sz="6" w:space="1" w:color="auto"/>"#),
+            "expected bottom border attributes in: {xml}"
+        );
+    }
+
+    // ── 35. Combined cross-reference round-trip ─────────────────────────
 
     #[test]
     fn bookmark_and_ref_round_trip() {
@@ -1020,4 +1122,158 @@ mod tests {
         assert!(xml.contains("REF intro"), "REF field should reference bookmark");
     }
 
+    // ── 36. Page numbering — decimal ───────────────────────────────────
+
+    #[test]
+    fn page_numbering_decimal_generates_footer_with_page_field() {
+        let mut doc = Document::new();
+        doc.page_numbering = Some(PageNumberFormat::Decimal);
+        let mut para = document::Paragraph::new();
+        para.add_run("body text");
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        // Footer file should exist
+        assert!(
+            zip_has_entry(&buf, "word/footer1.xml"),
+            "ZIP should contain word/footer1.xml when page_numbering is set"
+        );
+        let footer = read_zip_entry(&buf, "word/footer1.xml");
+        // Should contain PAGE field code
+        assert!(
+            footer.contains(" PAGE "),
+            "footer should contain PAGE instrText: {footer}"
+        );
+        assert!(
+            footer.contains(r#"w:fldCharType="begin"#),
+            "footer should contain fldChar begin: {footer}"
+        );
+        assert!(
+            footer.contains(r#"w:fldCharType="separate"#),
+            "footer should contain fldChar separate: {footer}"
+        );
+        assert!(
+            footer.contains(r#"w:fldCharType="end"#),
+            "footer should contain fldChar end: {footer}"
+        );
+        // Should be center-aligned
+        assert!(
+            footer.contains(r#"<w:jc w:val="center"/>"#),
+            "footer PAGE field should be centered: {footer}"
+        );
+    }
+
+    // ── 37. Page numbering — footer NOT static text ────────────────────
+
+    #[test]
+    fn page_numbering_footer_does_not_contain_static_page_number_body() {
+        let mut doc = Document::new();
+        doc.page_numbering = Some(PageNumberFormat::Decimal);
+        let mut para = document::Paragraph::new();
+        para.add_run("body text");
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        let doc_xml = read_zip_entry(&buf, "word/document.xml");
+        // The body should NOT contain the page number as a static run
+        // (it's in the footer via PAGE field, not in the body)
+        assert!(
+            !doc_xml.contains(r#"<w:t xml:space="preserve">1</w:t>"#)
+                || doc_xml.contains("PAGE"),
+            "body should not contain static page number text"
+        );
+    }
+
+    // ── 38. Page numbering — sectPr references footer ──────────────────
+
+    #[test]
+    fn page_numbering_sect_pr_references_footer() {
+        let mut doc = Document::new();
+        doc.page_numbering = Some(PageNumberFormat::Decimal);
+        let mut para = document::Paragraph::new();
+        para.add_run("text");
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        let doc_xml = read_zip_entry(&buf, "word/document.xml");
+        assert!(
+            doc_xml.contains("w:footerReference"),
+            "sectPr should reference footer1.xml: {doc_xml}"
+        );
+    }
+
+    // ── 39. Page numbering — pgNumType with decimal ────────────────────
+
+    #[test]
+    fn page_numbering_decimal_emits_pg_num_type() {
+        let mut doc = Document::new();
+        doc.page_numbering = Some(PageNumberFormat::Decimal);
+        let mut para = document::Paragraph::new();
+        para.add_run("text");
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        let doc_xml = read_zip_entry(&buf, "word/document.xml");
+        assert!(
+            doc_xml.contains(r#"<w:pgNumType w:fmt="decimal"/>"#),
+            "sectPr should contain pgNumType decimal: {doc_xml}"
+        );
+    }
+
+    // ── 40. Page numbering — lower roman ───────────────────────────────
+
+    #[test]
+    fn page_numbering_lower_roman_emits_pg_num_type() {
+        let mut doc = Document::new();
+        doc.page_numbering = Some(PageNumberFormat::LowerRoman);
+        let mut para = document::Paragraph::new();
+        para.add_run("text");
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        let doc_xml = read_zip_entry(&buf, "word/document.xml");
+        assert!(
+            doc_xml.contains(r#"<w:pgNumType w:fmt="lowerRoman"/>"#),
+            "sectPr should contain pgNumType lowerRoman: {doc_xml}"
+        );
+    }
+
+    // ── 41. Page numbering — content types and rels ────────────────────
+
+    #[test]
+    fn page_numbering_generates_content_types_and_rels() {
+        let mut doc = Document::new();
+        doc.page_numbering = Some(PageNumberFormat::Decimal);
+        let mut para = document::Paragraph::new();
+        para.add_run("text");
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        let ct = read_zip_entry(&buf, "[Content_Types].xml");
+        assert!(
+            ct.contains("footer"),
+            "content types should reference footer: {ct}"
+        );
+        let rels = read_zip_entry(&buf, "word/_rels/document.xml.rels");
+        assert!(
+            rels.contains("footer"),
+            "document rels should reference footer: {rels}"
+        );
+    }
+
+    // ── 42. No page numbering — no footer generated ────────────────────
+
+    #[test]
+    fn no_page_numbering_no_footer() {
+        let mut doc = Document::new();
+        let mut para = document::Paragraph::new();
+        para.add_run("no page numbers");
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        assert!(
+            !zip_has_entry(&buf, "word/footer1.xml"),
+            "ZIP should NOT contain footer1.xml when no page numbering and no footer"
+        );
+    }
 }
