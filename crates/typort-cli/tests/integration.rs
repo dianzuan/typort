@@ -1098,7 +1098,10 @@ fn svg_image_has_nonzero_dimensions() {
             }
         }
     }
-    assert!(found, "should have found at least one image from SVG rasterization");
+    assert!(
+        found,
+        "should have found at least one image from SVG rasterization"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1328,7 +1331,10 @@ fn toc_document_model_has_toc_inline() {
             false
         }
     });
-    assert!(has_toc, "document model should contain a FieldToc inline element");
+    assert!(
+        has_toc,
+        "document model should contain a FieldToc inline element"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1336,10 +1342,9 @@ fn toc_document_model_has_toc_inline() {
 // ---------------------------------------------------------------------------
 
 fn aligned_equations_doc_xml() -> String {
-    let world = typort_core::TyportWorld::new(Path::new(
-        "../../tests/fixtures/aligned_equations.typ",
-    ))
-    .unwrap();
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/aligned_equations.typ"))
+            .unwrap();
     let doc = typort_core::convert::convert(&world).unwrap();
 
     let mut buf = Vec::new();
@@ -1493,16 +1498,14 @@ fn header_footer_produces_xml_parts() {
     );
 
     // Verify header content
-    let header_xml =
-        std::io::read_to_string(reader.by_name("word/header1.xml").unwrap()).unwrap();
+    let header_xml = std::io::read_to_string(reader.by_name("word/header1.xml").unwrap()).unwrap();
     assert!(
         header_xml.contains("Document Title"),
         "header1.xml should contain 'Document Title'"
     );
 
     // Verify footer content
-    let footer_xml =
-        std::io::read_to_string(reader.by_name("word/footer1.xml").unwrap()).unwrap();
+    let footer_xml = std::io::read_to_string(reader.by_name("word/footer1.xml").unwrap()).unwrap();
     assert!(
         footer_xml.contains("Page footer text"),
         "footer1.xml should contain 'Page footer text'"
@@ -1736,18 +1739,9 @@ fn nested_list_document_model_has_levels() {
         })
         .collect();
 
-    assert!(
-        levels.contains(&0),
-        "should have list items at level 0"
-    );
-    assert!(
-        levels.contains(&1),
-        "should have list items at level 1"
-    );
-    assert!(
-        levels.contains(&2),
-        "should have list items at level 2"
-    );
+    assert!(levels.contains(&0), "should have list items at level 0");
+    assert!(levels.contains(&1), "should have list items at level 1");
+    assert!(levels.contains(&2), "should have list items at level 2");
 }
 
 // ---------------------------------------------------------------------------
@@ -1755,10 +1749,9 @@ fn nested_list_document_model_has_levels() {
 // ---------------------------------------------------------------------------
 
 fn inline_formatting_doc_xml() -> String {
-    let world = typort_core::TyportWorld::new(Path::new(
-        "../../tests/fixtures/inline_formatting.typ",
-    ))
-    .unwrap();
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/inline_formatting.typ"))
+            .unwrap();
     let doc = typort_core::convert::convert(&world).unwrap();
 
     let mut buf = Vec::new();
@@ -1866,8 +1859,8 @@ fn inline_smallcaps_text_preserved() {
 
 #[test]
 fn pagebreak_inserts_w_br_page() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/pagebreak_test.typ")).unwrap();
+    let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/pagebreak_test.typ"))
+        .unwrap();
     let doc = typort_core::convert::convert(&world).unwrap();
 
     let mut buf = Vec::new();
@@ -1896,8 +1889,8 @@ fn pagebreak_inserts_w_br_page() {
 fn pagebreak_document_model_has_pagebreak_inline() {
     use typort_ooxml::document::{BlockElement, InlineElement};
 
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/pagebreak_test.typ")).unwrap();
+    let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/pagebreak_test.typ"))
+        .unwrap();
     let doc = typort_core::convert::convert(&world).unwrap();
 
     // At least one paragraph should contain a PageBreak inline element
@@ -1923,10 +1916,9 @@ fn pagebreak_document_model_has_pagebreak_inline() {
 fn pagebreak_after_nearly_full_page_is_detected() {
     use typort_ooxml::document::{BlockElement, InlineElement};
 
-    let world = typort_core::TyportWorld::new(Path::new(
-        "../../tests/fixtures/pagebreak_full_page.typ",
-    ))
-    .unwrap();
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/pagebreak_full_page.typ"))
+            .unwrap();
     let doc = typort_core::convert::convert(&world).unwrap();
 
     // The document model must contain at least one PageBreak inline element.
@@ -1952,10 +1944,7 @@ fn pagebreak_after_nearly_full_page_is_detected() {
             false
         }
     });
-    assert!(
-        has_page2_text,
-        "document should contain text from page two"
-    );
+    assert!(has_page2_text, "document should contain text from page two");
 }
 
 // ---------------------------------------------------------------------------
@@ -2046,10 +2035,7 @@ fn math_in_heading_produces_omml() {
         doc_xml.contains("m:oMath"),
         "heading with inline math should produce m:oMath element"
     );
-    assert!(
-        doc_xml.contains("Heading2"),
-        "should still be a heading"
-    );
+    assert!(doc_xml.contains("Heading2"), "should still be a heading");
 }
 
 // ---------------------------------------------------------------------------
@@ -2221,14 +2207,8 @@ fn formatted_footnote_preserves_bold_and_italic() {
     let fn_content = &doc.footnotes[0].content;
     let has_bold = fn_content.iter().any(|r| r.bold);
     let has_italic = fn_content.iter().any(|r| r.italic);
-    assert!(
-        has_bold,
-        "footnote content should have a bold run"
-    );
-    assert!(
-        has_italic,
-        "footnote content should have an italic run"
-    );
+    assert!(has_bold, "footnote content should have a bold run");
+    assert!(has_italic, "footnote content should have an italic run");
 }
 
 #[test]
@@ -2269,10 +2249,7 @@ fn bold_link_preserves_formatting_in_hyperlink() {
     let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
 
     // The hyperlink should exist
-    assert!(
-        doc_xml.contains("HYPERLINK"),
-        "should have HYPERLINK field"
-    );
+    assert!(doc_xml.contains("HYPERLINK"), "should have HYPERLINK field");
     assert!(
         doc_xml.contains("https://example.com"),
         "should have the URL"
@@ -2301,7 +2278,8 @@ fn bold_link_document_model_has_bold_runs() {
         if let BlockElement::Paragraph(p) = e {
             p.inlines.iter().any(|i| {
                 if let InlineElement::Hyperlink { runs, .. } = i {
-                    runs.iter().any(|r| r.bold && r.text.contains("Bold link text"))
+                    runs.iter()
+                        .any(|r| r.bold && r.text.contains("Bold link text"))
                 } else {
                     false
                 }
@@ -2412,10 +2390,8 @@ fn grid_document_model_has_tab_inlines() {
 
 #[test]
 fn page_numbering_typ_generates_page_field_footer() {
-    let world = typort_core::TyportWorld::new(Path::new(
-        "../../tests/fixtures/page_numbering.typ",
-    ))
-    .unwrap();
+    let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/page_numbering.typ"))
+        .unwrap();
     let doc = typort_core::convert::convert(&world).unwrap();
 
     // Page numbering should be detected
@@ -2442,8 +2418,7 @@ fn page_numbering_typ_generates_page_field_footer() {
         "docx should contain word/footer1.xml, got: {names:?}"
     );
 
-    let footer_xml =
-        std::io::read_to_string(reader.by_name("word/footer1.xml").unwrap()).unwrap();
+    let footer_xml = std::io::read_to_string(reader.by_name("word/footer1.xml").unwrap()).unwrap();
 
     // Footer should contain PAGE field code
     assert!(
@@ -2460,8 +2435,7 @@ fn page_numbering_typ_generates_page_field_footer() {
     );
 
     // Document body should reference the footer
-    let doc_xml =
-        std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
     assert!(
         doc_xml.contains("w:footerReference"),
         "sectPr should reference footer: {doc_xml}"
@@ -2515,9 +2489,8 @@ fn math_in_table_cells_is_preserved() {
 
 #[test]
 fn figure_caption_is_single_paragraph() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/figure_caption.typ"))
-            .unwrap();
+    let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/figure_caption.typ"))
+        .unwrap();
     let doc = typort_core::convert::convert(&world).unwrap();
 
     let mut buf = Vec::new();
@@ -2539,9 +2512,10 @@ fn figure_caption_is_single_paragraph() {
             // Extract text content from <w:t ...>...</w:t> elements within this paragraph
             let mut text = String::new();
             for part in p.split("<w:t") {
-                if let Some(rest) = part.strip_prefix(">").or_else(|| {
-                    part.find('>').map(|i| &part[i + 1..])
-                }) {
+                if let Some(rest) = part
+                    .strip_prefix(">")
+                    .or_else(|| part.find('>').map(|i| &part[i + 1..]))
+                {
                     if let Some(end) = rest.find("</w:t>") {
                         text.push_str(&rest[..end]);
                     }
@@ -2565,9 +2539,9 @@ fn figure_caption_is_single_paragraph() {
     // The key assertion: the paragraph containing "A simple data table"
     // should also contain "Table" (the figure kind prefix), proving they
     // are combined into a single paragraph, not split apart.
-    let combined = caption_paras.iter().any(|t| {
-        t.contains("Table") && t.contains("A simple data table")
-    });
+    let combined = caption_paras
+        .iter()
+        .any(|t| t.contains("Table") && t.contains("A simple data table"));
     assert!(
         combined,
         "caption text and figure prefix should be in the same paragraph, but got separate paragraphs: {caption_paras:?}"
@@ -2578,10 +2552,9 @@ fn figure_caption_is_single_paragraph() {
 
 /// Helper: generate document.xml for inline_math_in_text.typ fixture.
 fn inline_math_in_text_doc_xml() -> String {
-    let world = typort_core::TyportWorld::new(Path::new(
-        "../../tests/fixtures/inline_math_in_text.typ",
-    ))
-    .unwrap();
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/inline_math_in_text.typ"))
+            .unwrap();
     let doc = typort_core::convert::convert(&world).unwrap();
 
     let mut buf = Vec::new();
@@ -2596,8 +2569,7 @@ fn inline_math_produces_single_paragraph() {
     let doc_xml = inline_math_in_text_doc_xml();
 
     // Count <w:p> elements — should be exactly 1 (the single sentence)
-    let p_count = doc_xml.matches("<w:p>").count()
-        + doc_xml.matches("<w:p ").count();
+    let p_count = doc_xml.matches("<w:p>").count() + doc_xml.matches("<w:p ").count();
     assert_eq!(
         p_count, 1,
         "sentence with inline math should produce exactly 1 paragraph, got {p_count}: {doc_xml}"
@@ -2645,7 +2617,10 @@ fn inline_math_interleaved_with_text_in_same_paragraph() {
     // Find the single <w:p> and verify it contains both text and math
     // by checking that text runs and math elements are siblings inside one <w:p>
     let p_start = doc_xml.find("<w:p>").expect("should have a <w:p>");
-    let p_end = doc_xml[p_start..].find("</w:p>").expect("should have </w:p>") + p_start;
+    let p_end = doc_xml[p_start..]
+        .find("</w:p>")
+        .expect("should have </w:p>")
+        + p_start;
     let p_content = &doc_xml[p_start..p_end];
 
     // Should contain both text runs and math
@@ -2799,8 +2774,8 @@ fn visual_regression_complex_paper() {
 
 #[test]
 fn equation_label_produces_bookmark() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/equation_label.typ")).unwrap();
+    let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/equation_label.typ"))
+        .unwrap();
     let doc = typort_core::convert::convert(&world).unwrap();
 
     let mut buf = Vec::new();
@@ -2821,8 +2796,8 @@ fn equation_label_produces_bookmark() {
 
 #[test]
 fn equation_label_cross_reference_produces_ref_field() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/equation_label.typ")).unwrap();
+    let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/equation_label.typ"))
+        .unwrap();
     let doc = typort_core::convert::convert(&world).unwrap();
 
     let mut buf = Vec::new();
@@ -2881,10 +2856,9 @@ fn doc_author_from_set_document() {
 
 #[test]
 fn show_rule_heading_centered() {
-    let world = typort_core::TyportWorld::new(Path::new(
-        "../../tests/fixtures/centered_heading.typ",
-    ))
-    .unwrap();
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/centered_heading.typ"))
+            .unwrap();
     let doc = typort_core::convert::convert(&world).unwrap();
 
     let mut buf = Vec::new();
@@ -2903,10 +2877,8 @@ fn show_rule_heading_centered() {
 
 #[test]
 fn show_rule_colored_bold() {
-    let world = typort_core::TyportWorld::new(Path::new(
-        "../../tests/fixtures/colored_text.typ",
-    ))
-    .unwrap();
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/colored_text.typ")).unwrap();
     let doc = typort_core::convert::convert(&world).unwrap();
 
     let mut buf = Vec::new();

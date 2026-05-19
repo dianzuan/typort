@@ -228,10 +228,7 @@ impl Paragraph {
 
     /// Add a bookmark start + end pair (anchor for cross-references).
     pub fn add_bookmark(&mut self, id: u32, name: String) {
-        self.inlines.push(InlineElement::Bookmark {
-            id,
-            name,
-        });
+        self.inlines.push(InlineElement::Bookmark { id, name });
         self.inlines.push(InlineElement::BookmarkEnd { id });
     }
 

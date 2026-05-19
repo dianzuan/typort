@@ -4,7 +4,10 @@ pub mod document;
 pub mod styles;
 pub mod writer;
 
-pub use document::{Document, DocumentMetadata, DocumentStyle, FootnoteFormat, HeaderFooter, ImageData, ImageFormat, PageNumberFormat, SectionBreak, SectionBreakType};
+pub use document::{
+    Document, DocumentMetadata, DocumentStyle, FootnoteFormat, HeaderFooter, ImageData,
+    ImageFormat, PageNumberFormat, SectionBreak, SectionBreakType,
+};
 pub use writer::write_docx;
 
 #[cfg(test)]
@@ -318,10 +321,7 @@ mod tests {
 
         let buf = build_docx(&doc);
         let xml = read_zip_entry(&buf, "word/document.xml");
-        assert!(
-            xml.contains("<w:numPr>"),
-            "expected w:numPr in: {xml}"
-        );
+        assert!(xml.contains("<w:numPr>"), "expected w:numPr in: {xml}");
         assert!(
             xml.contains(r#"<w:ilvl w:val="0"/>"#),
             "expected ilvl 0 in: {xml}"
@@ -346,10 +346,7 @@ mod tests {
         let buf = build_docx(&doc);
         let xml = read_zip_entry(&buf, "word/document.xml");
         let expected = format!(r#"<w:footnoteReference w:id="{fn_id}"/>"#);
-        assert!(
-            xml.contains(&expected),
-            "expected {expected} in: {xml}"
-        );
+        assert!(xml.contains(&expected), "expected {expected} in: {xml}");
         // Decimal mode should NOT have customMarkFollows
         assert!(
             !xml.contains("customMarkFollows"),
@@ -421,9 +418,7 @@ mod tests {
             vmerge: document::VMerge::None,
             width_pct: None,
         };
-        let row = document::TableRow {
-            cells: vec![cell],
-        };
+        let row = document::TableRow { cells: vec![cell] };
         let table = document::Table { rows: vec![row] };
         doc.add_table(table);
 
@@ -582,10 +577,7 @@ mod tests {
 
         let buf = build_docx(&doc);
         let xml = read_zip_entry(&buf, "word/document.xml");
-        assert!(
-            xml.contains(omml),
-            "expected OMML passthrough in: {xml}"
-        );
+        assert!(xml.contains(omml), "expected OMML passthrough in: {xml}");
     }
 
     // ── 19. Document grid ────────────────────────────────────────────────
@@ -677,10 +669,7 @@ mod tests {
             "expected right tab stop in: {xml}"
         );
         // Tab character in a run
-        assert!(
-            xml.contains("<w:tab/>"),
-            "expected tab element in: {xml}"
-        );
+        assert!(xml.contains("<w:tab/>"), "expected tab element in: {xml}");
         // Equation number text
         assert!(
             xml.contains("(1)"),
@@ -709,18 +698,9 @@ mod tests {
 
         let buf = build_docx(&doc);
         let xml = read_zip_entry(&buf, "word/document.xml");
-        assert!(
-            xml.contains("w:drawing"),
-            "expected w:drawing in: {xml}"
-        );
-        assert!(
-            xml.contains("wp:inline"),
-            "expected wp:inline in: {xml}"
-        );
-        assert!(
-            xml.contains("a:blip"),
-            "expected a:blip in: {xml}"
-        );
+        assert!(xml.contains("w:drawing"), "expected w:drawing in: {xml}");
+        assert!(xml.contains("wp:inline"), "expected wp:inline in: {xml}");
+        assert!(xml.contains("a:blip"), "expected a:blip in: {xml}");
         assert!(
             xml.contains(r#"cx="914400""#),
             "expected cx=914400 in: {xml}"
@@ -915,10 +895,7 @@ mod tests {
             xml.contains(r#"w:fldCharType="separate"#),
             "expected fldChar separate in: {xml}"
         );
-        assert!(
-            xml.contains("Figure 1"),
-            "expected display text in: {xml}"
-        );
+        assert!(xml.contains("Figure 1"), "expected display text in: {xml}");
         assert!(
             xml.contains(r#"w:fldCharType="end"#),
             "expected fldChar end in: {xml}"
@@ -1084,10 +1061,7 @@ mod tests {
 
         let buf = build_docx(&doc);
         let xml = read_zip_entry(&buf, "word/document.xml");
-        assert!(
-            xml.contains("<w:pBdr>"),
-            "expected w:pBdr in: {xml}"
-        );
+        assert!(xml.contains("<w:pBdr>"), "expected w:pBdr in: {xml}");
         assert!(
             xml.contains(r#"<w:bottom w:val="single" w:sz="6" w:space="1" w:color="auto"/>"#),
             "expected bottom border attributes in: {xml}"
@@ -1119,7 +1093,10 @@ mod tests {
 
         // Both bookmark and REF field should be present
         assert!(xml.contains(r#"w:name="intro"#), "bookmark should exist");
-        assert!(xml.contains("REF intro"), "REF field should reference bookmark");
+        assert!(
+            xml.contains("REF intro"),
+            "REF field should reference bookmark"
+        );
     }
 
     // ── 36. Page numbering — decimal ───────────────────────────────────
@@ -1178,8 +1155,7 @@ mod tests {
         // The body should NOT contain the page number as a static run
         // (it's in the footer via PAGE field, not in the body)
         assert!(
-            !doc_xml.contains(r#"<w:t xml:space="preserve">1</w:t>"#)
-                || doc_xml.contains("PAGE"),
+            !doc_xml.contains(r#"<w:t xml:space="preserve">1</w:t>"#) || doc_xml.contains("PAGE"),
             "body should not contain static page number text"
         );
     }

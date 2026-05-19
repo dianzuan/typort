@@ -584,11 +584,7 @@ fn accent_to_omml_char(c: char) -> &'static str {
 }
 
 /// Convert `OverlineElem`/`UnderlineElem` to `m:bar` with position top/bot.
-fn convert_bar<W: Write>(
-    writer: &mut Writer<W>,
-    body: &Content,
-    pos: &str,
-) -> std::io::Result<()> {
+fn convert_bar<W: Write>(writer: &mut Writer<W>, body: &Content, pos: &str) -> std::io::Result<()> {
     writer.create_element("m:bar").write_inner_content(|w| {
         w.create_element("m:barPr").write_inner_content(|pr| {
             pr.create_element("m:pos")
@@ -675,16 +671,8 @@ fn convert_cases<W: Write>(writer: &mut Writer<W>, cases: &CasesElem) -> std::io
     };
 
     // For standard (non-reverse) cases, suppress the closing delimiter
-    let effective_close = if is_reverse {
-        close_str.as_str()
-    } else {
-        ""
-    };
-    let effective_open = if is_reverse {
-        ""
-    } else {
-        open_str.as_str()
-    };
+    let effective_close = if is_reverse { close_str.as_str() } else { "" };
+    let effective_open = if is_reverse { "" } else { open_str.as_str() };
 
     writer.create_element("m:d").write_inner_content(|w| {
         w.create_element("m:dPr").write_inner_content(|pr| {
@@ -728,61 +716,56 @@ fn convert_groupchr<W: Write>(
 ) -> std::io::Result<()> {
     // The groupChr element itself
     let write_group = |w: &mut Writer<W>| -> std::io::Result<()> {
-        w.create_element("m:groupChr")
-            .write_inner_content(|gc| {
-                gc.create_element("m:groupChrPr")
-                    .write_inner_content(|pr| {
-                        pr.create_element("m:chr")
-                            .with_attribute(("m:val", chr))
-                            .write_empty()?;
-                        pr.create_element("m:pos")
-                            .with_attribute(("m:val", pos))
-                            .write_empty()?;
-                        // vertJc controls where the character sits relative to the base
-                        pr.create_element("m:vertJc")
-                            .with_attribute(("m:val", pos))
-                            .write_empty()?;
-                        Ok(())
-                    })?;
-                gc.create_element("m:e").write_inner_content(|e| {
-                    convert_content(e, body)?;
+        w.create_element("m:groupChr").write_inner_content(|gc| {
+            gc.create_element("m:groupChrPr")
+                .write_inner_content(|pr| {
+                    pr.create_element("m:chr")
+                        .with_attribute(("m:val", chr))
+                        .write_empty()?;
+                    pr.create_element("m:pos")
+                        .with_attribute(("m:val", pos))
+                        .write_empty()?;
+                    // vertJc controls where the character sits relative to the base
+                    pr.create_element("m:vertJc")
+                        .with_attribute(("m:val", pos))
+                        .write_empty()?;
                     Ok(())
                 })?;
+            gc.create_element("m:e").write_inner_content(|e| {
+                convert_content(e, body)?;
                 Ok(())
             })?;
+            Ok(())
+        })?;
         Ok(())
     };
 
     if let Some(ann) = annotation {
         // Wrap in m:limLow (bottom annotation) or m:limUpp (top annotation)
         if pos == "bot" {
-            writer
-                .create_element("m:limLow")
-                .write_inner_content(|w| {
-                    w.create_element("m:e").write_inner_content(|e| {
-                        write_group(e)?;
-                        Ok(())
-                    })?;
-                    w.create_element("m:lim").write_inner_content(|lim| {
-                        convert_content(lim, ann)?;
-                        Ok(())
-                    })?;
+            writer.create_element("m:limLow").write_inner_content(|w| {
+                w.create_element("m:e").write_inner_content(|e| {
+                    write_group(e)?;
                     Ok(())
                 })?;
+                w.create_element("m:lim").write_inner_content(|lim| {
+                    convert_content(lim, ann)?;
+                    Ok(())
+                })?;
+                Ok(())
+            })?;
         } else {
-            writer
-                .create_element("m:limUpp")
-                .write_inner_content(|w| {
-                    w.create_element("m:e").write_inner_content(|e| {
-                        write_group(e)?;
-                        Ok(())
-                    })?;
-                    w.create_element("m:lim").write_inner_content(|lim| {
-                        convert_content(lim, ann)?;
-                        Ok(())
-                    })?;
+            writer.create_element("m:limUpp").write_inner_content(|w| {
+                w.create_element("m:e").write_inner_content(|e| {
+                    write_group(e)?;
                     Ok(())
                 })?;
+                w.create_element("m:lim").write_inner_content(|lim| {
+                    convert_content(lim, ann)?;
+                    Ok(())
+                })?;
+                Ok(())
+            })?;
         }
     } else {
         write_group(writer)?;

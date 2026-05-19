@@ -60,8 +60,11 @@ pub fn extract_document_style(paged: &PagedDocument) -> DocumentStyle {
         .iter()
         .filter(|(f, _)| {
             let fl = f.to_lowercase();
-            (fl.contains("mono") || fl.contains("courier") || fl.contains("consol")
-                || fl.contains("fira code") || fl.contains("source code"))
+            (fl.contains("mono")
+                || fl.contains("courier")
+                || fl.contains("consol")
+                || fl.contains("fira code")
+                || fl.contains("source code"))
                 && f.as_str() != body_font_ascii
         })
         .max_by_key(|(_, c)| *c)
@@ -119,7 +122,8 @@ fn detect_first_line_indent(paged: &PagedDocument, body_pt: f64) -> u32 {
     let page_width = page.frame.width().to_pt();
     let (body_top, body_bottom) = find_body_zone(page_width, page.frame.height().to_pt());
 
-    let body_frags: Vec<&TextFragment> = fragments.iter()
+    let body_frags: Vec<&TextFragment> = fragments
+        .iter()
         .filter(|f| f.y >= body_top && f.y <= body_bottom)
         .collect();
 
@@ -299,13 +303,7 @@ fn collect_right_edges(
             }
             FrameItem::Group(group) => {
                 let new_offset = Point::new(abs_x, abs_y);
-                collect_right_edges(
-                    &group.frame,
-                    new_offset,
-                    body_top,
-                    body_bottom,
-                    items,
-                );
+                collect_right_edges(&group.frame, new_offset, body_top, body_bottom, items);
             }
             _ => {}
         }
@@ -467,7 +465,12 @@ fn collect_font_info_split(
             FrameItem::Group(group) => {
                 let new_offset = Point::new(offset.x + pos.x, abs_y);
                 collect_font_info_split(
-                    &group.frame, new_offset, ascii_fonts, cjk_fonts, size_counts, y_positions,
+                    &group.frame,
+                    new_offset,
+                    ascii_fonts,
+                    cjk_fonts,
+                    size_counts,
+                    y_positions,
                 );
             }
             _ => {}
@@ -555,10 +558,16 @@ fn extract_page_metrics(frame: &Frame) -> PageMetrics {
     let mut min_y = page_height;
     let mut max_y: f64 = 0.0;
 
-    collect_content_bounds(frame, Point::zero(), &mut min_x, &mut max_x, &mut min_y, &mut max_y);
+    collect_content_bounds(
+        frame,
+        Point::zero(),
+        &mut min_x,
+        &mut max_x,
+        &mut min_y,
+        &mut max_y,
+    );
 
-    let (margin_left, margin_right, margin_top, margin_bottom) = if min_x < max_x && min_y < max_y
-    {
+    let (margin_left, margin_right, margin_top, margin_bottom) = if min_x < max_x && min_y < max_y {
         let ml = (min_x * 20.0).round().max(0.0) as u32;
         let mr = ((page_width - max_x) * 20.0).round().max(0.0) as u32;
         let mt = (min_y * 20.0).round().max(0.0) as u32;
@@ -982,7 +991,10 @@ fn classify_page_number(s: &str) -> Option<PageNumberFormat> {
 
 /// Check if a string is a valid lowercase Roman numeral.
 fn is_lower_roman(s: &str) -> bool {
-    if s.is_empty() || !s.chars().all(|c| matches!(c, 'i' | 'v' | 'x' | 'l' | 'c' | 'd' | 'm'))
+    if s.is_empty()
+        || !s
+            .chars()
+            .all(|c| matches!(c, 'i' | 'v' | 'x' | 'l' | 'c' | 'd' | 'm'))
     {
         return false;
     }
@@ -992,7 +1004,10 @@ fn is_lower_roman(s: &str) -> bool {
 
 /// Check if a string is a valid uppercase Roman numeral.
 fn is_upper_roman(s: &str) -> bool {
-    if s.is_empty() || !s.chars().all(|c| matches!(c, 'I' | 'V' | 'X' | 'L' | 'C' | 'D' | 'M'))
+    if s.is_empty()
+        || !s
+            .chars()
+            .all(|c| matches!(c, 'I' | 'V' | 'X' | 'L' | 'C' | 'D' | 'M'))
     {
         return false;
     }
@@ -1002,11 +1017,7 @@ fn is_upper_roman(s: &str) -> bool {
 /// Compute the numeric value of a Roman numeral string.
 fn roman_value(s: &str, uppercase: bool) -> u32 {
     let val = |c: char| -> u32 {
-        match if uppercase {
-            c.to_ascii_lowercase()
-        } else {
-            c
-        } {
+        match if uppercase { c.to_ascii_lowercase() } else { c } {
             'i' => 1,
             'v' => 5,
             'x' => 10,
@@ -1084,7 +1095,9 @@ pub fn detect_columns(paged: &PagedDocument) -> Option<u32> {
     let cluster_tol = 5.0;
     let mut clusters: Vec<(f64, usize)> = Vec::new(); // (center_x, count)
     for &x in &x_starts {
-        let found = clusters.iter_mut().find(|(cx, _)| (x - *cx).abs() < cluster_tol);
+        let found = clusters
+            .iter_mut()
+            .find(|(cx, _)| (x - *cx).abs() < cluster_tol);
         if let Some((cx, count)) = found {
             // Update running average
             *cx = (*cx * (*count as f64) + x) / (*count as f64 + 1.0);
@@ -1254,7 +1267,9 @@ pub fn apply_heading_alignment_from_paged(
         // We look for the first run text to identify the heading's rendered position.
         let matching: Vec<&PagedTextItem> = paged_items
             .iter()
-            .filter(|item| item.text.contains(first_run_text) || first_run_text.contains(&item.text))
+            .filter(|item| {
+                item.text.contains(first_run_text) || first_run_text.contains(&item.text)
+            })
             .collect();
 
         if matching.is_empty() {
@@ -1331,10 +1346,13 @@ fn collect_text_colors_from_frame(frame: &Frame, items: &mut Vec<PagedColorItem>
                     continue;
                 }
                 let color_hex = extract_non_black_color(&text_item.fill);
-                let spans: Vec<typst_syntax::Span> = text_item.glyphs.iter()
-                    .map(|g| g.span.0)
-                    .collect();
-                items.push(PagedColorItem { text, color_hex, spans });
+                let spans: Vec<typst_syntax::Span> =
+                    text_item.glyphs.iter().map(|g| g.span.0).collect();
+                items.push(PagedColorItem {
+                    text,
+                    color_hex,
+                    spans,
+                });
             }
             FrameItem::Group(group) => {
                 collect_text_colors_from_frame(&group.frame, items);
@@ -1402,7 +1420,8 @@ pub fn apply_text_colors_from_paged(
 
     for footnote in &mut doc.footnotes {
         for run in &mut footnote.content {
-            let matched = run.span
+            let matched = run
+                .span
                 .and_then(|s| span_colors.get(&s))
                 .or_else(|| text_colors.get(run.text.as_str()));
             if let Some(color) = matched {
@@ -1440,7 +1459,8 @@ fn apply_color_to_run(
     span_colors: &HashMap<typst_syntax::Span, String>,
     text_colors: &HashMap<String, String>,
 ) {
-    let matched = run.span
+    let matched = run
+        .span
         .and_then(|s| span_colors.get(&s))
         .or_else(|| text_colors.get(&run.text));
     if let Some(color) = matched {
