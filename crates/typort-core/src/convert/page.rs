@@ -139,7 +139,7 @@ fn detect_first_line_indent(paged: &PagedDocument, body_pt: f64) -> u32 {
             x_clusters.push((x, 1));
         }
     }
-    x_clusters.sort_by(|a, b| b.1.cmp(&a.1));
+    x_clusters.sort_by_key(|b| std::cmp::Reverse(b.1));
 
     if x_clusters.len() >= 2 {
         let margin_x = x_clusters[0].0.min(x_clusters[1].0);
