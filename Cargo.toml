@@ -9,8 +9,12 @@ members = [
 resolver = "2"
 
 [workspace.package]
+version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
+description = "Universal Typst to Word (.docx) converter"
+repository = "https://github.com/dianzuan/typort"
+homepage = "https://github.com/dianzuan/typort"
 
 [workspace.dependencies]
 # Typst ecosystem
@@ -39,7 +43,7 @@ toml = "0.8"
 clap = { version = "4", features = ["derive"] }
 
 # Internal crates
-typort-core = { path = "crates/typort-core" }
-typort-ooxml = { path = "crates/typort-ooxml" }
-typort-math = { path = "crates/typort-math" }
-typort-presets = { path = "crates/typort-presets" }
+typort-core = { version = "0.1.0", path = "crates/typort-core" }
+typort-ooxml = { version = "0.1.0", path = "crates/typort-ooxml" }
+typort-math = { version = "0.1.0", path = "crates/typort-math" }
+typort-presets = { version = "0.1.0", path = "crates/typort-presets" }
