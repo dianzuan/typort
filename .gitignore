@@ -1,8 +1,30 @@
+# Build
 /target
+
+# Output
 *.docx
+*.pdf
+
+# IDE
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
+
+# OS
 .DS_Store
+Thumbs.db
+
+# Typst cache
+.typst/
+
+# Development artifacts
+/docs/superpowers/
+/assets/
+spike_*.rs
+spike_*.typ
+spike_*.png
+realize_test.rs
+PRD.md
+ROADMAP.md

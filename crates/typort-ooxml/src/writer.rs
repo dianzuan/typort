@@ -6,9 +6,22 @@ use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
 use crate::document::{
-    Alignment, BlockElement, Document, ImageData, ImageFormat, InlineElement, ParagraphStyle, Table,
+    Alignment, BlockElement, Document, ImageData, ImageFormat, InlineElement, PageNumberFormat,
+    ParagraphStyle, SectionBreak, SectionBreakType, Table,
 };
 use crate::styles;
+
+/// Tracks which optional document parts are present, used for rId assignment
+/// and conditional XML generation.
+#[derive(Clone, Copy)]
+#[allow(clippy::struct_excessive_bools)]
+struct DocParts {
+    footnotes: bool,
+    numbering: bool,
+    header: bool,
+    footer: bool,
+    content_width_twips: u32,
+}
 
 /// Write a Document to a .docx file (ZIP archive) into the given writer.
 ///
@@ -18,8 +31,14 @@ pub fn write_docx<W: Write + Seek>(
     doc: &Document,
     writer: W,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let has_footnotes = !doc.footnotes.is_empty();
-    let has_numbering = doc_has_lists(doc);
+    let ps = &doc.page_settings;
+    let parts = DocParts {
+        footnotes: !doc.footnotes.is_empty(),
+        numbering: doc_has_lists(doc),
+        header: doc.header.is_some(),
+        footer: doc.footer.is_some() || doc.page_numbering.is_some(),
+        content_width_twips: ps.width_twips.saturating_sub(ps.margin_left + ps.margin_right),
+    };
     let images = collect_images(doc);
     let has_images = !images.is_empty();
 
@@ -28,7 +47,7 @@ pub fn write_docx<W: Write + Seek>(
 
     zip.start_file("[Content_Types].xml", options)?;
     zip.write_all(&xml_part(|w| {
-        generate_content_types(w, has_footnotes, has_numbering, &images)
+        generate_content_types(w, parts, &images)
     })?)?;
 
     zip.start_file("_rels/.rels", options)?;
@@ -36,12 +55,12 @@ pub fn write_docx<W: Write + Seek>(
 
     zip.start_file("word/_rels/document.xml.rels", options)?;
     zip.write_all(&xml_part(|w| {
-        generate_document_rels(w, has_footnotes, has_numbering, &images)
+        generate_document_rels(w, parts, &images)
     })?)?;
 
     zip.start_file("word/styles.xml", options)?;
     zip.write_all(&xml_part(|w| {
-        styles::generate_styles(w, has_footnotes, &doc.style)
+        styles::generate_styles(w, parts.footnotes, &doc.style)
     })?)?;
 
     zip.start_file("word/fontTable.xml", options)?;
@@ -53,14 +72,30 @@ pub fn write_docx<W: Write + Seek>(
     zip.start_file("word/document.xml", options)?;
     zip.write_all(&xml_part(|w| generate_document_xml(w, doc, has_images))?)?;
 
-    if has_footnotes {
+    if parts.footnotes {
         zip.start_file("word/footnotes.xml", options)?;
         zip.write_all(&xml_part(|w| generate_footnotes_xml(w, doc))?)?;
     }
 
-    if has_numbering {
+    if parts.numbering {
         zip.start_file("word/numbering.xml", options)?;
         zip.write_all(&xml_part(generate_numbering_xml)?)?;
+    }
+
+    // Write header XML
+    if let Some(header) = &doc.header {
+        zip.start_file("word/header1.xml", options)?;
+        zip.write_all(&xml_part(|w| generate_header_xml(w, header))?)?;
+    }
+
+    // Write footer XML — either a PAGE field for page numbering, or static content
+    if let Some(pg_fmt) = &doc.page_numbering {
+        let fmt = pg_fmt.clone();
+        zip.start_file("word/footer1.xml", options)?;
+        zip.write_all(&xml_part(|w| generate_page_number_footer_xml(w, &fmt))?)?;
+    } else if let Some(footer) = &doc.footer {
+        zip.start_file("word/footer1.xml", options)?;
+        zip.write_all(&xml_part(|w| generate_footer_xml(w, footer))?)?;
     }
 
     // Write image files to word/media/
@@ -99,13 +134,7 @@ fn collect_images(doc: &Document) -> Vec<&ImageData> {
         match el {
             BlockElement::Paragraph(p) => collect_images_from_para(p, &mut images),
             BlockElement::Table(t) => {
-                for row in &t.rows {
-                    for cell in &row.cells {
-                        for para in &cell.paragraphs {
-                            collect_images_from_para(para, &mut images);
-                        }
-                    }
-                }
+                collect_images_from_table(t, &mut images);
             }
         }
     }
@@ -123,19 +152,52 @@ fn collect_images_from_para<'a>(
     }
 }
 
+fn collect_images_from_table<'a>(
+    table: &'a crate::document::Table,
+    images: &mut Vec<&'a ImageData>,
+) {
+    for row in &table.rows {
+        for cell in &row.cells {
+            // Check structured content first (includes nested tables)
+            if cell.content.is_empty() {
+                for para in &cell.paragraphs {
+                    collect_images_from_para(para, images);
+                }
+            } else {
+                for item in &cell.content {
+                    match item {
+                        crate::document::CellContent::Paragraph(p) => {
+                            collect_images_from_para(p, images);
+                        }
+                        crate::document::CellContent::Table(t) => {
+                            collect_images_from_table(t, images);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Compute the relationship ID for an image given its 1-based index.
 /// Image relationship IDs start after the fixed relationships (styles, fontTable,
-/// footnotes, numbering, settings).
-fn image_rel_id(image_index: usize, has_footnotes: bool, has_numbering: bool) -> String {
+/// footnotes, numbering, settings, header, footer).
+fn image_rel_id(image_index: usize, parts: DocParts) -> String {
     // Base count: rId1=styles, rId2=fontTable
     let mut base = 2;
-    if has_footnotes {
+    if parts.footnotes {
         base += 1;
     }
-    if has_numbering {
+    if parts.numbering {
         base += 1;
     }
     base += 1; // settings
+    if parts.header {
+        base += 1;
+    }
+    if parts.footer {
+        base += 1;
+    }
     format!("rId{}", base + image_index)
 }
 
@@ -155,8 +217,7 @@ pub(crate) fn xml_part(
 
 fn generate_content_types(
     writer: &mut Writer<&mut Vec<u8>>,
-    has_footnotes: bool,
-    has_numbering: bool,
+    parts: DocParts,
     images: &[&ImageData],
 ) -> io::Result<()> {
     // Determine which image extensions are used
@@ -199,13 +260,13 @@ fn generate_content_types(
                 .with_attribute(("PartName", "/word/fontTable.xml"))
                 .with_attribute(("ContentType", "application/vnd.openxmlformats-officedocument.wordprocessingml.fontTable+xml"))
                 .write_empty()?;
-            if has_footnotes {
+            if parts.footnotes {
                 w.create_element("Override")
                     .with_attribute(("PartName", "/word/footnotes.xml"))
                     .with_attribute(("ContentType", "application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"))
                     .write_empty()?;
             }
-            if has_numbering {
+            if parts.numbering {
                 w.create_element("Override")
                     .with_attribute(("PartName", "/word/numbering.xml"))
                     .with_attribute(("ContentType", "application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"))
@@ -215,6 +276,18 @@ fn generate_content_types(
                 .with_attribute(("PartName", "/word/settings.xml"))
                 .with_attribute(("ContentType", "application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"))
                 .write_empty()?;
+            if parts.header {
+                w.create_element("Override")
+                    .with_attribute(("PartName", "/word/header1.xml"))
+                    .with_attribute(("ContentType", "application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"))
+                    .write_empty()?;
+            }
+            if parts.footer {
+                w.create_element("Override")
+                    .with_attribute(("PartName", "/word/footer1.xml"))
+                    .with_attribute(("ContentType", "application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"))
+                    .write_empty()?;
+            }
             w.create_element("Override")
                 .with_attribute(("PartName", "/docProps/core.xml"))
                 .with_attribute(("ContentType", "application/vnd.openxmlformats-package.core-properties+xml"))
@@ -244,10 +317,10 @@ fn generate_rels(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 fn generate_document_rels(
     writer: &mut Writer<&mut Vec<u8>>,
-    has_footnotes: bool,
-    has_numbering: bool,
+    parts: DocParts,
     images: &[&ImageData],
 ) -> io::Result<()> {
     writer
@@ -257,25 +330,38 @@ fn generate_document_rels(
             "http://schemas.openxmlformats.org/package/2006/relationships",
         ))
         .write_inner_content(|w| {
+            // Use a counter to assign sequential rId values
+            let mut next_id = 1_usize;
+
+            // rId1 = styles
+            let rid = format!("rId{next_id}");
+            next_id += 1;
             w.create_element("Relationship")
-                .with_attribute(("Id", "rId1"))
+                .with_attribute(("Id", rid.as_str()))
                 .with_attribute((
                     "Type",
                     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles",
                 ))
                 .with_attribute(("Target", "styles.xml"))
                 .write_empty()?;
+
+            // rId2 = fontTable
+            let rid = format!("rId{next_id}");
+            next_id += 1;
             w.create_element("Relationship")
-                .with_attribute(("Id", "rId2"))
+                .with_attribute(("Id", rid.as_str()))
                 .with_attribute((
                     "Type",
                     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable",
                 ))
                 .with_attribute(("Target", "fontTable.xml"))
                 .write_empty()?;
-            if has_footnotes {
+
+            if parts.footnotes {
+                let rid = format!("rId{next_id}");
+                next_id += 1;
                 w.create_element("Relationship")
-                    .with_attribute(("Id", "rId3"))
+                    .with_attribute(("Id", rid.as_str()))
                     .with_attribute((
                         "Type",
                         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes",
@@ -283,10 +369,12 @@ fn generate_document_rels(
                     .with_attribute(("Target", "footnotes.xml"))
                     .write_empty()?;
             }
-            if has_numbering {
-                let num_id = if has_footnotes { "rId4" } else { "rId3" };
+
+            if parts.numbering {
+                let rid = format!("rId{next_id}");
+                next_id += 1;
                 w.create_element("Relationship")
-                    .with_attribute(("Id", num_id))
+                    .with_attribute(("Id", rid.as_str()))
                     .with_attribute((
                         "Type",
                         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering",
@@ -294,22 +382,51 @@ fn generate_document_rels(
                     .with_attribute(("Target", "numbering.xml"))
                     .write_empty()?;
             }
-            let settings_id = match (has_footnotes, has_numbering) {
-                (true, true) => "rId5",
-                (true, false) | (false, true) => "rId4",
-                (false, false) => "rId3",
-            };
+
+            // settings
+            let rid = format!("rId{next_id}");
+            next_id += 1;
             w.create_element("Relationship")
-                .with_attribute(("Id", settings_id))
+                .with_attribute(("Id", rid.as_str()))
                 .with_attribute((
                     "Type",
                     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings",
                 ))
                 .with_attribute(("Target", "settings.xml"))
                 .write_empty()?;
+
+            // header
+            if parts.header {
+                let rid = format!("rId{next_id}");
+                next_id += 1;
+                w.create_element("Relationship")
+                    .with_attribute(("Id", rid.as_str()))
+                    .with_attribute((
+                        "Type",
+                        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header",
+                    ))
+                    .with_attribute(("Target", "header1.xml"))
+                    .write_empty()?;
+            }
+
+            // footer
+            if parts.footer {
+                let rid = format!("rId{next_id}");
+                next_id += 1; // keep counter consistent for image_rel_id parity
+                let _ = next_id;
+                w.create_element("Relationship")
+                    .with_attribute(("Id", rid.as_str()))
+                    .with_attribute((
+                        "Type",
+                        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer",
+                    ))
+                    .with_attribute(("Target", "footer1.xml"))
+                    .write_empty()?;
+            }
+
             // Image relationships
             for (idx, img) in images.iter().enumerate() {
-                let rid = image_rel_id(idx + 1, has_footnotes, has_numbering);
+                let rid = image_rel_id(idx + 1, parts);
                 let ext = match img.format {
                     ImageFormat::Png => "png",
                     ImageFormat::Jpeg => "jpg",
@@ -369,6 +486,31 @@ fn generate_settings(
     Ok(())
 }
 
+/// Compute the relationship ID for a header or footer.
+/// Headers/footers come after settings in the relationship chain.
+fn header_footer_rel_id(is_header: bool, parts: DocParts) -> String {
+    // Base count: rId1=styles, rId2=fontTable
+    let mut id = 2;
+    if parts.footnotes {
+        id += 1;
+    }
+    if parts.numbering {
+        id += 1;
+    }
+    id += 1; // settings
+    if is_header {
+        // header is the next one after settings
+        id += 1;
+    } else {
+        // footer comes after header (if present)
+        if parts.header {
+            id += 1;
+        }
+        id += 1;
+    }
+    format!("rId{id}")
+}
+
 fn generate_document_xml(
     writer: &mut Writer<&mut Vec<u8>>,
     doc: &Document,
@@ -406,21 +548,27 @@ fn generate_document_xml(
     // We need to track image index state across paragraphs for the writer.
     // Use a Cell to allow mutation inside the closure.
     let image_counter = std::cell::Cell::new(0_usize);
-    let has_fn = !doc.footnotes.is_empty();
-    let has_num = doc_has_lists(doc);
+    let ps = &doc.page_settings;
+    let parts = DocParts {
+        footnotes: !doc.footnotes.is_empty(),
+        numbering: doc_has_lists(doc),
+        header: doc.header.is_some(),
+        footer: doc.footer.is_some() || doc.page_numbering.is_some(),
+        content_width_twips: ps.width_twips.saturating_sub(ps.margin_left + ps.margin_right),
+    };
     elem.write_inner_content(|w| {
             w.create_element("w:body").write_inner_content(|body_w| {
                 for element in &doc.body.elements {
                     match element {
                         BlockElement::Paragraph(para) => {
-                            write_paragraph(body_w, para, &doc.style.footnote_format, has_fn, has_num, &image_counter)?;
+                            write_paragraph(body_w, para, &doc.style.footnote_format, &doc.style, parts, &image_counter)?;
                         }
                         BlockElement::Table(table) => {
-                            write_table(body_w, table, &doc.style.footnote_format, has_fn, has_num, &image_counter)?;
+                            write_table(body_w, table, &doc.style.footnote_format, &doc.style, parts, &image_counter)?;
                         }
                     }
                 }
-                write_section_properties(body_w, &doc.page_settings, &doc.style)?;
+                write_section_properties(body_w, &doc.page_settings, &doc.style, parts, doc.page_numbering.as_ref())?;
                 Ok(())
             })?;
             Ok(())
@@ -432,8 +580,26 @@ fn write_section_properties<W: Write>(
     writer: &mut Writer<W>,
     settings: &crate::document::PageSettings,
     style: &crate::document::DocumentStyle,
+    parts: DocParts,
+    page_numbering: Option<&PageNumberFormat>,
 ) -> io::Result<()> {
     writer.create_element("w:sectPr").write_inner_content(|w| {
+        // Header reference
+        if parts.header {
+            let rid = header_footer_rel_id(true, parts);
+            w.create_element("w:headerReference")
+                .with_attribute(("w:type", "default"))
+                .with_attribute(("r:id", rid.as_str()))
+                .write_empty()?;
+        }
+        // Footer reference
+        if parts.footer {
+            let rid = header_footer_rel_id(false, parts);
+            w.create_element("w:footerReference")
+                .with_attribute(("w:type", "default"))
+                .with_attribute(("r:id", rid.as_str()))
+                .write_empty()?;
+        }
         w.create_element("w:footnotePr").write_inner_content(|fp| {
             if style.footnote_format == crate::document::FootnoteFormat::CircledNumber {
                 fp.create_element("w:numFmt")
@@ -445,39 +611,65 @@ fn write_section_properties<W: Write>(
                 .write_empty()?;
             Ok(())
         })?;
-        w.create_element("w:pgSz")
-            .with_attribute(("w:w", settings.width_twips.to_string().as_str()))
-            .with_attribute(("w:h", settings.height_twips.to_string().as_str()))
-            .write_empty()?;
-        w.create_element("w:pgMar")
-            .with_attribute(("w:top", settings.margin_top.to_string().as_str()))
-            .with_attribute(("w:right", settings.margin_right.to_string().as_str()))
-            .with_attribute(("w:bottom", settings.margin_bottom.to_string().as_str()))
-            .with_attribute(("w:left", settings.margin_left.to_string().as_str()))
-            .write_empty()?;
-        // Document grid: constrain line pitch for CJK documents.
-        // linePitch = body font size in twips × line spacing factor.
-        // body_size_half_pt is in half-points; convert to twips: half_pt × 10.
-        // line_spacing is in 240ths of a line (240 = 1.0×, 360 = 1.5×).
-        let font_twips = style.body_size_half_pt * 10;
-        let line_pitch = font_twips * style.line_spacing / 240;
-        let line_pitch_str = line_pitch.to_string();
-        w.create_element("w:docGrid")
-            .with_attribute(("w:type", "lines"))
-            .with_attribute(("w:linePitch", line_pitch_str.as_str()))
-            .write_empty()?;
+        // Page number format (w:pgNumType)
+        if let Some(fmt) = page_numbering {
+            let fmt_val = page_number_format_val(fmt);
+            w.create_element("w:pgNumType")
+                .with_attribute(("w:fmt", fmt_val))
+                .write_empty()?;
+        }
+        write_section_page_settings(w, settings, style)?;
         Ok(())
     })?;
     Ok(())
 }
 
-#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
+/// Write page size, margins, columns, and document grid for a section.
+fn write_section_page_settings<W: Write>(
+    w: &mut Writer<W>,
+    settings: &crate::document::PageSettings,
+    style: &crate::document::DocumentStyle,
+) -> io::Result<()> {
+    w.create_element("w:pgSz")
+        .with_attribute(("w:w", settings.width_twips.to_string().as_str()))
+        .with_attribute(("w:h", settings.height_twips.to_string().as_str()))
+        .write_empty()?;
+    w.create_element("w:pgMar")
+        .with_attribute(("w:top", settings.margin_top.to_string().as_str()))
+        .with_attribute(("w:right", settings.margin_right.to_string().as_str()))
+        .with_attribute(("w:bottom", settings.margin_bottom.to_string().as_str()))
+        .with_attribute(("w:left", settings.margin_left.to_string().as_str()))
+        .write_empty()?;
+    // Columns
+    if let Some(cols) = settings.columns.filter(|&c| c > 1) {
+        let num = cols.to_string();
+        let space = settings.column_spacing.unwrap_or(720).to_string();
+        w.create_element("w:cols")
+            .with_attribute(("w:num", num.as_str()))
+            .with_attribute(("w:space", space.as_str()))
+            .write_empty()?;
+    }
+    // Document grid: constrain line pitch for CJK documents.
+    // linePitch = body font size in twips x line spacing factor.
+    // body_size_half_pt is in half-points; convert to twips: half_pt x 10.
+    // line_spacing is in 240ths of a line (240 = 1.0x, 360 = 1.5x).
+    let font_twips = style.body_size_half_pt * 10;
+    let line_pitch = font_twips * style.line_spacing / 240;
+    let line_pitch_str = line_pitch.to_string();
+    w.create_element("w:docGrid")
+        .with_attribute(("w:type", "lines"))
+        .with_attribute(("w:linePitch", line_pitch_str.as_str()))
+        .write_empty()?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_lines)]
 fn write_paragraph<W: Write>(
     writer: &mut Writer<W>,
     para: &crate::document::Paragraph,
     fn_format: &crate::document::FootnoteFormat,
-    has_footnotes: bool,
-    has_numbering: bool,
+    doc_style: &crate::document::DocumentStyle,
+    parts: DocParts,
     image_counter: &std::cell::Cell<usize>,
 ) -> io::Result<()> {
     writer.create_element("w:p").write_inner_content(|w| {
@@ -486,6 +678,7 @@ fn write_paragraph<W: Write>(
         let has_alignment = para.alignment.is_some();
         let has_left_indent = para.left_indent.is_some();
         let has_code_block = para.code_block;
+        let has_section_break = para.section_break.is_some();
         // Determine if we need to suppress the inherited first-line indent
         let suppress_indent = para.suppress_indent
             || (has_alignment
@@ -501,6 +694,8 @@ fn write_paragraph<W: Write>(
             )
         });
         let has_hanging = para.hanging_indent;
+        let has_hrule = para.horizontal_rule;
+        let has_tab_stops = !para.tab_stops.is_empty();
         if has_style
             || has_list
             || has_alignment
@@ -509,8 +704,23 @@ fn write_paragraph<W: Write>(
             || has_hanging
             || has_left_indent
             || has_code_block
+            || has_section_break
+            || has_hrule
+            || has_tab_stops
         {
             w.create_element("w:pPr").write_inner_content(|ppr| {
+                // Horizontal rule: emit bottom border
+                if has_hrule {
+                    ppr.create_element("w:pBdr").write_inner_content(|bdr| {
+                        bdr.create_element("w:bottom")
+                            .with_attribute(("w:val", "single"))
+                            .with_attribute(("w:sz", "6"))
+                            .with_attribute(("w:space", "1"))
+                            .with_attribute(("w:color", "auto"))
+                            .write_empty()?;
+                        Ok(())
+                    })?;
+                }
                 if has_code_block {
                     ppr.create_element("w:pStyle")
                         .with_attribute(("w:val", "CodeBlock"))
@@ -538,12 +748,24 @@ fn write_paragraph<W: Write>(
                     })?;
                 }
                 // Emit tab stops for numbered equations (right-aligned at page width)
+                // or for recovered grid/multi-column layouts
                 if has_eq_number {
                     ppr.create_element("w:tabs").write_inner_content(|tabs| {
                         tabs.create_element("w:tab")
                             .with_attribute(("w:val", "right"))
-                            .with_attribute(("w:pos", "8306"))
+                            .with_attribute(("w:pos", parts.content_width_twips.to_string().as_str()))
                             .write_empty()?;
+                        Ok(())
+                    })?;
+                } else if has_tab_stops {
+                    ppr.create_element("w:tabs").write_inner_content(|tabs| {
+                        for &pos in &para.tab_stops {
+                            let pos_str = pos.to_string();
+                            tabs.create_element("w:tab")
+                                .with_attribute(("w:val", "right"))
+                                .with_attribute(("w:pos", pos_str.as_str()))
+                                .write_empty()?;
+                        }
                         Ok(())
                     })?;
                 }
@@ -582,53 +804,55 @@ fn write_paragraph<W: Write>(
                         .with_attribute(("w:val", val))
                         .write_empty()?;
                 }
+                // Emit section break (w:sectPr inside w:pPr)
+                if let Some(section) = &para.section_break {
+                    write_section_break(ppr, section, doc_style)?;
+                }
                 Ok(())
             })?;
         }
-        // Use the inlines list if it has content (supports footnote refs);
-        // otherwise fall back to runs for backward compat.
-        if para.inlines.is_empty() {
-            for run in &para.runs {
-                write_run(w, run)?;
-            }
-        } else {
-            for inline in &para.inlines {
-                match inline {
-                    InlineElement::Text(run) => write_run(w, run)?,
-                    InlineElement::FootnoteRef(id) => write_footnote_ref(w, *id, fn_format)?,
-                    InlineElement::Math {
-                        omml_xml,
-                        equation_number,
-                    } => {
-                        write_math_inline(w, omml_xml)?;
-                        if let Some(num) = equation_number {
-                            write_equation_number(w, num)?;
-                        }
+        for inline in &para.inlines {
+            match inline {
+                InlineElement::Text(run) => write_run(w, run, &doc_style.code_font)?,
+                InlineElement::FootnoteRef(id) => write_footnote_ref(w, *id, fn_format)?,
+                InlineElement::Math {
+                    omml_xml,
+                    equation_number,
+                } => {
+                    write_math_inline(w, omml_xml)?;
+                    if let Some(num) = equation_number {
+                        write_equation_number(w, num)?;
                     }
-                    InlineElement::Image(img) => {
-                        let n = image_counter.get() + 1;
-                        image_counter.set(n);
-                        let rid = image_rel_id(n, has_footnotes, has_numbering);
-                        write_image_inline(w, img, n, &rid)?;
-                    }
-                    InlineElement::Bookmark { id, name } => {
-                        write_bookmark_start(w, *id, name)?;
-                    }
-                    InlineElement::BookmarkEnd { id } => {
-                        write_bookmark_end(w, *id)?;
-                    }
-                    InlineElement::FieldRef {
-                        bookmark_name,
-                        display_text,
-                    } => {
-                        write_field_ref(w, bookmark_name, display_text)?;
-                    }
-                    InlineElement::Hyperlink { url, runs } => {
-                        write_hyperlink(w, url, runs)?;
-                    }
-                    InlineElement::PageBreak => {
-                        write_page_break(w)?;
-                    }
+                }
+                InlineElement::Image(img) => {
+                    let n = image_counter.get() + 1;
+                    image_counter.set(n);
+                    let rid = image_rel_id(n, parts);
+                    write_image_inline(w, img, n, &rid)?;
+                }
+                InlineElement::Bookmark { id, name } => {
+                    write_bookmark_start(w, *id, name)?;
+                }
+                InlineElement::BookmarkEnd { id } => {
+                    write_bookmark_end(w, *id)?;
+                }
+                InlineElement::FieldRef {
+                    bookmark_name,
+                    display_text,
+                } => {
+                    write_field_ref(w, bookmark_name, display_text)?;
+                }
+                InlineElement::Hyperlink { url, runs } => {
+                    write_hyperlink(w, url, runs)?;
+                }
+                InlineElement::PageBreak => {
+                    write_page_break(w)?;
+                }
+                InlineElement::FieldToc { max_depth } => {
+                    write_toc_field(w, *max_depth)?;
+                }
+                InlineElement::Tab => {
+                    write_tab(w)?;
                 }
             }
         }
@@ -637,16 +861,27 @@ fn write_paragraph<W: Write>(
     Ok(())
 }
 
-fn write_run<W: Write>(writer: &mut Writer<W>, run: &crate::document::Run) -> io::Result<()> {
+/// Write a tab character element (`<w:r><w:tab/></w:r>`).
+fn write_tab<W: Write>(writer: &mut Writer<W>) -> io::Result<()> {
     writer.create_element("w:r").write_inner_content(|w| {
-        let has_rpr = run.bold || run.italic || run.superscript || run.subscript || run.monospace;
+        w.create_element("w:tab").write_empty()?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
+fn write_run<W: Write>(writer: &mut Writer<W>, run: &crate::document::Run, code_font: &str) -> io::Result<()> {
+    writer.create_element("w:r").write_inner_content(|w| {
+        let has_rpr = run.bold || run.italic || run.superscript || run.subscript || run.monospace
+            || run.underline || run.strikethrough || run.highlight || run.smallcaps
+            || run.color.is_some();
         if has_rpr {
             w.create_element("w:rPr").write_inner_content(|rpr| {
                 if run.monospace {
                     rpr.create_element("w:rFonts")
-                        .with_attribute(("w:ascii", "Courier New"))
-                        .with_attribute(("w:hAnsi", "Courier New"))
-                        .with_attribute(("w:eastAsia", "\u{7b49}\u{7ebf}"))
+                        .with_attribute(("w:ascii", code_font))
+                        .with_attribute(("w:hAnsi", code_font))
+                        .with_attribute(("w:eastAsia", code_font))
                         .write_empty()?;
                 }
                 if run.bold {
@@ -654,6 +889,27 @@ fn write_run<W: Write>(writer: &mut Writer<W>, run: &crate::document::Run) -> io
                 }
                 if run.italic {
                     rpr.create_element("w:i").write_empty()?;
+                }
+                if run.smallcaps {
+                    rpr.create_element("w:smallCaps").write_empty()?;
+                }
+                if let Some(color) = &run.color {
+                    rpr.create_element("w:color")
+                        .with_attribute(("w:val", color.as_str()))
+                        .write_empty()?;
+                }
+                if run.strikethrough {
+                    rpr.create_element("w:strike").write_empty()?;
+                }
+                if run.underline {
+                    rpr.create_element("w:u")
+                        .with_attribute(("w:val", "single"))
+                        .write_empty()?;
+                }
+                if run.highlight {
+                    rpr.create_element("w:highlight")
+                        .with_attribute(("w:val", "yellow"))
+                        .write_empty()?;
                 }
                 if run.superscript {
                     rpr.create_element("w:vertAlign")
@@ -676,13 +932,12 @@ fn write_run<W: Write>(writer: &mut Writer<W>, run: &crate::document::Run) -> io
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn write_table<W: Write>(
     writer: &mut Writer<W>,
     table: &Table,
     fn_format: &crate::document::FootnoteFormat,
-    has_footnotes: bool,
-    has_numbering: bool,
+    doc_style: &crate::document::DocumentStyle,
+    parts: DocParts,
     image_counter: &std::cell::Cell<usize>,
 ) -> io::Result<()> {
     // Determine number of columns from the first row for equal-width distribution
@@ -758,12 +1013,31 @@ fn write_table<W: Write>(
                             }
                             Ok(())
                         })?;
-                        if cell.paragraphs.is_empty() {
+                        if !cell.content.is_empty() {
+                            // Cell has structured content (paragraphs + nested tables)
+                            let mut has_trailing_para = false;
+                            for item in &cell.content {
+                                match item {
+                                    crate::document::CellContent::Paragraph(para) => {
+                                        write_paragraph(tc_w, para, fn_format, doc_style, parts, image_counter)?;
+                                        has_trailing_para = true;
+                                    }
+                                    crate::document::CellContent::Table(nested_tbl) => {
+                                        write_table(tc_w, nested_tbl, fn_format, doc_style, parts, image_counter)?;
+                                        has_trailing_para = false;
+                                    }
+                                }
+                            }
+                            // OOXML requires a trailing w:p after a nested w:tbl in a cell
+                            if !has_trailing_para {
+                                tc_w.create_element("w:p").write_empty()?;
+                            }
+                        } else if cell.paragraphs.is_empty() {
                             // OOXML requires at least one paragraph per cell
                             tc_w.create_element("w:p").write_empty()?;
                         } else {
                             for para in &cell.paragraphs {
-                                write_paragraph(tc_w, para, fn_format, has_footnotes, has_numbering, image_counter)?;
+                                write_paragraph(tc_w, para, fn_format, doc_style, parts, image_counter)?;
                             }
                         }
                         Ok(())
@@ -1170,6 +1444,47 @@ fn write_page_break<W: Write>(writer: &mut Writer<W>) -> io::Result<()> {
     Ok(())
 }
 
+fn write_toc_field<W: Write>(writer: &mut Writer<W>, max_depth: u8) -> io::Result<()> {
+    let instr = format!(r#" TOC \o "1-{max_depth}" \h \z \u "#);
+    // fldChar begin
+    writer.create_element("w:r").write_inner_content(|w| {
+        w.create_element("w:fldChar")
+            .with_attribute(("w:fldCharType", "begin"))
+            .write_empty()?;
+        Ok(())
+    })?;
+    // instrText
+    writer.create_element("w:r").write_inner_content(|w| {
+        w.create_element("w:instrText")
+            .with_attribute(("xml:space", "preserve"))
+            .write_text_content(quick_xml::events::BytesText::new(&instr))?;
+        Ok(())
+    })?;
+    // fldChar separate
+    writer.create_element("w:r").write_inner_content(|w| {
+        w.create_element("w:fldChar")
+            .with_attribute(("w:fldCharType", "separate"))
+            .write_empty()?;
+        Ok(())
+    })?;
+    // Placeholder text
+    writer.create_element("w:r").write_inner_content(|w| {
+        w.create_element("w:t")
+            .write_text_content(quick_xml::events::BytesText::new(
+                "Right-click and update field to see table of contents.",
+            ))?;
+        Ok(())
+    })?;
+    // fldChar end
+    writer.create_element("w:r").write_inner_content(|w| {
+        w.create_element("w:fldChar")
+            .with_attribute(("w:fldCharType", "end"))
+            .write_empty()?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
 fn write_footnote_ref<W: Write>(
     writer: &mut Writer<W>,
     id: u32,
@@ -1295,7 +1610,7 @@ fn generate_footnotes_xml(writer: &mut Writer<&mut Vec<u8>>, doc: &Document) -> 
                             })?;
                             // Content runs
                             for run in &footnote.content {
-                                write_run(p_w, run)?;
+                                write_run(p_w, run, &doc.style.code_font)?;
                             }
                             Ok(())
                         })?;
@@ -1304,6 +1619,183 @@ fn generate_footnotes_xml(writer: &mut Writer<&mut Vec<u8>>, doc: &Document) -> 
             }
             Ok(())
         })?;
+    Ok(())
+}
+
+/// Write a `w:sectPr` element inside a paragraph's `w:pPr` for a section break.
+fn write_section_break<W: Write>(
+    writer: &mut Writer<W>,
+    section: &SectionBreak,
+    style: &crate::document::DocumentStyle,
+) -> io::Result<()> {
+    writer.create_element("w:sectPr").write_inner_content(|w| {
+        let break_val = match section.break_type {
+            SectionBreakType::NextPage => "nextPage",
+            SectionBreakType::Continuous => "continuous",
+            SectionBreakType::EvenPage => "evenPage",
+            SectionBreakType::OddPage => "oddPage",
+        };
+        w.create_element("w:type")
+            .with_attribute(("w:val", break_val))
+            .write_empty()?;
+        if let Some(ps) = &section.page_settings {
+            write_section_page_settings(w, ps, style)?;
+        } else {
+            // Use default page settings
+            write_section_page_settings(w, &crate::document::PageSettings::default(), style)?;
+        }
+        Ok(())
+    })?;
+    Ok(())
+}
+
+fn generate_header_xml(
+    writer: &mut Writer<&mut Vec<u8>>,
+    content: &crate::document::HeaderFooter,
+) -> io::Result<()> {
+    generate_header_footer_part(writer, "w:hdr", content)
+}
+
+fn generate_footer_xml(
+    writer: &mut Writer<&mut Vec<u8>>,
+    content: &crate::document::HeaderFooter,
+) -> io::Result<()> {
+    generate_header_footer_part(writer, "w:ftr", content)
+}
+
+/// Generate a footer XML part containing a PAGE field code for automatic page numbering.
+///
+/// Produces a centered paragraph with `fldChar begin / instrText PAGE / fldChar separate /
+/// fallback text / fldChar end`.
+fn generate_page_number_footer_xml(
+    writer: &mut Writer<&mut Vec<u8>>,
+    _fmt: &PageNumberFormat,
+) -> io::Result<()> {
+    writer
+        .create_element("w:ftr")
+        .with_attribute((
+            "xmlns:w",
+            "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+        ))
+        .with_attribute((
+            "xmlns:r",
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+        ))
+        .write_inner_content(|w| {
+            w.create_element("w:p").write_inner_content(|pw| {
+                // Center-aligned paragraph
+                pw.create_element("w:pPr").write_inner_content(|ppr| {
+                    ppr.create_element("w:jc")
+                        .with_attribute(("w:val", "center"))
+                        .write_empty()?;
+                    Ok(())
+                })?;
+                // fldChar begin
+                pw.create_element("w:r").write_inner_content(|rw| {
+                    rw.create_element("w:fldChar")
+                        .with_attribute(("w:fldCharType", "begin"))
+                        .write_empty()?;
+                    Ok(())
+                })?;
+                // instrText with PAGE field code
+                pw.create_element("w:r").write_inner_content(|rw| {
+                    rw.create_element("w:instrText")
+                        .with_attribute(("xml:space", "preserve"))
+                        .write_text_content(BytesText::new(" PAGE "))?;
+                    Ok(())
+                })?;
+                // fldChar separate
+                pw.create_element("w:r").write_inner_content(|rw| {
+                    rw.create_element("w:fldChar")
+                        .with_attribute(("w:fldCharType", "separate"))
+                        .write_empty()?;
+                    Ok(())
+                })?;
+                // Fallback display text
+                pw.create_element("w:r").write_inner_content(|rw| {
+                    rw.create_element("w:t")
+                        .write_text_content(BytesText::new("1"))?;
+                    Ok(())
+                })?;
+                // fldChar end
+                pw.create_element("w:r").write_inner_content(|rw| {
+                    rw.create_element("w:fldChar")
+                        .with_attribute(("w:fldCharType", "end"))
+                        .write_empty()?;
+                    Ok(())
+                })?;
+                Ok(())
+            })?;
+            Ok(())
+        })?;
+    Ok(())
+}
+
+/// Convert a `PageNumberFormat` to the OOXML `w:pgNumType/@w:fmt` value.
+fn page_number_format_val(fmt: &PageNumberFormat) -> &'static str {
+    match fmt {
+        PageNumberFormat::Decimal => "decimal",
+        PageNumberFormat::LowerRoman => "lowerRoman",
+        PageNumberFormat::UpperRoman => "upperRoman",
+        PageNumberFormat::LowerLetter => "lowerLetter",
+        PageNumberFormat::UpperLetter => "upperLetter",
+    }
+}
+
+fn generate_header_footer_part(
+    writer: &mut Writer<&mut Vec<u8>>,
+    root_tag: &str,
+    content: &crate::document::HeaderFooter,
+) -> io::Result<()> {
+    writer
+        .create_element(root_tag)
+        .with_attribute((
+            "xmlns:w",
+            "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+        ))
+        .with_attribute((
+            "xmlns:r",
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+        ))
+        .write_inner_content(|w| {
+            for para in &content.paragraphs {
+                write_header_footer_paragraph(w, para)?;
+            }
+            Ok(())
+        })?;
+    Ok(())
+}
+
+/// Write a simplified paragraph for headers/footers (text runs only, with alignment).
+fn write_header_footer_paragraph<W: Write>(
+    writer: &mut Writer<W>,
+    para: &crate::document::Paragraph,
+) -> io::Result<()> {
+    writer.create_element("w:p").write_inner_content(|w| {
+        let has_alignment = para.alignment.is_some();
+        if has_alignment {
+            w.create_element("w:pPr").write_inner_content(|ppr| {
+                if let Some(alignment) = &para.alignment {
+                    let val = match alignment {
+                        Alignment::Left => "left",
+                        Alignment::Center => "center",
+                        Alignment::Right => "right",
+                        Alignment::Justify => "both",
+                    };
+                    ppr.create_element("w:jc")
+                        .with_attribute(("w:val", val))
+                        .write_empty()?;
+                }
+                Ok(())
+            })?;
+        }
+        for inline in &para.inlines {
+            if let InlineElement::Text(run) = inline {
+                write_run(w, run, "Courier New")?;
+            }
+        }
+        Ok(())
+    })?;
     Ok(())
 }
 

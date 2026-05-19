@@ -71,3 +71,7 @@ $ overbrace(a + b + c, "sum") $
 
 == Vector
 $ vec(1, 2, 3) $
+
+== Aligned Equation
+$ x &= 1 + 2 \
+  &= 3 $

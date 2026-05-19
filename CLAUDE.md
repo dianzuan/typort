@@ -14,7 +14,7 @@
 - 标题（h1-h5）→ Word Heading 样式
 - 段落、粗体、斜体、上标、下标、等宽
 - 脚注（含带圈数字格式）
-- 数学公式（Typst → OMML）：分数、上下标、根号、求和/积分/连乘、定界符、矩阵、向量、重音符号、上/下划线、命名函数、cases、overbrace/underbrace/overbracket/underbracket/overparen/underparen/overshell/undershell
+- 数学公式（Typst → OMML）：分数、上下标、根号、求和/积分/连乘、定界符、矩阵、向量、重音符号、上/下划线、命名函数、cases、overbrace/underbrace/overbracket/underbracket/overparen/underparen/overshell/undershell、多行对齐公式（eqArr）
 - 表格（含合并单元格 colspan/rowspan）
 - 有序/无序列表
 - 代码块、引用块、术语列表
@@ -26,36 +26,35 @@
 - 参考文献悬挂缩进
 - 公式编号（章节感知）
 - 期刊预设（页面边距覆盖）
+- 图片嵌入（PNG/JPG → DrawingML `w:drawing` + `word/media/`）
+- SVG/Typst 矢量图光栅化（resvg → PNG 后嵌入）
+- 文档网格（`w:docGrid`）
+- 段落控制（`w:keepNext`、`w:widowControl`）
+- CJK 排版属性（`w:kinsoku`、`w:overflowPunct`、`w:autoSpaceDE/DN`）
+- 交叉引用（`@label` → `w:bookmarkStart` + `REF` 域代码）
+- 超链接（`link()` → `w:fldSimple HYPERLINK`）
+- 分页符（`#pagebreak()` → `w:br type="page"`，从 PagedDocument 检测页面早结束）
+- 分节（页面设置变化 → 多 `w:sectPr`）
+- 页眉页脚（从 PagedDocument 边距区域提取文本）
+- 分栏（`#page(columns: N)` → `w:cols`）
+- 目录域（`#outline()` → `TOC` 域代码）
+- 多行对齐公式（`AlignPointElem` + `LinebreakElem` → `m:eqArr`）
+- 水平分割线（`#line(length: 100%)` → `w:pBdr` 底部边框，从 PagedDocument Shape 检测）
+- 多页 `#align()` 内容恢复（不再仅限首页，全页面扫描缺失内容）
 
 ### 未实现（按优先级）
 
-**P0 — 基本可用性：**
-- 图片嵌入（PNG/JPG → `w:drawing` + `word/media/`）
-- Typst 原生绘图/SVG → 光栅化后嵌入
-- 文档网格（`w:docGrid`）
-- 段落控制（`w:keepNext`、`w:widowControl`、`w:pageBreakBefore`）
-- CJK 排版属性（`w:kinsoku`、`w:overflowPunct`、`w:autoSpaceDE/DN`）
-
-**P1 — 数学公式补全：**
-- ~~矩阵 `mat` → `m:m`~~ ✅ 已实现
-- ~~向量/重音 `accent`/`hat`/`arrow` → `m:acc`~~ ✅ 已实现
-- ~~上/下划线 → `m:bar`~~ ✅ 已实现
-- ~~命名函数 `sin`/`cos`/`lim` → `m:func`~~ ✅ 已实现
-- 多行对齐公式 → `m:eqArr`（AlignPointElem 独立识别待实现，当前仅在 cases 内使用）
-- ~~`cases` → `m:d` + `m:eqArr`~~ ✅ 已实现
-- ~~花括号注释 `overbrace`/`underbrace` → `m:groupChr`~~ ✅ 已实现（含 bracket/paren/shell 变体）
-
-**P2 — 完整文档：**
-- 交叉引用（`@label` → `w:bookmarkStart` + `REF` 域代码）
-- 分节（多 `w:sectPr`，不同页面设置）
-- 页眉页脚
-- 分栏
-- 分页符
+**P1 — 数学公式：**
+- ~~矩阵 `mat` → `m:m`~~ ✅
+- ~~向量/重音 `accent`/`hat`/`arrow` → `m:acc`~~ ✅
+- ~~上/下划线 → `m:bar`~~ ✅
+- ~~命名函数 `sin`/`cos`/`lim` → `m:func`~~ ✅
+- ~~多行对齐公式 → `m:eqArr`~~ ✅
+- ~~`cases` → `m:d` + `m:eqArr`~~ ✅
+- ~~花括号注释 `overbrace`/`underbrace` → `m:groupChr`~~ ✅
 
 **P3 — 增强：**
-- Reference doc 模板系统（用户提供 .docx 模板，typort 填入内容）
-- Ruby 注音（`w:ruby`）
-- 目录域（`TOC`）
+- Ruby 注音（`w:ruby`，Typst 0.14.2 无原生支持）
 
 ### 已知限制（OMML 层面）
 - OMML 不支持数学内着色（`\color` 无等价物）
@@ -67,7 +66,7 @@
 
 ```bash
 cargo build --workspace        # Build all crates
-cargo test --workspace         # Run all tests (97 tests)
+cargo test --workspace         # Run all tests (163 tests)
 cargo run -p typort-cli -- input.typ -o output.docx  # Run CLI
 ```
 
@@ -78,7 +77,7 @@ Cargo workspace with 5 crates under `crates/`:
 - `typort-cli` — Binary. CLI entry point (clap). Depends on typort-core.
 - `typort-core` — Lib. Typst compilation (World impl), HtmlDocument 遍历, PagedDocument 恢复, 元素分发. Depends on typort-ooxml, typort-math, typort-presets.
 - `typort-ooxml` — Lib. OOXML XML generation (pure quick-xml) + ZIP packaging. Document model → Word XML.
-- `typort-math` — Lib. Typst math Content → OMML conversion. 已实现 13/17 OMML 元素.
+- `typort-math` — Lib. Typst math Content → OMML conversion. 已实现 13/17 OMML 元素 + 独立 eqArr.
 - `typort-presets` — Lib. Journal preset TOML loading.
 
 ## Key Dependencies
@@ -86,6 +85,7 @@ Cargo workspace with 5 crates under `crates/`:
 - `typst` 0.14.2 — Compiler crate, provides Content tree
 - `typst-kit` 0.14.2 — Font discovery helpers (embedded fonts only, no system fonts)
 - `quick-xml` 0.37 — XML serialization (we do NOT use docx-rs)
+- `resvg` + `tiny-skia` — SVG rasterization (SVG → PNG for embedding)
 - `zip` 2.x — .docx ZIP packaging
 
 ## Conventions

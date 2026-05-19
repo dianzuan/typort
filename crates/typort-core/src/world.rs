@@ -7,7 +7,9 @@ use typst::syntax::{FileId, Source, VirtualPath};
 use typst::text::{Font, FontBook};
 use typst::utils::LazyHash;
 use typst::{Feature, Library, LibraryExt, World};
+use typst_kit::download::{Downloader, ProgressSink};
 use typst_kit::fonts::{FontSlot, Fonts};
+use typst_kit::package::PackageStorage;
 
 pub struct TyportWorld {
     library: LazyHash<Library>,
@@ -15,6 +17,7 @@ pub struct TyportWorld {
     fonts: Vec<FontSlot>,
     source: Source,
     root: PathBuf,
+    package_storage: PackageStorage,
 }
 
 impl TyportWorld {
@@ -33,11 +36,14 @@ impl TyportWorld {
         let content = std::fs::read_to_string(&abs_path)?;
         let source = Source::new(FileId::new(None, vpath), content);
 
-        let Fonts { book, fonts } = Fonts::searcher().include_system_fonts(false).search();
+        let Fonts { book, fonts } = Fonts::searcher().include_system_fonts(true).search();
 
         let library = Library::builder()
             .with_features([Feature::Html].into_iter().collect())
             .build();
+
+        let downloader = Downloader::new("typort");
+        let package_storage = PackageStorage::new(None, None, downloader);
 
         Ok(Self {
             library: LazyHash::new(library),
@@ -45,11 +51,23 @@ impl TyportWorld {
             fonts,
             source,
             root,
+            package_storage,
         })
     }
 
-    fn resolve_path(&self, id: FileId) -> PathBuf {
-        self.root.join(id.vpath().as_rootless_path())
+    pub fn main_source(&self) -> &Source {
+        &self.source
+    }
+
+    fn resolve_path(&self, id: FileId) -> FileResult<PathBuf> {
+        if let Some(spec) = id.package() {
+            let package_dir = self
+                .package_storage
+                .prepare_package(spec, &mut ProgressSink)?;
+            Ok(package_dir.join(id.vpath().as_rootless_path()))
+        } else {
+            Ok(self.root.join(id.vpath().as_rootless_path()))
+        }
     }
 }
 
@@ -70,7 +88,7 @@ impl World for TyportWorld {
         if id == self.source.id() {
             Ok(self.source.clone())
         } else {
-            let path = self.resolve_path(id);
+            let path = self.resolve_path(id)?;
             let content = std::fs::read_to_string(&path)
                 .map_err(|_| typst::diag::FileError::NotFound(path))?;
             Ok(Source::new(id, content))
@@ -78,7 +96,7 @@ impl World for TyportWorld {
     }
 
     fn file(&self, id: FileId) -> FileResult<Bytes> {
-        let path = self.resolve_path(id);
+        let path = self.resolve_path(id)?;
         let data = std::fs::read(&path)
             .map_err(|_| typst::diag::FileError::NotFound(path))?;
         Ok(Bytes::new(data))

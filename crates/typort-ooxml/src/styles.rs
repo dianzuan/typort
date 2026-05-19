@@ -20,10 +20,10 @@ pub(crate) fn generate_styles(
             for level in 1..=5 {
                 write_style_heading(w, level, style)?;
             }
-            write_style_code_block(w)?;
+            write_style_code_block(w, style)?;
             if has_footnotes {
                 write_style_footnote_reference(w)?;
-                write_style_footnote_text(w)?;
+                write_style_footnote_text(w, style)?;
             }
             Ok(())
         })?;
@@ -112,7 +112,7 @@ fn write_style_normal<W: Write>(w: &mut Writer<W>, style: &DocumentStyle) -> io:
             s.create_element("w:pPr").write_inner_content(|ppr| {
                 ppr.create_element("w:widowControl").write_empty()?;
                 ppr.create_element("w:jc")
-                    .with_attribute(("w:val", "both"))
+                    .with_attribute(("w:val", style.body_alignment.as_str()))
                     .write_empty()?;
                 ppr.create_element("w:spacing")
                     .with_attribute(("w:line", line_spacing.as_str()))
@@ -136,17 +136,8 @@ fn write_style_heading<W: Write>(
     let style_id = format!("Heading{level}");
     let name = format!("heading {level}");
 
-    // Heading sizes: scale up from body size
-    // Level 1: body + 4.5pt (9 half-pt), Level 2: body + 3.5pt (7),
-    // Level 3: body + 2.5pt (5), Level 4: body + 1.5pt (3), Level 5: body + 0.5pt (1)
-    let heading_size = style.body_size_half_pt
-        + match level {
-            1 => 9,
-            2 => 7,
-            3 => 5,
-            4 => 3,
-            _ => 1,
-        };
+    let idx = (level as usize).saturating_sub(1).min(4);
+    let heading_size = style.heading_sizes[idx];
     let font_size = heading_size.to_string();
 
     w.create_element("w:style")
@@ -166,9 +157,11 @@ fn write_style_heading<W: Write>(
                 ppr.create_element("w:outlineLvl")
                     .with_attribute(("w:val", outline_level.as_str()))
                     .write_empty()?;
+                let sp_before = style.heading_spacing_before.to_string();
+                let sp_after = style.heading_spacing_after.to_string();
                 ppr.create_element("w:spacing")
-                    .with_attribute(("w:before", "240"))
-                    .with_attribute(("w:after", "120"))
+                    .with_attribute(("w:before", sp_before.as_str()))
+                    .with_attribute(("w:after", sp_after.as_str()))
                     .write_empty()?;
                 ppr.create_element("w:ind")
                     .with_attribute(("w:firstLine", "0"))
@@ -195,7 +188,8 @@ fn write_style_heading<W: Write>(
     Ok(())
 }
 
-fn write_style_code_block<W: Write>(w: &mut Writer<W>) -> io::Result<()> {
+fn write_style_code_block<W: Write>(w: &mut Writer<W>, style: &DocumentStyle) -> io::Result<()> {
+    let code_sz = style.code_size_half_pt.to_string();
     w.create_element("w:style")
         .with_attribute(("w:type", "paragraph"))
         .with_attribute(("w:styleId", "CodeBlock"))
@@ -216,24 +210,19 @@ fn write_style_code_block<W: Write>(w: &mut Writer<W>) -> io::Result<()> {
                     .with_attribute(("w:before", "0"))
                     .with_attribute(("w:after", "0"))
                     .write_empty()?;
-                ppr.create_element("w:shd")
-                    .with_attribute(("w:val", "clear"))
-                    .with_attribute(("w:color", "auto"))
-                    .with_attribute(("w:fill", "F2F2F2"))
-                    .write_empty()?;
                 Ok(())
             })?;
             s.create_element("w:rPr").write_inner_content(|rpr| {
                 rpr.create_element("w:rFonts")
-                    .with_attribute(("w:ascii", "Courier New"))
-                    .with_attribute(("w:hAnsi", "Courier New"))
-                    .with_attribute(("w:eastAsia", "\u{7b49}\u{7ebf}"))
+                    .with_attribute(("w:ascii", style.code_font.as_str()))
+                    .with_attribute(("w:hAnsi", style.code_font.as_str()))
+                    .with_attribute(("w:eastAsia", style.code_font.as_str()))
                     .write_empty()?;
                 rpr.create_element("w:sz")
-                    .with_attribute(("w:val", "18"))
+                    .with_attribute(("w:val", code_sz.as_str()))
                     .write_empty()?;
                 rpr.create_element("w:szCs")
-                    .with_attribute(("w:val", "18"))
+                    .with_attribute(("w:val", code_sz.as_str()))
                     .write_empty()?;
                 Ok(())
             })?;
@@ -261,7 +250,8 @@ fn write_style_footnote_reference<W: Write>(w: &mut Writer<W>) -> io::Result<()>
     Ok(())
 }
 
-fn write_style_footnote_text<W: Write>(w: &mut Writer<W>) -> io::Result<()> {
+fn write_style_footnote_text<W: Write>(w: &mut Writer<W>, style: &DocumentStyle) -> io::Result<()> {
+    let fn_sz = style.footnote_size_half_pt.to_string();
     w.create_element("w:style")
         .with_attribute(("w:type", "paragraph"))
         .with_attribute(("w:styleId", "FootnoteText"))
@@ -274,10 +264,10 @@ fn write_style_footnote_text<W: Write>(w: &mut Writer<W>) -> io::Result<()> {
                 .write_empty()?;
             s.create_element("w:rPr").write_inner_content(|rpr| {
                 rpr.create_element("w:sz")
-                    .with_attribute(("w:val", "18"))
+                    .with_attribute(("w:val", fn_sz.as_str()))
                     .write_empty()?;
                 rpr.create_element("w:szCs")
-                    .with_attribute(("w:val", "18"))
+                    .with_attribute(("w:val", fn_sz.as_str()))
                     .write_empty()?;
                 Ok(())
             })?;
@@ -299,9 +289,8 @@ pub(crate) fn generate_font_table(
         fonts.push((style.body_font_east_asia.as_str(), "86"));
     }
 
-    // Always include code block fonts
-    fonts.push(("Courier New", "00"));
-    fonts.push(("\u{7b49}\u{7ebf}", "86")); // 等线
+    // Include the detected code font
+    fonts.push((style.code_font.as_str(), "00"));
 
     // Deduplicate by font name
     fonts.sort_by_key(|(name, _)| *name);

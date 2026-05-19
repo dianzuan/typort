@@ -15,3 +15,5 @@ typst-html.workspace = true
 typort-ooxml.workspace = true
 typort-math.workspace = true
 typort-presets.workspace = true
+resvg.workspace = true
+tiny-skia.workspace = true
