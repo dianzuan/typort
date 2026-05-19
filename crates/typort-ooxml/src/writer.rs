@@ -966,6 +966,7 @@ fn write_run<W: Write>(
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 fn write_table<W: Write>(
     writer: &mut Writer<W>,
     table: &Table,
