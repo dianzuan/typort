@@ -1538,10 +1538,8 @@ fn convert_html_list_at_level(
                 .collect();
             for c in &non_list_children {
                 match c {
-                    HtmlNode::Text(text, _) => {
-                        if !text.is_empty() {
-                            para.push_run(Run::new(text.as_str()));
-                        }
+                    HtmlNode::Text(text, _) if !text.is_empty() => {
+                        para.push_run(Run::new(text.as_str()));
                     }
                     HtmlNode::Element(el) => {
                         collect_html_inlines(&el.children, &mut para,
