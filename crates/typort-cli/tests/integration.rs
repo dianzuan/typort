@@ -2998,3 +2998,79 @@ fn nested_table_document_model_has_cell_content() {
         "second cell should have a nested table in its content"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Show rule style recovery tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn show_rule_heading_font_and_size() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/show_rule_styles.typ"))
+            .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    // Heading should be centered (from show rule: align(center))
+    assert!(
+        doc_xml.contains(r#"<w:jc w:val="center"/>"#),
+        "heading should be centered via show rule. Got:\n{doc_xml}"
+    );
+
+    // Heading font should be overridden to DejaVu Sans (from show rule)
+    assert!(
+        doc_xml.contains("DejaVu Sans"),
+        "heading should use DejaVu Sans font from show rule. Got:\n{doc_xml}"
+    );
+
+    // Heading size should be 18pt = 36 half-points (from show rule)
+    assert!(
+        doc_xml.contains(r#"<w:sz w:val="36"/>"#),
+        "heading should have size 36 half-points (18pt) from show rule. Got:\n{doc_xml}"
+    );
+}
+
+#[test]
+fn show_rule_bold_size_override() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/show_rule_styles.typ"))
+            .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    // Bold text should have 14pt = 28 half-points (from show rule: set text(size: 14pt))
+    assert!(
+        doc_xml.contains(r#"<w:sz w:val="28"/>"#),
+        "bold text should have size 28 half-points (14pt) from show rule. Got:\n{doc_xml}"
+    );
+}
+
+#[test]
+fn show_rule_italic_color() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/show_rule_styles.typ"))
+            .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    // Italic text should be blue (from show rule: set text(fill: rgb("#0000FF")))
+    assert!(
+        doc_xml.contains(r#"<w:color w:val="0000FF"/>"#),
+        "italic text should have blue color from show rule. Got:\n{doc_xml}"
+    );
+}

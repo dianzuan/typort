@@ -83,7 +83,7 @@ pub fn write_docx<W: Write + Seek>(
     // Write header XML
     if let Some(header) = &doc.header {
         zip.start_file("word/header1.xml", options)?;
-        zip.write_all(&xml_part(|w| generate_header_xml(w, header))?)?;
+        zip.write_all(&xml_part(|w| generate_header_xml(w, header, &doc.style))?)?;
     }
 
     // Write footer XML — either a PAGE field for page numbering, or static content
@@ -93,7 +93,7 @@ pub fn write_docx<W: Write + Seek>(
         zip.write_all(&xml_part(|w| generate_page_number_footer_xml(w, &fmt))?)?;
     } else if let Some(footer) = &doc.footer {
         zip.start_file("word/footer1.xml", options)?;
-        zip.write_all(&xml_part(|w| generate_footer_xml(w, footer))?)?;
+        zip.write_all(&xml_part(|w| generate_footer_xml(w, footer, &doc.style))?)?;
     }
 
     // Write image files to word/media/
@@ -716,6 +716,7 @@ fn write_paragraph<W: Write>(
         let has_hanging = para.hanging_indent;
         let has_hrule = para.horizontal_rule;
         let has_tab_stops = !para.tab_stops.is_empty();
+        let has_spacing = para.spacing_before.is_some();
         if has_style
             || has_list
             || has_alignment
@@ -727,6 +728,7 @@ fn write_paragraph<W: Write>(
             || has_section_break
             || has_hrule
             || has_tab_stops
+            || has_spacing
         {
             w.create_element("w:pPr").write_inner_content(|ppr| {
                 // Horizontal rule: emit bottom border
@@ -815,6 +817,13 @@ fn write_paragraph<W: Write>(
                         .with_attribute(("w:firstLine", "0"))
                         .write_empty()?;
                 }
+                // Emit spacing override
+                if let Some(before) = para.spacing_before {
+                    let before_str = before.to_string();
+                    ppr.create_element("w:spacing")
+                        .with_attribute(("w:before", before_str.as_str()))
+                        .write_empty()?;
+                }
                 // Emit alignment
                 if let Some(alignment) = &para.alignment {
                     let val = match alignment {
@@ -836,7 +845,7 @@ fn write_paragraph<W: Write>(
         }
         for inline in &para.inlines {
             match inline {
-                InlineElement::Text(run) => write_run(w, run, &doc_style.code_font)?,
+                InlineElement::Text(run) => write_run(w, run, doc_style)?,
                 InlineElement::FootnoteRef(id) => write_footnote_ref(w, *id, fn_format)?,
                 InlineElement::Math {
                     omml_xml,
@@ -896,9 +905,10 @@ fn write_tab<W: Write>(writer: &mut Writer<W>) -> io::Result<()> {
 fn write_run<W: Write>(
     writer: &mut Writer<W>,
     run: &crate::document::Run,
-    code_font: &str,
+    doc_style: &crate::document::DocumentStyle,
 ) -> io::Result<()> {
     writer.create_element("w:r").write_inner_content(|w| {
+        let has_font_override = run.font_ascii.is_some() || run.font_east_asia.is_some();
         let has_rpr = run.bold
             || run.italic
             || run.superscript
@@ -908,14 +918,30 @@ fn write_run<W: Write>(
             || run.strikethrough
             || run.highlight
             || run.smallcaps
-            || run.color.is_some();
+            || run.color.is_some()
+            || has_font_override
+            || run.size_half_pt.is_some();
         if has_rpr {
             w.create_element("w:rPr").write_inner_content(|rpr| {
                 if run.monospace {
                     rpr.create_element("w:rFonts")
-                        .with_attribute(("w:ascii", code_font))
-                        .with_attribute(("w:hAnsi", code_font))
-                        .with_attribute(("w:eastAsia", code_font))
+                        .with_attribute(("w:ascii", doc_style.code_font.as_str()))
+                        .with_attribute(("w:hAnsi", doc_style.code_font.as_str()))
+                        .with_attribute(("w:eastAsia", doc_style.code_font.as_str()))
+                        .write_empty()?;
+                } else if has_font_override {
+                    let ascii = run
+                        .font_ascii
+                        .as_deref()
+                        .unwrap_or(&doc_style.body_font_ascii);
+                    let east_asia = run
+                        .font_east_asia
+                        .as_deref()
+                        .unwrap_or(&doc_style.body_font_east_asia);
+                    rpr.create_element("w:rFonts")
+                        .with_attribute(("w:ascii", ascii))
+                        .with_attribute(("w:hAnsi", ascii))
+                        .with_attribute(("w:eastAsia", east_asia))
                         .write_empty()?;
                 }
                 if run.bold {
@@ -930,6 +956,15 @@ fn write_run<W: Write>(
                 if let Some(color) = &run.color {
                     rpr.create_element("w:color")
                         .with_attribute(("w:val", color.as_str()))
+                        .write_empty()?;
+                }
+                if let Some(size) = run.size_half_pt {
+                    let size_str = size.to_string();
+                    rpr.create_element("w:sz")
+                        .with_attribute(("w:val", size_str.as_str()))
+                        .write_empty()?;
+                    rpr.create_element("w:szCs")
+                        .with_attribute(("w:val", size_str.as_str()))
                         .write_empty()?;
                 }
                 if run.strikethrough {
@@ -1662,7 +1697,7 @@ fn generate_footnotes_xml(writer: &mut Writer<&mut Vec<u8>>, doc: &Document) -> 
                             })?;
                             // Content runs
                             for run in &footnote.content {
-                                write_run(p_w, run, &doc.style.code_font)?;
+                                write_run(p_w, run, &doc.style)?;
                             }
                             Ok(())
                         })?;
@@ -1704,15 +1739,17 @@ fn write_section_break<W: Write>(
 fn generate_header_xml(
     writer: &mut Writer<&mut Vec<u8>>,
     content: &crate::document::HeaderFooter,
+    doc_style: &crate::document::DocumentStyle,
 ) -> io::Result<()> {
-    generate_header_footer_part(writer, "w:hdr", content)
+    generate_header_footer_part(writer, "w:hdr", content, doc_style)
 }
 
 fn generate_footer_xml(
     writer: &mut Writer<&mut Vec<u8>>,
     content: &crate::document::HeaderFooter,
+    doc_style: &crate::document::DocumentStyle,
 ) -> io::Result<()> {
-    generate_header_footer_part(writer, "w:ftr", content)
+    generate_header_footer_part(writer, "w:ftr", content, doc_style)
 }
 
 /// Generate a footer XML part containing a PAGE field code for automatic page numbering.
@@ -1798,6 +1835,7 @@ fn generate_header_footer_part(
     writer: &mut Writer<&mut Vec<u8>>,
     root_tag: &str,
     content: &crate::document::HeaderFooter,
+    doc_style: &crate::document::DocumentStyle,
 ) -> io::Result<()> {
     writer
         .create_element(root_tag)
@@ -1811,7 +1849,7 @@ fn generate_header_footer_part(
         ))
         .write_inner_content(|w| {
             for para in &content.paragraphs {
-                write_header_footer_paragraph(w, para)?;
+                write_header_footer_paragraph(w, para, doc_style)?;
             }
             Ok(())
         })?;
@@ -1822,6 +1860,7 @@ fn generate_header_footer_part(
 fn write_header_footer_paragraph<W: Write>(
     writer: &mut Writer<W>,
     para: &crate::document::Paragraph,
+    doc_style: &crate::document::DocumentStyle,
 ) -> io::Result<()> {
     writer.create_element("w:p").write_inner_content(|w| {
         let has_alignment = para.alignment.is_some();
@@ -1843,7 +1882,7 @@ fn write_header_footer_paragraph<W: Write>(
         }
         for inline in &para.inlines {
             if let InlineElement::Text(run) = inline {
-                write_run(w, run, "Courier New")?;
+                write_run(w, run, doc_style)?;
             }
         }
         Ok(())

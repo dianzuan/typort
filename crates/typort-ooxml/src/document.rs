@@ -83,6 +83,14 @@ pub struct Run {
     /// Text color as a 6-digit hex string (e.g. "FF0000" for red).
     /// `None` means inherit the default (black).
     pub color: Option<String>,
+    /// Per-run font override for ASCII/Latin text (e.g. from show rules).
+    /// `None` means inherit the document default.
+    pub font_ascii: Option<String>,
+    /// Per-run font override for CJK text.
+    pub font_east_asia: Option<String>,
+    /// Per-run font size override in half-points (e.g. 24 = 12pt).
+    /// `None` means inherit the document default.
+    pub size_half_pt: Option<u32>,
     /// Source span for cross-referencing with `PagedDocument` styling.
     pub span: Option<typst_syntax::Span>,
 }
@@ -102,6 +110,9 @@ impl Run {
             highlight: false,
             smallcaps: false,
             color: None,
+            font_ascii: None,
+            font_east_asia: None,
+            size_half_pt: None,
             span: None,
         }
     }
@@ -145,6 +156,9 @@ pub struct Paragraph {
     /// Tab stop positions in twips (e.g., for grid/multi-column recovery).
     /// Emitted as `<w:tabs><w:tab w:val="right" w:pos="..."/></w:tabs>` in `w:pPr`.
     pub tab_stops: Vec<u32>,
+    /// Override the paragraph's `w:before` spacing (twips).
+    /// Used to suppress heading above-spacing at the start of a page/document.
+    pub spacing_before: Option<u32>,
 }
 
 impl Paragraph {
@@ -425,10 +439,14 @@ pub struct DocumentStyle {
     pub heading_sizes: [u32; 5],
     /// Paragraph justification (e.g., "both" for justify, "left" for left-align).
     pub body_alignment: String,
-    /// Heading spacing before in twips (default 240 = 12pt).
-    pub heading_spacing_before: u32,
-    /// Heading spacing after in twips (default 120 = 6pt).
-    pub heading_spacing_after: u32,
+    /// Body paragraph spacing before in twips.
+    pub body_spacing_before: u32,
+    /// Body paragraph spacing after in twips.
+    pub body_spacing_after: u32,
+    /// Heading spacing before in twips, per level (0=h1 .. 4=h5).
+    pub heading_spacing_before: [u32; 5],
+    /// Heading spacing after in twips, per level (0=h1 .. 4=h5).
+    pub heading_spacing_after: [u32; 5],
 }
 
 impl Default for DocumentStyle {
@@ -445,8 +463,10 @@ impl Default for DocumentStyle {
             footnote_size_half_pt: 18,
             heading_sizes: [30, 28, 26, 24, 22],
             body_alignment: "left".to_string(),
-            heading_spacing_before: 240,
-            heading_spacing_after: 120,
+            body_spacing_before: 0,
+            body_spacing_after: 0,
+            heading_spacing_before: [240; 5],
+            heading_spacing_after: [120; 5],
         }
     }
 }
