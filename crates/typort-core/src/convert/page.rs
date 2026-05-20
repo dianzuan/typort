@@ -83,6 +83,10 @@ pub fn extract_document_style(paged: &PagedDocument) -> DocumentStyle {
     let (body_spacing_before, body_spacing_after) =
         detect_body_paragraph_spacing(body_size_half_pt, &heading_sizes, paged);
 
+    // Detect CJK content presence from rendered text
+    let has_cjk = !ascii_font_counts.is_empty()
+        && cjk_font_counts.values().sum::<usize>() > 0;
+
     DocumentStyle {
         body_font_ascii,
         body_font_east_asia,
@@ -99,6 +103,10 @@ pub fn extract_document_style(paged: &PagedDocument) -> DocumentStyle {
         footnote_size_half_pt,
         heading_sizes,
         body_alignment: detect_justification(paged),
+        lang_latin: "en-US".to_string(),
+        lang_east_asia: if has_cjk { "zh-CN".to_string() } else { "en-US".to_string() },
+        has_cjk_content: has_cjk,
+        hyperlink_color: "0563C1".to_string(),
     }
 }
 
@@ -126,7 +134,7 @@ fn detect_first_line_indent(paged: &PagedDocument, body_pt: f64) -> u32 {
 
     // Group by y (lines), find the left-most x per line
     let page_width = page.frame.width().to_pt();
-    let (body_top, body_bottom) = find_body_zone(page_width, page.frame.height().to_pt());
+    let (body_top, body_bottom) = find_body_zone(page_width, page.frame.height().to_pt(), None, None);
 
     let body_frags: Vec<&TextFragment> = fragments
         .iter()
@@ -213,7 +221,7 @@ fn detect_justification(paged: &PagedDocument) -> String {
     for page in paged.pages.iter().take(3) {
         let page_width = page.frame.width().to_pt();
         let page_height = page.frame.height().to_pt();
-        let (body_top, body_bottom) = find_body_zone(page_width, page_height);
+        let (body_top, body_bottom) = find_body_zone(page_width, page_height, None, None);
         collect_right_edges(
             &page.frame,
             Point::zero(),
@@ -933,19 +941,23 @@ fn extract_page_metrics(frame: &Frame) -> PageMetrics {
         &mut max_y,
     );
 
+    // Use Typst's default margin (2.5/21 * min(w,h)) as fallback instead of
+    // Word's 1-inch (1440 twips), matching actual Typst rendering.
+    let default_margin_twips = (default_margin_pt(page_width, page_height) * 20.0).round().max(0.0) as u32;
+
     let (margin_left, margin_right, margin_top, margin_bottom) = if min_x < max_x && min_y < max_y {
         let ml = (min_x * 20.0).round().max(0.0) as u32;
         let mr = ((page_width - max_x) * 20.0).round().max(0.0) as u32;
         let mt = (min_y * 20.0).round().max(0.0) as u32;
         let mb = ((page_height - max_y) * 20.0).round().max(0.0) as u32;
         (
-            if ml >= 100 { ml } else { 1440 },
-            if mr >= 100 { mr } else { 1440 },
-            if mt >= 100 { mt } else { 1440 },
-            if mb >= 100 { mb } else { 1440 },
+            if ml >= 100 { ml } else { default_margin_twips },
+            if mr >= 100 { mr } else { default_margin_twips },
+            if mt >= 100 { mt } else { default_margin_twips },
+            if mb >= 100 { mb } else { default_margin_twips },
         )
     } else {
-        (1440, 1440, 1440, 1440)
+        (default_margin_twips, default_margin_twips, default_margin_twips, default_margin_twips)
     };
 
     PageMetrics {
@@ -1020,17 +1032,18 @@ pub fn detect_section_breaks(paged: &PagedDocument) -> Vec<DetectedSection> {
 
 /// Apply section breaks to the document model.
 ///
-/// Given detected section boundaries from `PagedDocument` and the total
-/// body element count, place `SectionBreak` on the appropriate paragraphs.
-/// This uses a proportional mapping: if the document has N pages and M body
-/// elements, the break after page P is placed at approximately element
-/// `P * M / N`.
+/// Given detected section boundaries from `PagedDocument` and an
+/// element → page mapping, place `SectionBreak` on the last paragraph
+/// before each section boundary.
+///
+/// `element_page_map` maps each element index to its 1-based page number.
+/// If the map is empty, falls back to proportional mapping.
 pub fn apply_section_breaks(
     doc: &mut typort_ooxml::document::Document,
     sections: &[DetectedSection],
-    total_pages: usize,
+    element_page_map: &[usize],
 ) {
-    if sections.is_empty() || total_pages == 0 {
+    if sections.is_empty() {
         return;
     }
 
@@ -1040,9 +1053,30 @@ pub fn apply_section_breaks(
     }
 
     for section in sections {
-        // Proportional mapping: break before page `start_page` means the
-        // section break goes on the last element before that page's content.
-        let approx_idx = section.start_page * total_elements / total_pages;
+        // Find the last element on the page before the section break.
+        // section.start_page is the 0-based index of the new section's
+        // first page, so we look for the last element on page `start_page`
+        // (1-based) — i.e., the element just before the new section begins.
+        let target_page = section.start_page; // 0-based → 1-based = start_page itself
+
+        let approx_idx = if !element_page_map.is_empty() && element_page_map.len() == total_elements {
+            // Use the introspector-based mapping: find the last element
+            // whose page number is < start_page+1 (i.e., on a page before
+            // the new section).
+            element_page_map
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|(_, page)| **page <= target_page)
+                .map_or(0, |(idx, _)| idx)
+        } else {
+            // Fallback: proportional mapping (legacy behaviour)
+            let total_pages = element_page_map.len().max(
+                sections.last().map_or(1, |s| s.start_page + 1),
+            );
+            section.start_page * total_elements / total_pages.max(1)
+        };
+
         // Find the nearest paragraph at or before `approx_idx`
         let para_idx = find_nearest_paragraph(&doc.body.elements, approx_idx);
         if let Some(idx) = para_idx
@@ -1122,18 +1156,29 @@ fn default_margin_pt(page_width: f64, page_height: f64) -> f64 {
 /// Identify the body content zone using margin-based boundaries.
 ///
 /// Typst renders headers in the top margin area and footers in the
-/// bottom margin area. We use the computed default margin as a boundary
+/// bottom margin area. We use the actual margins as the boundary
 /// to separate these zones.
 ///
+/// `margin_top_pt` and `margin_bottom_pt`: actual margins in pt. If `None`,
+/// falls back to Typst's default margin (`2.5/21 * min(w, h)`).
+///
 /// Returns `(body_top, body_bottom)` in pt — the y-range of the body zone.
-fn find_body_zone(page_width: f64, page_height: f64) -> (f64, f64) {
-    let margin = default_margin_pt(page_width, page_height);
-    // Body starts at the margin line and ends at the bottom margin line.
+fn find_body_zone(
+    page_width: f64,
+    page_height: f64,
+    margin_top_pt: Option<f64>,
+    margin_bottom_pt: Option<f64>,
+) -> (f64, f64) {
+    let default_margin = default_margin_pt(page_width, page_height);
+    let mt = margin_top_pt.unwrap_or(default_margin);
+    let mb = margin_bottom_pt.unwrap_or(default_margin);
+    // Body starts at the top margin line and ends at the bottom margin line.
     // Headers are positioned at margin * (1 - header_ascent) where header_ascent
     // defaults to 0.3, so header text is at ~margin * 0.7 from top.
-    // Use margin * 0.9 as the boundary to safely include all header content.
-    let body_top = margin * 0.9;
-    let body_bottom = page_height - margin * 0.9;
+    // Use margin * 0.9 as the boundary to safely include all header content
+    // above the body zone.
+    let body_top = mt * 0.9;
+    let body_bottom = page_height - mb * 0.9;
     (body_top, body_bottom)
 }
 
@@ -1161,7 +1206,7 @@ fn extract_margin_zone(paged: &PagedDocument, zone: MarginZone) -> Option<Header
     let mut fragments = Vec::new();
     collect_text_fragments(&page.frame, Point::zero(), &mut fragments);
 
-    let (body_top, body_bottom) = find_body_zone(page_width, page_height);
+    let (body_top, body_bottom) = find_body_zone(page_width, page_height, None, None);
 
     let mut items: Vec<&TextFragment> = fragments
         .iter()
@@ -1294,7 +1339,7 @@ fn extract_footer_text_from_page(frame: &Frame) -> Option<String> {
     let mut fragments = Vec::new();
     collect_text_fragments(frame, Point::zero(), &mut fragments);
 
-    let (_body_top, body_bottom) = find_body_zone(page_width, page_height);
+    let (_body_top, body_bottom) = find_body_zone(page_width, page_height, None, None);
 
     let footer_items: Vec<&TextFragment> = fragments
         .iter()
@@ -1439,7 +1484,7 @@ pub fn detect_columns(paged: &PagedDocument) -> Option<u32> {
     collect_text_fragments(&page.frame, Point::zero(), &mut fragments);
 
     // Filter to body-area text only (exclude headers/footers using margin-based zones)
-    let (body_top, body_bottom) = find_body_zone(page_width, page_height);
+    let (body_top, body_bottom) = find_body_zone(page_width, page_height, None, None);
     let body_frags: Vec<&TextFragment> = fragments
         .iter()
         .filter(|f| f.y >= body_top && f.y <= body_bottom)

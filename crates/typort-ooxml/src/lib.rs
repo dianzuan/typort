@@ -263,12 +263,12 @@ mod tests {
         let buf = build_docx(&doc);
         let xml = read_zip_entry(&buf, "word/document.xml");
         assert!(
-            xml.contains(r#"w:hanging="420""#),
-            "expected hanging=420 in: {xml}"
+            xml.contains(r#"w:hanging="440""#),
+            "expected hanging=440 in: {xml}"
         );
         assert!(
-            xml.contains(r#"w:left="420""#),
-            "expected left=420 in: {xml}"
+            xml.contains(r#"w:left="440""#),
+            "expected left=440 in: {xml}"
         );
     }
 
@@ -419,7 +419,11 @@ mod tests {
             width_pct: None,
         };
         let row = document::TableRow { cells: vec![cell] };
-        let table = document::Table { rows: vec![row] };
+        let table = document::Table {
+            rows: vec![row],
+            width_pct: None,
+            border_size: None,
+        };
         doc.add_table(table);
 
         let buf = build_docx(&doc);
@@ -475,10 +479,10 @@ mod tests {
             xml.contains(r#"<w:jc w:val="left"/>"#),
             "expected jc left in Normal style: {xml}"
         );
-        // Default first-line indent is 420 twips
+        // Typst default first-line indent is 0 (no indent)
         assert!(
-            xml.contains(r#"w:firstLine="420""#),
-            "expected firstLine=420 in Normal style: {xml}"
+            xml.contains(r#"w:firstLine="0""#),
+            "expected firstLine=0 in Normal style: {xml}"
         );
     }
 

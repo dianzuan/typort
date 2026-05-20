@@ -151,17 +151,25 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
     // 12c. Post-processing: detect small caps from source text
     apply_smallcaps_from_source(world, &mut doc);
 
+    // 12d. Build element→page mapping from block tag locations for precise
+    //       section break and horizontal rule placement.
+    let element_page_map: Vec<usize> = if let Some(paged) = &paged_doc {
+        build_element_page_map(&body.children, paged, doc.body.elements.len())
+    } else {
+        Vec::new()
+    };
+
     // 13. Detect and apply section breaks from page setting changes
     if let Some(paged) = &paged_doc {
         let sections = page::detect_section_breaks(paged);
         if !sections.is_empty() {
-            page::apply_section_breaks(&mut doc, &sections, paged.pages.len());
+            page::apply_section_breaks(&mut doc, &sections, &element_page_map);
         }
     }
 
     // 14. Detect horizontal rules from PagedDocument and insert them
     if let Some(paged) = &paged_doc {
-        insert_horizontal_rules_from_paged(paged, &mut doc);
+        insert_horizontal_rules_from_paged(paged, &mut doc, &element_page_map);
     }
 
     Ok(doc)
@@ -1539,7 +1547,11 @@ fn postprocess_rowspans(raw_rows: Vec<RawTableRow>) -> Table {
         final_rows.push(TableRow { cells: new_cells });
     }
 
-    Table { rows: final_rows }
+    Table {
+        rows: final_rows,
+        width_pct: None,
+        border_size: None,
+    }
 }
 
 /// Convert a `<tr>` element into a `TableRow` plus rowspan metadata.
@@ -2727,6 +2739,10 @@ struct FrameLine {
     /// each cluster is stored as a group of runs.  When `x_clusters` has
     /// 2+ entries the line should be emitted as a tab-separated paragraph.
     x_clusters: Vec<XCluster>,
+    /// Page index (0-based) this line appears on.
+    page_idx: usize,
+    /// Y-position in pt from top of the page.
+    y_pt: f64,
 }
 
 /// A group of runs that belong to the same horizontal cluster on a line.
@@ -2779,7 +2795,7 @@ fn recover_missing_content(paged: &PagedDocument, doc: &mut Document) {
     }
 
     if !missing.is_empty() {
-        insert_missing_at_position(doc, &missing);
+        insert_missing_at_position(doc, &missing, &all_page_lines);
     }
 }
 
@@ -2852,7 +2868,7 @@ fn extract_lines_from_all_pages(paged: &PagedDocument) -> Vec<FrameLine> {
             .map_or(10.5, |(s, _)| f64::from(s) / 10.0)
     });
 
-    for page in &paged.pages {
+    for (page_idx, page) in paged.pages.iter().enumerate() {
         let mut text_items = Vec::new();
         collect_text_items_with_pos(&page.frame, Point::zero(), &mut text_items);
 
@@ -2922,11 +2938,14 @@ fn extract_lines_from_all_pages(paged: &PagedDocument) -> Vec<FrameLine> {
             }
 
             let trimmed = full_text.trim().to_string();
+            let avg_y = items.iter().map(|i| i.y).sum::<f64>() / items.len() as f64;
             if !trimmed.is_empty() {
                 all_lines.push(FrameLine {
                     text: trimmed,
                     runs: all_runs,
                     x_clusters,
+                    page_idx,
+                    y_pt: avg_y,
                 });
             }
         }
@@ -3049,20 +3068,29 @@ fn pt_to_twips(pt: f64) -> u32 {
 
 /// Insert missing lines as paragraphs at the correct position in the document.
 ///
-/// The insertion point is after the last consecutive heading at the start of the document,
-/// before the first non-heading paragraph. This matches the typical academic paper structure:
-/// - Title heading
-/// - Subtitle heading (optional)
-/// - [INSERT HERE: author/institution info]
-/// - Abstract paragraph
-/// - Body content
+/// Uses the y-position of missing lines relative to existing content in the
+/// paged output to determine the insertion point, rather than assuming a
+/// fixed "after headings" structure. Falls back to inserting after the title
+/// section if position matching fails.
+///
+/// `all_page_lines` is the full ordered list of lines from the paged output,
+/// used to find the existing line just before each group of missing lines.
 ///
 /// Lines with multiple x-clusters (from `#grid()` layouts) are emitted as
 /// tab-separated paragraphs with right-aligned tab stops. Lines with a single
 /// cluster are emitted as centered paragraphs (the existing behaviour for
 /// `#align(center)` recovery).
-fn insert_missing_at_position(doc: &mut Document, missing_lines: &[FrameLine]) {
-    let insert_idx = find_title_section_end(doc);
+fn insert_missing_at_position(
+    doc: &mut Document,
+    missing_lines: &[FrameLine],
+    all_page_lines: &[FrameLine],
+) {
+    let insert_idx = find_insert_position_by_y(doc, missing_lines, all_page_lines);
+
+    // Compute actual page content width for tab stop positioning instead of
+    // assuming A4 with default margins.
+    let ps = &doc.page_settings;
+    let content_width_twips = ps.width_twips.saturating_sub(ps.margin_left + ps.margin_right);
 
     let mut paragraphs: Vec<BlockElement> = Vec::new();
     for line in missing_lines {
@@ -3081,11 +3109,8 @@ fn insert_missing_at_position(doc: &mut Document, missing_lines: &[FrameLine]) {
             // with a right-aligned tab stop for the last cluster.
             let last_cluster = &line.x_clusters[line.x_clusters.len() - 1];
             let tab_pos = pt_to_twips(last_cluster.x_pt);
-            // Use the page content width as the tab stop position if we can
-            // derive it; otherwise fall back to the cluster's x-position.
-            // For A4 with default margins the content width is
-            // (11906 - 1800 - 1800) = 8306 twips.
-            let tab_stop = if tab_pos > 0 { tab_pos } else { 8306 };
+            // Use the actual page content width as the tab stop fallback.
+            let tab_stop = if tab_pos > 0 { tab_pos } else { content_width_twips };
             para.tab_stops.push(tab_stop);
             for (idx, cluster) in line.x_clusters.iter().enumerate() {
                 if idx > 0 {
@@ -3112,6 +3137,119 @@ fn insert_missing_at_position(doc: &mut Document, missing_lines: &[FrameLine]) {
     }
 }
 
+/// Find the best insertion position for missing lines by comparing their
+/// y-position in the paged output with surrounding present lines.
+///
+/// Looks for the line in `all_page_lines` that immediately precedes the first
+/// missing line (by page and y-position) and is present in the document model,
+/// then finds that text in the doc elements to determine the insertion index.
+///
+/// Falls back to `find_title_section_end` if no preceding line can be matched.
+fn find_insert_position_by_y(
+    doc: &Document,
+    missing_lines: &[FrameLine],
+    all_page_lines: &[FrameLine],
+) -> usize {
+    let Some(first_missing) = missing_lines.first() else {
+        return find_title_section_end(doc);
+    };
+
+    // Find the first missing line in all_page_lines by matching text, page, and y.
+    let missing_idx = all_page_lines.iter().position(|line| {
+        line.text == first_missing.text
+            && line.page_idx == first_missing.page_idx
+            && (line.y_pt - first_missing.y_pt).abs() < 2.0
+    });
+
+    if let Some(idx) = missing_idx {
+        // Search backwards for the nearest line that IS present in the doc.
+        for j in (0..idx).rev() {
+            let candidate = &all_page_lines[j];
+            if let Some(elem_idx) = find_element_by_text(doc, &candidate.text) {
+                return elem_idx + 1;
+            }
+        }
+    }
+
+    // Fallback: insert after the title section (legacy behaviour)
+    find_title_section_end(doc)
+}
+
+/// Find the index of a document element whose text content contains the given text.
+fn find_element_by_text(doc: &Document, text: &str) -> Option<usize> {
+    if text.is_empty() {
+        return None;
+    }
+    let search_prefix: String = text.chars().take(15).collect();
+    for (i, elem) in doc.body.elements.iter().enumerate() {
+        let elem_text = match elem {
+            BlockElement::Paragraph(p) => p.text_content(),
+            BlockElement::Table(_) => continue,
+        };
+        if elem_text.contains(&search_prefix) {
+            return Some(i);
+        }
+    }
+    None
+}
+
+// ---------------------------------------------------------------------------
+// Element → page mapping via Introspector
+// ---------------------------------------------------------------------------
+
+/// Build a mapping from document body element index to page number.
+///
+/// Collects all block-level `Tag::Start` locations from the HTML tree (in
+/// document order), queries the `PagedDocument` introspector for each
+/// location's page number, then distributes those page numbers across the
+/// `total_elements` in the document model.
+///
+/// Returns a `Vec<usize>` of length `total_elements` where each entry is
+/// the 1-based page number for that element. Elements beyond the range of
+/// collected tags inherit the last known page number.
+fn build_element_page_map(
+    children: &[HtmlNode],
+    paged: &PagedDocument,
+    total_elements: usize,
+) -> Vec<usize> {
+    if total_elements == 0 || paged.pages.is_empty() {
+        return Vec::new();
+    }
+
+    let mut locs: Vec<Location> = Vec::new();
+    collect_block_tag_locations(children, &mut locs);
+
+    if locs.is_empty() {
+        return vec![1; total_elements];
+    }
+
+    // Query page numbers for each block tag location.
+    let tag_pages: Vec<usize> = locs
+        .iter()
+        .map(|loc| paged.introspector.page(*loc).get())
+        .collect();
+
+    // The block tags correspond roughly 1:1 with doc elements, but the
+    // doc may have extra elements (page-break paragraphs, recovered content).
+    // Distribute: assign each doc element the page of the nearest tag.
+    let mut result = vec![1_usize; total_elements];
+    let n_tags = tag_pages.len();
+
+    for (elem_idx, slot) in result.iter_mut().enumerate() {
+        // Map element index to the nearest tag index proportionally.
+        let tag_idx = if n_tags >= total_elements {
+            // More tags than elements: map directly
+            elem_idx.min(n_tags - 1)
+        } else {
+            // Fewer tags than elements: proportional mapping
+            (elem_idx * n_tags / total_elements).min(n_tags - 1)
+        };
+        *slot = tag_pages[tag_idx];
+    }
+
+    result
+}
+
 // ---------------------------------------------------------------------------
 // Page break detection via Introspector
 // ---------------------------------------------------------------------------
@@ -3121,10 +3259,10 @@ fn insert_missing_at_position(doc: &mut Document, missing_lines: &[FrameLine]) {
 /// a `HashSet<Location>` of elements that need a page break inserted **before**
 /// them (i.e. the first element on each new page after a page boundary).
 ///
-/// Only boundaries where the previous page is *not full* (content ends before
-/// 95 % of the page height) are treated as explicit page breaks.  Natural
-/// page overflow (the previous page is full) is ignored because Word will
-/// reflow the content naturally.
+/// A page transition is treated as an explicit page break only if a
+/// `PagebreakElem` exists on that page (queried via the Introspector).
+/// When no `PagebreakElem` is found anywhere in the document, falls back
+/// to a content-height heuristic (page < 95% full).
 fn collect_page_break_locations(children: &[HtmlNode], paged: &PagedDocument) -> HashSet<Location> {
     // 1. Collect all block-level Tag::Start locations in document order.
     let mut locs: Vec<Location> = Vec::new();
@@ -3140,21 +3278,45 @@ fn collect_page_break_locations(children: &[HtmlNode], paged: &PagedDocument) ->
         .map(|loc| paged.introspector.page(*loc))
         .collect();
 
-    // 3. Find page boundaries: where consecutive elements jump to a higher page.
-    //    For each boundary, check whether the previous page's content is short
-    //    (indicating an explicit break rather than natural overflow).
+    // 3. Query all PagebreakElem locations and collect the pages they appear on.
+    //    A page containing an explicit #pagebreak() should produce a page break
+    //    in the Word output; natural page overflow should not.
+    let explicit_break_pages: HashSet<usize> = {
+        use typst::foundations::{NativeElement, Selector};
+        let selector =
+            Selector::Elem(typst_library::layout::PagebreakElem::ELEM, None);
+        let pagebreaks = paged.introspector.query(&selector);
+        pagebreaks
+            .iter()
+            .filter_map(typst::foundations::Content::location)
+            .map(|loc| paged.introspector.page(loc).get())
+            .collect()
+    };
+    let has_any_pagebreak_elems = !explicit_break_pages.is_empty();
+
+    // 4. Find page boundaries: where consecutive elements jump to a higher page.
     let mut result = HashSet::new();
     for i in 1..locs.len() {
         if page_nums[i] > page_nums[i - 1] {
-            let prev_page_idx = page_nums[i - 1].get() - 1;
-            if prev_page_idx < paged.pages.len() {
-                let page = &paged.pages[prev_page_idx];
-                let page_height = page.frame.height().to_pt();
-                let content_y = find_max_content_y_in_frame(&page.frame, Point::zero());
-                // If the previous page is nearly full (>= 95 % height used),
-                // this is natural overflow — skip.
-                if page_height > 0.0 && content_y >= page_height * 0.95 {
+            let prev_page_num = page_nums[i - 1].get();
+            if has_any_pagebreak_elems {
+                // Check if any page in the gap has an explicit PagebreakElem.
+                let has_explicit = (prev_page_num..page_nums[i].get())
+                    .any(|p| explicit_break_pages.contains(&p));
+                if !has_explicit {
                     continue;
+                }
+            } else {
+                // Fallback: use content height heuristic when no PagebreakElem
+                // was found by the introspector.
+                let prev_page_idx = prev_page_num - 1;
+                if prev_page_idx < paged.pages.len() {
+                    let page = &paged.pages[prev_page_idx];
+                    let page_height = page.frame.height().to_pt();
+                    let content_y = find_max_content_y_in_frame(&page.frame, Point::zero());
+                    if page_height > 0.0 && content_y >= page_height * 0.95 {
+                        continue;
+                    }
                 }
             }
             result.insert(locs[i]);
@@ -3246,12 +3408,20 @@ fn find_max_content_y_in_frame(frame: &Frame, offset: Point) -> f64 {
 ///
 /// A horizontal rule is detected as a `FrameItem::Shape` with `Geometry::Line`
 /// whose horizontal extent is at least 80% of the page content width.
+///
+/// Uses the introspector-based `element_page_map` (`element_index` → page)
+/// to place rules precisely at the correct page boundary instead of
+/// proportional estimation.
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
     clippy::cast_precision_loss
 )]
-fn insert_horizontal_rules_from_paged(paged: &PagedDocument, doc: &mut Document) {
+fn insert_horizontal_rules_from_paged(
+    paged: &PagedDocument,
+    doc: &mut Document,
+    element_page_map: &[usize],
+) {
     let total_pages = paged.pages.len();
     if total_pages == 0 {
         return;
@@ -3262,22 +3432,19 @@ fn insert_horizontal_rules_from_paged(paged: &PagedDocument, doc: &mut Document)
         return;
     }
 
-    // Collect all horizontal rules across all pages with their normalized position
-    let mut hrules: Vec<f64> = Vec::new(); // normalized position (0.0 to 1.0 across all pages)
+    // Collect all horizontal rules with their page number and y-position
+    // (page_number is 1-based, y is in pt from top of page).
+    let mut hrules: Vec<(usize, f64)> = Vec::new();
 
     for (page_idx, page) in paged.pages.iter().enumerate() {
         let page_width = page.frame.width().to_pt();
-        let page_height = page.frame.height().to_pt();
         let content_width = page_width * 0.6; // Minimum 60% of page width to be a rule
 
         let mut lines = Vec::new();
         collect_horizontal_lines(&page.frame, Point::zero(), content_width, &mut lines);
 
         for line_y in lines {
-            // Normalize to a position across all pages: page_idx + fraction within page
-            let normalized =
-                (f64::from(page_idx as u32) + line_y / page_height) / f64::from(total_pages as u32);
-            hrules.push(normalized);
+            hrules.push((page_idx + 1, line_y)); // 1-based page number
         }
     }
 
@@ -3285,17 +3452,30 @@ fn insert_horizontal_rules_from_paged(paged: &PagedDocument, doc: &mut Document)
         return;
     }
 
-    // Insert from back to front to maintain correct indices
-    hrules.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    // Sort by position (page, then y) in reverse for back-to-front insertion
+    hrules.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then_with(|| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal))
+    });
 
     let full_doc_text = extract_doc_text(doc);
 
-    for normalized_pos in &hrules {
-        let approx_idx = (normalized_pos * total_elements as f64).round() as usize;
-        let insert_idx = approx_idx.min(total_elements);
+    for (page_num, _line_y) in &hrules {
+        // Find the insertion point: the first element on this page.
+        // The hrule should be inserted before that element.
+        let insert_idx = if !element_page_map.is_empty() && element_page_map.len() == total_elements {
+            element_page_map
+                .iter()
+                .position(|&p| p >= *page_num)
+                .unwrap_or(total_elements)
+        } else {
+            // Fallback: proportional mapping
+            let normalized = f64::from(*page_num as u32 - 1) / f64::from(total_pages as u32);
+            let idx = (normalized * total_elements as f64).round() as usize;
+            idx.min(total_elements)
+        };
 
         // Don't insert if we already have a horizontal rule nearby
-        // (avoid duplicates from multiple detection passes)
         let already_has_hrule = doc.body.elements.get(insert_idx).is_some_and(|e| {
             if let BlockElement::Paragraph(p) = e {
                 p.horizontal_rule

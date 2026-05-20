@@ -79,6 +79,9 @@ pub struct Run {
     pub underline: bool,
     pub strikethrough: bool,
     pub highlight: bool,
+    /// Highlight color name (e.g. "yellow", "green", "cyan").
+    /// Only used when `highlight` is true. `None` defaults to "yellow".
+    pub highlight_color: Option<String>,
     pub smallcaps: bool,
     /// Text color as a 6-digit hex string (e.g. "FF0000" for red).
     /// `None` means inherit the default (black).
@@ -108,6 +111,7 @@ impl Run {
             underline: false,
             strikethrough: false,
             highlight: false,
+            highlight_color: None,
             smallcaps: false,
             color: None,
             font_ascii: None,
@@ -321,6 +325,12 @@ pub struct TableRow {
 #[derive(Debug, Clone)]
 pub struct Table {
     pub rows: Vec<TableRow>,
+    /// Table width as percentage (in fiftieths of a percent, e.g. 5000 = 100%).
+    /// `None` defaults to 5000 (100%).
+    pub width_pct: Option<u32>,
+    /// Border size in eighths of a point (e.g. 4 = 0.5pt).
+    /// `None` defaults to 4 (0.5pt solid).
+    pub border_size: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -395,7 +405,11 @@ pub struct DocumentMetadata {
 
 impl DocumentMetadata {
     /// Return the creation timestamp string (ISO 8601 / W3CDTF format).
-    /// Falls back to a compile-time default if not explicitly set.
+    /// Falls back to a fixed default if not explicitly set.
+    ///
+    /// NOTE: We use a fixed fallback rather than a compile-time timestamp
+    /// (`env!("BUILD_TIMESTAMP")`) to avoid adding a build-script dependency
+    /// and to keep builds reproducible.
     #[must_use]
     pub fn created_time(&self) -> String {
         self.created
@@ -447,26 +461,43 @@ pub struct DocumentStyle {
     pub heading_spacing_before: [u32; 5],
     /// Heading spacing after in twips, per level (0=h1 .. 4=h5).
     pub heading_spacing_after: [u32; 5],
+    /// BCP 47 language tag for Latin text (e.g. "en-US").
+    pub lang_latin: String,
+    /// BCP 47 language tag for East Asian text (e.g. "zh-CN", "ja-JP", "ko-KR").
+    pub lang_east_asia: String,
+    /// Whether the document contains CJK content. Controls `w:hint="eastAsia"`.
+    pub has_cjk_content: bool,
+    /// Hyperlink color as a 6-digit hex string (e.g. "0563C1").
+    pub hyperlink_color: String,
 }
 
 impl Default for DocumentStyle {
     fn default() -> Self {
+        // Typst defaults: 11pt body, 0.65em leading → 1.65x → 396/240 line spacing,
+        // no first-line indent, h1=1.4em=31hp, h2=1.2em=26hp, h3-5=body size,
+        // paragraph spacing = 1.2 * 11pt = 13.2pt → 264 twips.
         Self {
             body_font_ascii: "Times New Roman".to_string(),
             body_font_east_asia: "\u{5b8b}\u{4f53}".to_string(),
-            body_size_half_pt: 21,
-            line_spacing: 360,
-            first_line_indent_twips: 420,
+            body_size_half_pt: 22,       // Typst default: 11pt = 22 half-points
+            line_spacing: 396,           // Typst default: 0.65em leading → 1.65x → 396
+            first_line_indent_twips: 0,  // Typst default: no indent
             footnote_format: FootnoteFormat::default(),
             code_font: "Courier New".to_string(),
-            code_size_half_pt: 18,
+            code_size_half_pt: 22,       // Typst raw text uses body size by default
             footnote_size_half_pt: 18,
-            heading_sizes: [30, 28, 26, 24, 22],
+            // Typst defaults: h1=1.4*22=31, h2=1.2*22=26, h3-h5=body size
+            heading_sizes: [31, 26, 22, 22, 22],
             body_alignment: "left".to_string(),
-            body_spacing_before: 0,
-            body_spacing_after: 0,
+            // Typst default par.spacing = 1.2em; at 11pt → 13.2pt → 264 twips
+            body_spacing_before: 264,
+            body_spacing_after: 264,
             heading_spacing_before: [240; 5],
             heading_spacing_after: [120; 5],
+            lang_latin: "en-US".to_string(),
+            lang_east_asia: "zh-CN".to_string(),
+            has_cjk_content: true,
+            hyperlink_color: "0563C1".to_string(),
         }
     }
 }

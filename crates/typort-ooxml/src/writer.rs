@@ -476,8 +476,8 @@ fn generate_settings(
                 Ok(())
             })?;
             w.create_element("w:themeFontLang")
-                .with_attribute(("w:val", "en-US"))
-                .with_attribute(("w:eastAsia", "zh-CN"))
+                .with_attribute(("w:val", style.lang_latin.as_str()))
+                .with_attribute(("w:eastAsia", style.lang_east_asia.as_str()))
                 .write_empty()?;
             Ok(())
         })?;
@@ -802,15 +802,23 @@ fn write_paragraph<W: Write>(
                         .with_attribute(("w:firstLine", "0"))
                         .write_empty()?;
                 } else if has_hanging {
+                    // Bibliography hanging indent: 2em computed from body font size
+                    let bib_indent = doc_style.body_size_half_pt * 10 * 2;
+                    let bib_indent_str = bib_indent.to_string();
                     ppr.create_element("w:ind")
-                        .with_attribute(("w:left", "420"))
-                        .with_attribute(("w:hanging", "420"))
+                        .with_attribute(("w:left", bib_indent_str.as_str()))
+                        .with_attribute(("w:hanging", bib_indent_str.as_str()))
                         .with_attribute(("w:firstLine", "0"))
                         .write_empty()?;
                 } else if has_list {
+                    // List indent: left = 2em, hanging = 1em, computed from body font size
+                    let list_left = doc_style.body_size_half_pt * 10 * 2;
+                    let list_hanging = doc_style.body_size_half_pt * 10;
+                    let list_left_str = list_left.to_string();
+                    let list_hanging_str = list_hanging.to_string();
                     ppr.create_element("w:ind")
-                        .with_attribute(("w:left", "720"))
-                        .with_attribute(("w:hanging", "360"))
+                        .with_attribute(("w:left", list_left_str.as_str()))
+                        .with_attribute(("w:hanging", list_hanging_str.as_str()))
                         .write_empty()?;
                 } else if suppress_indent || has_eq_number {
                     ppr.create_element("w:ind")
@@ -875,7 +883,7 @@ fn write_paragraph<W: Write>(
                     write_field_ref(w, bookmark_name, display_text)?;
                 }
                 InlineElement::Hyperlink { url, runs } => {
-                    write_hyperlink(w, url, runs)?;
+                    write_hyperlink(w, url, runs, doc_style)?;
                 }
                 InlineElement::PageBreak => {
                     write_page_break(w)?;
@@ -976,8 +984,12 @@ fn write_run<W: Write>(
                         .write_empty()?;
                 }
                 if run.highlight {
+                    let hl_color = run
+                        .highlight_color
+                        .as_deref()
+                        .unwrap_or("yellow");
                     rpr.create_element("w:highlight")
-                        .with_attribute(("w:val", "yellow"))
+                        .with_attribute(("w:val", hl_color))
                         .write_empty()?;
                 }
                 if run.superscript {
@@ -1018,9 +1030,11 @@ fn write_table<W: Write>(
 
     writer.create_element("w:tbl").write_inner_content(|w| {
         // Table properties with borders
+        let tbl_width = table.width_pct.unwrap_or(5000).to_string();
+        let border_sz = table.border_size.unwrap_or(4).to_string();
         w.create_element("w:tblPr").write_inner_content(|tpr| {
             tpr.create_element("w:tblW")
-                .with_attribute(("w:w", "5000"))
+                .with_attribute(("w:w", tbl_width.as_str()))
                 .with_attribute(("w:type", "pct"))
                 .write_empty()?;
             tpr.create_element("w:tblBorders")
@@ -1035,7 +1049,7 @@ fn write_table<W: Write>(
                     ] {
                         bdr.create_element(side)
                             .with_attribute(("w:val", "single"))
-                            .with_attribute(("w:sz", "4"))
+                            .with_attribute(("w:sz", border_sz.as_str()))
                             .with_attribute(("w:space", "0"))
                             .write_empty()?;
                     }
@@ -1485,6 +1499,7 @@ fn write_hyperlink<W: Write>(
     writer: &mut Writer<W>,
     url: &str,
     runs: &[crate::document::Run],
+    doc_style: &crate::document::DocumentStyle,
 ) -> io::Result<()> {
     // Use w:fldSimple with HYPERLINK field code to avoid relationship management
     let instr = format!("HYPERLINK &quot;{url}&quot;");
@@ -1494,10 +1509,10 @@ fn write_hyperlink<W: Write>(
         .write_inner_content(|w| {
             for run in runs {
                 w.create_element("w:r").write_inner_content(|rw| {
-                    // Apply hyperlink styling: blue underlined
+                    // Apply hyperlink styling: colored + underlined
                     rw.create_element("w:rPr").write_inner_content(|rpr| {
                         rpr.create_element("w:color")
-                            .with_attribute(("w:val", "0563C1"))
+                            .with_attribute(("w:val", doc_style.hyperlink_color.as_str()))
                             .write_empty()?;
                         rpr.create_element("w:u")
                             .with_attribute(("w:val", "single"))

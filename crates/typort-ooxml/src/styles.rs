@@ -36,12 +36,15 @@ fn write_doc_defaults<W: Write>(w: &mut Writer<W>, style: &DocumentStyle) -> io:
         d.create_element("w:rPrDefault")
             .write_inner_content(|rprd| {
                 rprd.create_element("w:rPr").write_inner_content(|rpr| {
-                    rpr.create_element("w:rFonts")
+                    let mut fonts = rpr
+                        .create_element("w:rFonts")
                         .with_attribute(("w:ascii", style.body_font_ascii.as_str()))
                         .with_attribute(("w:hAnsi", style.body_font_ascii.as_str()))
-                        .with_attribute(("w:eastAsia", style.body_font_east_asia.as_str()))
-                        .with_attribute(("w:hint", "eastAsia"))
-                        .write_empty()?;
+                        .with_attribute(("w:eastAsia", style.body_font_east_asia.as_str()));
+                    if style.has_cjk_content {
+                        fonts = fonts.with_attribute(("w:hint", "eastAsia"));
+                    }
+                    fonts.write_empty()?;
                     rpr.create_element("w:kern")
                         .with_attribute(("w:val", "2"))
                         .write_empty()?;
@@ -52,8 +55,8 @@ fn write_doc_defaults<W: Write>(w: &mut Writer<W>, style: &DocumentStyle) -> io:
                         .with_attribute(("w:val", sz.as_str()))
                         .write_empty()?;
                     rpr.create_element("w:lang")
-                        .with_attribute(("w:val", "en-US"))
-                        .with_attribute(("w:eastAsia", "zh-CN"))
+                        .with_attribute(("w:val", style.lang_latin.as_str()))
+                        .with_attribute(("w:eastAsia", style.lang_east_asia.as_str()))
                         .write_empty()?;
                     Ok(())
                 })?;
@@ -91,12 +94,15 @@ fn write_style_normal<W: Write>(w: &mut Writer<W>, style: &DocumentStyle) -> io:
                 .with_attribute(("w:val", "Normal"))
                 .write_empty()?;
             s.create_element("w:rPr").write_inner_content(|rpr| {
-                rpr.create_element("w:rFonts")
+                let mut fonts = rpr
+                    .create_element("w:rFonts")
                     .with_attribute(("w:ascii", style.body_font_ascii.as_str()))
                     .with_attribute(("w:hAnsi", style.body_font_ascii.as_str()))
-                    .with_attribute(("w:eastAsia", style.body_font_east_asia.as_str()))
-                    .with_attribute(("w:hint", "eastAsia"))
-                    .write_empty()?;
+                    .with_attribute(("w:eastAsia", style.body_font_east_asia.as_str()));
+                if style.has_cjk_content {
+                    fonts = fonts.with_attribute(("w:hint", "eastAsia"));
+                }
+                fonts.write_empty()?;
                 rpr.create_element("w:sz")
                     .with_attribute(("w:val", sz.as_str()))
                     .write_empty()?;
@@ -104,8 +110,8 @@ fn write_style_normal<W: Write>(w: &mut Writer<W>, style: &DocumentStyle) -> io:
                     .with_attribute(("w:val", sz.as_str()))
                     .write_empty()?;
                 rpr.create_element("w:lang")
-                    .with_attribute(("w:val", "en-US"))
-                    .with_attribute(("w:eastAsia", "zh-CN"))
+                    .with_attribute(("w:val", style.lang_latin.as_str()))
+                    .with_attribute(("w:eastAsia", style.lang_east_asia.as_str()))
                     .write_empty()?;
                 Ok(())
             })?;
@@ -287,10 +293,22 @@ pub(crate) fn generate_font_table(
     // Collect unique fonts to declare in fontTable.xml
     let mut fonts: Vec<(&str, &str)> = Vec::new();
 
+    // Determine East Asian charset from language tag:
+    // zh → "86" (GB2312), ja → "80" (Shift-JIS), ko → "81" (Hangul), else → "00" (ANSI)
+    let ea_charset = if style.lang_east_asia.starts_with("zh") {
+        "86"
+    } else if style.lang_east_asia.starts_with("ja") {
+        "80"
+    } else if style.lang_east_asia.starts_with("ko") {
+        "81"
+    } else {
+        "00"
+    };
+
     // Always include the body fonts
     fonts.push((style.body_font_ascii.as_str(), "00"));
     if style.body_font_east_asia != style.body_font_ascii {
-        fonts.push((style.body_font_east_asia.as_str(), "86"));
+        fonts.push((style.body_font_east_asia.as_str(), ea_charset));
     }
 
     // Include the detected code font
