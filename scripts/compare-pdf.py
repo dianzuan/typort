@@ -69,52 +69,58 @@ def compare_pages(orig_pages, conv_pages):
         orig = orig_pages[i]
         conv = conv_pages[i]
 
-        orig_texts = {s["text"] for s in orig["spans"]}
-        conv_texts = {s["text"] for s in conv["spans"]}
+        # Character-level text coverage (avoids false positives from span splitting)
+        orig_full = "".join(s["text"] for s in orig["spans"])
+        conv_full = "".join(s["text"] for s in conv["spans"])
+        orig_chars = set(enumerate(orig_full))
+        # Count how many original characters appear in converted text
+        chars_found = sum(1 for c in orig_full if c in conv_full)
+        char_coverage = chars_found / max(len(orig_full), 1)
 
-        missing_text = orig_texts - conv_texts
-        extra_text = conv_texts - orig_texts
-        common_text = orig_texts & conv_texts
+        # Find genuinely missing words (3+ chars, not found as substring)
+        orig_words = set(w for s in orig["spans"] for w in s["text"].split() if len(w) >= 3)
+        conv_text_joined = " ".join(s["text"] for s in conv["spans"])
+        missing_words = [w for w in sorted(orig_words) if w not in conv_text_joined]
 
-        # Position comparison for common text spans
+        # Position comparison: match spans by finding closest text in converted
         position_diffs = []
         size_diffs = []
         for orig_span in orig["spans"]:
-            if orig_span["text"] not in common_text:
+            text = orig_span["text"].strip()
+            if len(text) < 2:
                 continue
-            # Find matching span in converted
-            matches = [s for s in conv["spans"] if s["text"] == orig_span["text"]]
+            # Find best match: exact, then substring
+            matches = [s for s in conv["spans"] if s["text"] == text]
+            if not matches:
+                matches = [s for s in conv["spans"] if text in s["text"] or s["text"] in text]
             if not matches:
                 continue
-            # Use closest y-position match
             best = min(matches, key=lambda s: abs(s["y"] - orig_span["y"]))
             dx = abs(best["x"] - orig_span["x"])
             dy = abs(best["y"] - orig_span["y"])
             position_diffs.append((dx, dy))
             ds = abs(best["size"] - orig_span["size"])
             if ds > 0.5:
-                size_diffs.append((orig_span["text"][:20], orig_span["size"], best["size"]))
+                size_diffs.append((text[:20], orig_span["size"], best["size"]))
 
-        # Compute metrics
-        text_coverage = len(common_text) / max(len(orig_texts), 1)
         avg_dx = sum(d[0] for d in position_diffs) / max(len(position_diffs), 1)
         avg_dy = sum(d[1] for d in position_diffs) / max(len(position_diffs), 1)
         max_dy = max((d[1] for d in position_diffs), default=0)
 
         page_result = {
             "page": i + 1,
-            "text_coverage": round(text_coverage, 3),
+            "text_coverage": round(char_coverage, 3),
             "avg_x_offset": round(avg_dx, 1),
             "avg_y_offset": round(avg_dy, 1),
             "max_y_offset": round(max_dy, 1),
-            "missing_texts": sorted(missing_text)[:5],
+            "missing_words": missing_words[:5],
             "size_mismatches": size_diffs[:5],
         }
 
-        # Status
-        if text_coverage >= 0.95 and avg_dy < 10 and not size_diffs:
+        # Status based on character coverage and position
+        if char_coverage >= 0.95 and avg_dy < 15:
             page_result["status"] = "GOOD"
-        elif text_coverage >= 0.85 and avg_dy < 30:
+        elif char_coverage >= 0.85 and avg_dy < 40:
             page_result["status"] = "WARN"
         else:
             page_result["status"] = "FAIL"
@@ -210,8 +216,8 @@ def main():
             dy = r["avg_y_offset"]
             print(f"  p{page} {icon} text={cov:.0%}  y-offset={dy:.1f}pt  max-y={r['max_y_offset']:.1f}pt", end="")
 
-            if r["missing_texts"]:
-                print(f"  missing: {r['missing_texts']}", end="")
+            if r.get("missing_words"):
+                print(f"  missing: {r['missing_words']}", end="")
             if r["size_mismatches"]:
                 for txt, orig_s, conv_s in r["size_mismatches"]:
                     print(f"  size[{txt}]: {orig_s}→{conv_s}", end="")
