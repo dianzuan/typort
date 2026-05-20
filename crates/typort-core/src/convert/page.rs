@@ -866,121 +866,9 @@ fn numeric_to_pt(n: typst_syntax::ast::Numeric<'_>) -> f64 {
     }
 }
 
-/// Recursively collect content bounding box from frame items.
-fn collect_content_bounds(
-    frame: &Frame,
-    offset: Point,
-    min_x: &mut f64,
-    max_x: &mut f64,
-    min_y: &mut f64,
-    max_y: &mut f64,
-) {
-    for (pos, item) in frame.items() {
-        let abs_x = offset.x + pos.x;
-        let abs_y = offset.y + pos.y;
-        match item {
-            FrameItem::Text(text_item) => {
-                let x = abs_x.to_pt();
-                let y = abs_y.to_pt();
-                let w = text_item.width().to_pt();
-                if x < *min_x {
-                    *min_x = x;
-                }
-                if x + w > *max_x {
-                    *max_x = x + w;
-                }
-                if y < *min_y {
-                    *min_y = y;
-                }
-                let h = text_item.size.to_pt();
-                if y + h > *max_y {
-                    *max_y = y + h;
-                }
-            }
-            FrameItem::Group(group) => {
-                let new_offset = Point::new(abs_x, abs_y);
-                collect_content_bounds(&group.frame, new_offset, min_x, max_x, min_y, max_y);
-            }
-            _ => {}
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Section break detection
 // ---------------------------------------------------------------------------
-
-/// Settings extracted from a single page for comparison purposes.
-#[derive(Debug, Clone)]
-struct PageMetrics {
-    width_twips: u32,
-    height_twips: u32,
-    margin_top: u32,
-    margin_bottom: u32,
-    margin_left: u32,
-    margin_right: u32,
-}
-
-/// Extract page metrics from a single page frame.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn extract_page_metrics(frame: &Frame) -> PageMetrics {
-    let page_width = frame.width().to_pt();
-    let page_height = frame.height().to_pt();
-
-    let mut min_x = page_width;
-    let mut max_x: f64 = 0.0;
-    let mut min_y = page_height;
-    let mut max_y: f64 = 0.0;
-
-    collect_content_bounds(
-        frame,
-        Point::zero(),
-        &mut min_x,
-        &mut max_x,
-        &mut min_y,
-        &mut max_y,
-    );
-
-    // Use Typst's default margin (2.5/21 * min(w,h)) as fallback instead of
-    // Word's 1-inch (1440 twips), matching actual Typst rendering.
-    let default_margin_twips = (default_margin_pt(page_width, page_height) * 20.0).round().max(0.0) as u32;
-
-    let (margin_left, margin_right, margin_top, margin_bottom) = if min_x < max_x && min_y < max_y {
-        let ml = (min_x * 20.0).round().max(0.0) as u32;
-        let mr = ((page_width - max_x) * 20.0).round().max(0.0) as u32;
-        let mt = (min_y * 20.0).round().max(0.0) as u32;
-        let mb = ((page_height - max_y) * 20.0).round().max(0.0) as u32;
-        (
-            if ml >= 100 { ml } else { default_margin_twips },
-            if mr >= 100 { mr } else { default_margin_twips },
-            if mt >= 100 { mt } else { default_margin_twips },
-            if mb >= 100 { mb } else { default_margin_twips },
-        )
-    } else {
-        (default_margin_twips, default_margin_twips, default_margin_twips, default_margin_twips)
-    };
-
-    PageMetrics {
-        width_twips: (page_width * 20.0).round() as u32,
-        height_twips: (page_height * 20.0).round() as u32,
-        margin_top,
-        margin_bottom,
-        margin_left,
-        margin_right,
-    }
-}
-
-/// Check if two page metrics differ enough to warrant a section break.
-fn metrics_differ(a: &PageMetrics, b: &PageMetrics) -> bool {
-    // Use a tolerance of 20 twips (1pt) to avoid false positives from rounding
-    let tol = 20;
-    a.width_twips.abs_diff(b.width_twips) > tol
-        || a.height_twips.abs_diff(b.height_twips) > tol
-        || a.margin_top.abs_diff(b.margin_top) > tol
-        || a.margin_bottom.abs_diff(b.margin_bottom) > tol
-        || a.margin_left.abs_diff(b.margin_left) > tol
-        || a.margin_right.abs_diff(b.margin_right) > tol
-}
 
 /// Represents a section detected from page setting changes.
 #[derive(Debug)]
@@ -997,34 +885,44 @@ pub struct DetectedSection {
 /// (if any) represents a change starting at `start_page` index. Each section's
 /// `page_settings` describes the settings BEFORE the break (i.e., the settings
 /// of the section that is ending).
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub fn detect_section_breaks(paged: &PagedDocument) -> Vec<DetectedSection> {
     if paged.pages.len() < 2 {
         return Vec::new();
     }
 
     let mut sections = Vec::new();
-    let mut prev_metrics = extract_page_metrics(&paged.pages[0].frame);
+    let prev_w = paged.pages[0].frame.width();
+    let prev_h = paged.pages[0].frame.height();
+    let mut prev_width = (prev_w.to_pt() * 20.0).round() as u32;
+    let mut prev_height = (prev_h.to_pt() * 20.0).round() as u32;
 
     for i in 1..paged.pages.len() {
-        let curr_metrics = extract_page_metrics(&paged.pages[i].frame);
-        if metrics_differ(&prev_metrics, &curr_metrics) {
-            // Section break between page i-1 and page i.
-            // The section that ends gets the prev_metrics as its settings.
+        let curr_w = (paged.pages[i].frame.width().to_pt() * 20.0).round() as u32;
+        let curr_h = (paged.pages[i].frame.height().to_pt() * 20.0).round() as u32;
+        let tol = 20; // 1pt tolerance for rounding
+        if curr_w.abs_diff(prev_width) > tol || curr_h.abs_diff(prev_height) > tol {
+            let margin = default_margin_pt(
+                prev_w.to_pt().min(paged.pages[i].frame.width().to_pt()),
+                prev_h.to_pt().min(paged.pages[i].frame.height().to_pt()),
+            );
+            let margin_twips = (margin * 20.0).round() as u32;
             sections.push(DetectedSection {
                 start_page: i,
                 page_settings: PageSettings {
-                    width_twips: prev_metrics.width_twips,
-                    height_twips: prev_metrics.height_twips,
-                    margin_top: prev_metrics.margin_top,
-                    margin_bottom: prev_metrics.margin_bottom,
-                    margin_left: prev_metrics.margin_left,
-                    margin_right: prev_metrics.margin_right,
+                    width_twips: prev_width,
+                    height_twips: prev_height,
+                    margin_top: margin_twips,
+                    margin_bottom: margin_twips,
+                    margin_left: margin_twips,
+                    margin_right: margin_twips,
                     columns: None,
                     column_spacing: None,
                 },
             });
         }
-        prev_metrics = curr_metrics;
+        prev_width = curr_w;
+        prev_height = curr_h;
     }
 
     sections
