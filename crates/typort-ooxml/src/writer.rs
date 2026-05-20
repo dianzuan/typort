@@ -707,15 +707,11 @@ fn write_section_page_settings<W: Write>(
             .with_attribute(("w:space", space.as_str()))
             .write_empty()?;
     }
-    // Document grid: constrain line pitch for CJK documents.
-    // linePitch = body font size in twips x line spacing factor.
-    // body_size_half_pt is in half-points; convert to twips: half_pt x 10.
-    // line_spacing is in 240ths of a line (240 = 1.0x, 360 = 1.5x).
-    let font_twips = style.body_size_half_pt * 10;
-    let line_pitch = font_twips * style.line_spacing / 240;
-    let line_pitch_str = line_pitch.to_string();
+    // Document grid: use default (no grid) since line spacing is controlled
+    // precisely via w:lineRule="atLeast". type="lines" would add grid pitch
+    // on top of paragraph spacing, doubling the line height.
+    let line_pitch_str = style.line_spacing.to_string();
     w.create_element("w:docGrid")
-        .with_attribute(("w:type", "lines"))
         .with_attribute(("w:linePitch", line_pitch_str.as_str()))
         .write_empty()?;
     Ok(())

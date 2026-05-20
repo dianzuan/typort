@@ -218,36 +218,44 @@ fn apply_source_overrides(
         doc.style.first_line_indent_twips = indent.unwrap_or(0);
     }
 
-    // Body paragraph spacing: source AST or Typst default 1.2em
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    {
-        let par_spacing = if let Some(em) = ovr.par_spacing_em {
-            (em * body_pt * 20.0).round() as u32
-        } else if let Some(twips) = ovr.par_spacing_twips {
-            twips
-        } else {
-            (1.2 * body_pt * 20.0).round() as u32
-        };
-        doc.style.body_spacing_before = par_spacing;
-        doc.style.body_spacing_after = par_spacing;
-    }
+    // Leading (in pt) — needed below for paragraph spacing calculation.
+    let leading_pt = if let Some(em) = ovr.par_leading_em {
+        em * body_pt
+    } else if let Some(twips) = ovr.par_leading_twips {
+        f64::from(twips) / 20.0
+    } else {
+        0.65 * body_pt
+    };
 
-    // Line spacing: compute as Word "auto" multiplier (240 = 1.0x single line).
-    // Word's "single line" includes font metrics, so this multiplier is approximate.
-    // This is the same approach Pandoc uses — accept slight inaccuracy over exact
-    // mode which can clip superscripts and tall characters.
+    // Body paragraph spacing: Typst's par.spacing replaces leading in the gap
+    // between paragraphs. Word adds w:after on top of line pitch.
+    // To compensate: w:after = max(0, par_spacing - leading).
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let par_spacing_pt = if let Some(em) = ovr.par_spacing_em {
+        em * body_pt
+    } else if let Some(twips) = ovr.par_spacing_twips {
+        f64::from(twips) / 20.0
+    } else {
+        1.2 * body_pt
+    };
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let after_extra = if par_spacing_pt > leading_pt {
+        ((par_spacing_pt - leading_pt) * 20.0).round() as u32
+    } else {
+        0
+    };
+    doc.style.body_spacing_before = 0;
+    doc.style.body_spacing_after = after_extra;
+
+    // Line spacing: cap_height (from font metrics) + leading (from source AST).
+    // Typst's line pitch = cap_height × font_size + leading, where cap_height
+    // is the default top-edge metric (not ascender). We emit this as
+    // w:lineRule="atLeast" in twips for precise control.
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     {
-        let leading_pt = if let Some(em) = ovr.par_leading_em {
-            em * body_pt
-        } else if let Some(twips) = ovr.par_leading_twips {
-            f64::from(twips) / 20.0
-        } else {
-            0.65 * body_pt
-        };
-        let line_height_pt = body_pt + leading_pt;
-        let spacing = (line_height_pt / body_pt * 240.0).round() as u32;
-        doc.style.line_spacing = spacing;
+        let cap_height_pt = doc.style.body_cap_height_ratio * body_pt;
+        let line_pitch_pt = cap_height_pt + leading_pt;
+        doc.style.line_spacing = (line_pitch_pt * 20.0).round() as u32;
     }
 
     // Paragraph justification
@@ -259,12 +267,11 @@ fn apply_source_overrides(
         };
     }
 
-    // Heading spacing: compute from Typst's documented defaults.
-    // Typst heading above/below are relative to the heading's own font size:
-    //   scale = [1.4, 1.2, 1.0, 1.0, 1.0] for levels 1-5
-    //   above = (if level==1 { 1.8 } else { 1.44 }) / scale  (in em of heading size)
-    //   below = 0.75 / scale  (in em of heading size)
-    // The heading size in pt = heading_sizes[level] / 2.
+    // Heading spacing: Typst uses block-level margin collapsing.
+    // In Typst, gap = descent + max(heading_above, par_spacing, leading) + ascent.
+    // In Word, gap = line_pitch + body.after + heading.before.
+    // Since body.after = max(0, par_spacing - leading), heading.before should
+    // add just the excess of heading.above beyond (body.after + leading).
     {
         let scales = [1.4_f64, 1.2, 1.0, 1.0, 1.0];
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -274,10 +281,18 @@ fn apply_source_overrides(
             let below_em = 0.75 / scale;
             let above_pt = above_em * heading_pt;
             let below_pt = below_em * heading_pt;
-            doc.style.heading_spacing_before[level] =
-                (above_pt * 20.0).round() as u32;
-            doc.style.heading_spacing_after[level] =
-                (below_pt * 20.0).round() as u32;
+            let effective_after = f64::from(after_extra) / 20.0 + leading_pt;
+            doc.style.heading_spacing_before[level] = if above_pt > effective_after {
+                ((above_pt - effective_after) * 20.0).round() as u32
+            } else {
+                0
+            };
+            let below_effective = below_pt.max(par_spacing_pt);
+            doc.style.heading_spacing_after[level] = if below_effective > leading_pt {
+                ((below_effective - leading_pt) * 20.0).round() as u32
+            } else {
+                0
+            };
         }
     }
 }
