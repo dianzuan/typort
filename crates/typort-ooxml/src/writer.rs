@@ -454,6 +454,10 @@ fn generate_settings(
             "xmlns:w",
             "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
         ))
+        .with_attribute((
+            "xmlns:m",
+            "http://schemas.openxmlformats.org/officeDocument/2006/math",
+        ))
         .write_inner_content(|w| {
             w.create_element("w:footnotePr").write_inner_content(|fp| {
                 if style.footnote_format == crate::document::FootnoteFormat::CircledNumber {
@@ -479,6 +483,40 @@ fn generate_settings(
                 .with_attribute(("w:val", style.lang_latin.as_str()))
                 .with_attribute(("w:eastAsia", style.lang_east_asia.as_str()))
                 .write_empty()?;
+            w.create_element("m:mathPr").write_inner_content(|m| {
+                m.create_element("m:mathFont")
+                    .with_attribute(("m:val", "Cambria Math"))
+                    .write_empty()?;
+                m.create_element("m:brkBin")
+                    .with_attribute(("m:val", "before"))
+                    .write_empty()?;
+                m.create_element("m:brkBinSub")
+                    .with_attribute(("m:val", "--"))
+                    .write_empty()?;
+                m.create_element("m:smallFrac")
+                    .with_attribute(("m:val", "0"))
+                    .write_empty()?;
+                m.create_element("m:dispDef").write_empty()?;
+                m.create_element("m:lMargin")
+                    .with_attribute(("m:val", "0"))
+                    .write_empty()?;
+                m.create_element("m:rMargin")
+                    .with_attribute(("m:val", "0"))
+                    .write_empty()?;
+                m.create_element("m:defJc")
+                    .with_attribute(("m:val", "centerGroup"))
+                    .write_empty()?;
+                m.create_element("m:wrapIndent")
+                    .with_attribute(("m:val", "1440"))
+                    .write_empty()?;
+                m.create_element("m:intLim")
+                    .with_attribute(("m:val", "subSup"))
+                    .write_empty()?;
+                m.create_element("m:naryLim")
+                    .with_attribute(("m:val", "undOvr"))
+                    .write_empty()?;
+                Ok(())
+            })?;
             Ok(())
         })?;
     Ok(())
