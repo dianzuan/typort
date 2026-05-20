@@ -21,7 +21,8 @@ pub fn extract_document_style(paged: &PagedDocument) -> DocumentStyle {
     let mut ascii_font_counts: HashMap<String, usize> = HashMap::new();
     let mut cjk_font_counts: HashMap<String, usize> = HashMap::new();
     let mut size_counts: HashMap<u32, usize> = HashMap::new();
-    let mut y_positions: Vec<f64> = Vec::new();
+    let mut y_positions: Vec<(f64, u32)> = Vec::new();
+    let mut body_cap_heights: Vec<f64> = Vec::new();
 
     for page in paged.pages.iter().take(3) {
         collect_font_info_split(
@@ -31,6 +32,7 @@ pub fn extract_document_style(paged: &PagedDocument) -> DocumentStyle {
             &mut cjk_font_counts,
             &mut size_counts,
             &mut y_positions,
+            &mut body_cap_heights,
         );
     }
 
@@ -53,7 +55,17 @@ pub fn extract_document_style(paged: &PagedDocument) -> DocumentStyle {
 
     let body_pt = f64::from(body_size_half_pt) / 2.0;
     let first_line_indent_twips = detect_first_line_indent(paged, body_pt);
-    let line_spacing = detect_line_spacing(&mut y_positions, body_size_half_pt);
+    let line_spacing = detect_line_spacing(&y_positions, body_size_half_pt);
+
+    // Determine body font's cap-height ratio from collected metrics.
+    // Cap-height is the text box height Typst uses for line layout.
+    let body_cap_height_ratio = if body_cap_heights.is_empty() {
+        0.66
+    } else {
+        let mut sorted = body_cap_heights.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        sorted[sorted.len() / 2]
+    };
 
     // Detect code font (monospace font that isn't the body font)
     let code_font = ascii_font_counts
@@ -107,6 +119,7 @@ pub fn extract_document_style(paged: &PagedDocument) -> DocumentStyle {
         lang_east_asia: if has_cjk { "zh-CN".to_string() } else { "en-US".to_string() },
         has_cjk_content: has_cjk,
         hyperlink_color: "0563C1".to_string(),
+        body_cap_height_ratio,
     }
 }
 
@@ -173,34 +186,47 @@ fn detect_first_line_indent(paged: &PagedDocument, body_pt: f64) -> u32 {
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn detect_line_spacing(y_positions: &mut Vec<f64>, body_size_half_pt: u32) -> u32 {
-    if y_positions.len() < 2 {
-        return 360;
-    }
-    y_positions.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    y_positions.dedup_by(|a, b| (*a - *b).abs() < 0.5);
-
+fn detect_line_spacing(y_positions: &[(f64, u32)], body_size_half_pt: u32) -> u32 {
     let body_pt = f64::from(body_size_half_pt) / 2.0;
-    // Collect gaps between consecutive lines that are plausible line spacing
-    // (between 0.8x and 3x the font size)
+    let default_twips = (body_pt * 1.65 * 20.0).round() as u32;
+
+    // Filter to only body-sized text items (within ±1 half-point of detected body size)
+    let mut body_ys: Vec<f64> = y_positions
+        .iter()
+        .filter(|(_, sz)| sz.abs_diff(body_size_half_pt) <= 1)
+        .map(|(y, _)| *y)
+        .collect();
+
+    if body_ys.len() < 2 {
+        return default_twips;
+    }
+    body_ys.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    body_ys.dedup_by(|a, b| (*a - *b).abs() < 0.5);
+
     let mut gaps: Vec<f64> = Vec::new();
-    for pair in y_positions.windows(2) {
+    for pair in body_ys.windows(2) {
         let gap = pair[1] - pair[0];
         if gap > body_pt * 0.8 && gap < body_pt * 3.0 {
             gaps.push(gap);
         }
     }
     if gaps.is_empty() {
-        return 360;
+        return default_twips;
     }
-    // Use the median gap as the representative line pitch
-    gaps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let median_pitch = gaps[gaps.len() / 2];
-    // Convert: Word line spacing = (pitch / font_size) * 240
-    let ratio = median_pitch / body_pt;
-    let spacing = (ratio * 240.0).round() as u32;
-    // Clamp to reasonable range
-    spacing.clamp(200, 600)
+    // Use mode (most common gap, rounded to 0.5pt) for robustness against
+    // mixed within-paragraph and between-paragraph gaps.
+    let mut gap_counts: HashMap<u32, usize> = HashMap::new();
+    for &g in &gaps {
+        let key = (g * 2.0).round() as u32;
+        *gap_counts.entry(key).or_insert(0) += 1;
+    }
+    let mode_key = gap_counts
+        .into_iter()
+        .max_by_key(|(_, count)| *count)
+        .map_or(0, |(key, _)| key);
+    let mode_pitch = f64::from(mode_key) / 2.0;
+    let spacing = (mode_pitch * 20.0).round() as u32;
+    spacing.clamp(160, 960)
 }
 
 /// Detect whether the document body text is justified or left-aligned.
@@ -532,7 +558,8 @@ fn collect_font_info_split(
     ascii_fonts: &mut HashMap<String, usize>,
     cjk_fonts: &mut HashMap<String, usize>,
     size_counts: &mut HashMap<u32, usize>,
-    y_positions: &mut Vec<f64>,
+    y_positions: &mut Vec<(f64, u32)>,
+    body_cap_heights: &mut Vec<f64>,
 ) {
     for (pos, item) in frame.items() {
         let abs_y = offset.y + pos.y;
@@ -542,7 +569,9 @@ fn collect_font_info_split(
                 let size_half_pt = (text_item.size.to_pt() * 2.0).round() as u32;
                 let glyph_count = text_item.glyphs.len();
                 *size_counts.entry(size_half_pt).or_insert(0) += glyph_count;
-                y_positions.push(abs_y.to_pt());
+                y_positions.push((abs_y.to_pt(), size_half_pt));
+                let cap_h = text_item.font.metrics().cap_height.get();
+                body_cap_heights.push(cap_h);
 
                 let has_cjk = text_item.text.chars().any(is_cjk_char);
                 let has_ascii = text_item.text.chars().any(|c| c.is_ascii_alphabetic());
@@ -562,6 +591,7 @@ fn collect_font_info_split(
                     cjk_fonts,
                     size_counts,
                     y_positions,
+                    body_cap_heights,
                 );
             }
             _ => {}

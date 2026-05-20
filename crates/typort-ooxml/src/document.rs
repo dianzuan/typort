@@ -469,18 +469,21 @@ pub struct DocumentStyle {
     pub has_cjk_content: bool,
     /// Hyperlink color as a 6-digit hex string (e.g. "0563C1").
     pub hyperlink_color: String,
+    /// Body font's cap-height ratio (em units). Used to compute line pitch:
+    /// line_pitch = cap_height_ratio × body_size + leading.
+    pub body_cap_height_ratio: f64,
 }
 
 impl Default for DocumentStyle {
     fn default() -> Self {
-        // Typst defaults: 11pt body, 0.65em leading → 1.65x → 396/240 line spacing,
+        // Typst defaults: 11pt body, 0.65em leading → 18.15pt line height → 363 twips,
         // no first-line indent, h1=1.4em=31hp, h2=1.2em=26hp, h3-5=body size,
         // paragraph spacing = 1.2 * 11pt = 13.2pt → 264 twips.
         Self {
             body_font_ascii: "Times New Roman".to_string(),
             body_font_east_asia: "\u{5b8b}\u{4f53}".to_string(),
             body_size_half_pt: 22,       // Typst default: 11pt = 22 half-points
-            line_spacing: 396,           // Typst default: 0.65em leading → 1.65x → 396
+            line_spacing: 276,           // ~13.8pt: typical rendered line pitch for 11pt body
             first_line_indent_twips: 0,  // Typst default: no indent
             footnote_format: FootnoteFormat::default(),
             code_font: "Courier New".to_string(),
@@ -489,15 +492,17 @@ impl Default for DocumentStyle {
             // Typst defaults: h1=1.4*22=31, h2=1.2*22=26, h3-h5=body size
             heading_sizes: [31, 26, 22, 22, 22],
             body_alignment: "left".to_string(),
-            // Typst default par.spacing = 1.2em; at 11pt → 13.2pt → 264 twips
-            body_spacing_before: 264,
+            // Typst default par.spacing = 1.2em; at 11pt → 13.2pt → 264 twips.
+            // before=0 because Word sums before+after (no collapsing).
+            body_spacing_before: 0,
             body_spacing_after: 264,
-            heading_spacing_before: [240; 5],
-            heading_spacing_after: [120; 5],
+            heading_spacing_before: [0; 5],
+            heading_spacing_after: [264; 5],
             lang_latin: "en-US".to_string(),
             lang_east_asia: "zh-CN".to_string(),
             has_cjk_content: true,
             hyperlink_color: "0563C1".to_string(),
+            body_cap_height_ratio: 0.66,
         }
     }
 }

@@ -600,8 +600,8 @@ mod tests {
             "should have linePitch attribute: {xml}"
         );
         assert!(
-            xml.contains(r#"w:type="lines""#),
-            "docGrid type should be 'lines': {xml}"
+            !xml.contains(r#"w:type="lines""#),
+            "docGrid should NOT use type=lines (it adds pitch on top of paragraph spacing): {xml}"
         );
     }
 

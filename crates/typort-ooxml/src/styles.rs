@@ -126,7 +126,7 @@ fn write_style_normal<W: Write>(w: &mut Writer<W>, style: &DocumentStyle) -> io:
                     .with_attribute(("w:before", sp_before.as_str()))
                     .with_attribute(("w:after", sp_after.as_str()))
                     .with_attribute(("w:line", line_spacing.as_str()))
-                    .with_attribute(("w:lineRule", "auto"))
+                    .with_attribute(("w:lineRule", "atLeast"))
                     .write_empty()?;
                 ppr.create_element("w:ind")
                     .with_attribute(("w:firstLine", indent.as_str()))
