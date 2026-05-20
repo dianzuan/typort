@@ -77,7 +77,11 @@ pub fn extract_document_style(paged: &PagedDocument) -> DocumentStyle {
 
     // Detect heading before/after spacing from y-position gaps around large text
     let (heading_spacing_before, heading_spacing_after) =
-        detect_heading_spacing(&y_positions, &size_counts, body_size_half_pt, paged);
+        detect_heading_spacing_per_level(body_size_half_pt, &heading_sizes, paged);
+
+    // Detect body paragraph spacing from y-position gaps between normal text
+    let (body_spacing_before, body_spacing_after) =
+        detect_body_paragraph_spacing(body_size_half_pt, &heading_sizes, paged);
 
     DocumentStyle {
         body_font_ascii,
@@ -87,6 +91,8 @@ pub fn extract_document_style(paged: &PagedDocument) -> DocumentStyle {
         first_line_indent_twips,
         footnote_format: FootnoteFormat::default(),
         code_font,
+        body_spacing_before,
+        body_spacing_after,
         heading_spacing_before,
         heading_spacing_after,
         code_size_half_pt,
@@ -351,69 +357,146 @@ fn detect_heading_sizes(size_counts: &HashMap<u32, usize>, body_size: u32) -> [u
 }
 
 /// Detect heading before/after spacing by measuring y-gaps around heading-sized text.
+/// Detect heading spacing before/after per level from rendered y-positions.
+///
+/// For each heading-sized text item, measures the y-gap to its neighbors.
+/// Groups by which heading level the size matches, returns per-level arrays.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn detect_heading_spacing(
-    _y_positions: &[f64],
-    _size_counts: &HashMap<u32, usize>,
+fn detect_heading_spacing_per_level(
     body_size: u32,
+    heading_sizes: &[u32; 5],
     paged: &PagedDocument,
-) -> (u32, u32) {
-    let heading_min_size = body_size + 1;
-    // Collect (y, size_half_pt) pairs from the first page
-    let Some(page) = paged.pages.first() else {
-        return (240, 120);
-    };
+) -> ([u32; 5], [u32; 5]) {
+    let default_before = [240; 5];
+    let default_after = [120; 5];
+
     let mut items: Vec<(f64, u32)> = Vec::new();
-    collect_y_and_size(&page.frame, Point::zero(), &mut items);
+    for page in paged.pages.iter().take(5) {
+        collect_y_and_size(&page.frame, Point::zero(), &mut items);
+    }
     if items.len() < 3 {
-        return (240, 120);
+        return (default_before, default_after);
     }
     items.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     items.dedup_by(|a, b| (a.0 - b.0).abs() < 1.0);
 
     let body_pt = f64::from(body_size) / 2.0;
-    let normal_line_pitch = body_pt * 1.6; // approximate
 
-    let mut before_gaps = Vec::new();
-    let mut after_gaps = Vec::new();
+    // Per-level gap collectors
+    let mut before_per_level: [Vec<f64>; 5] = Default::default();
+    let mut after_per_level: [Vec<f64>; 5] = Default::default();
 
     for (i, &(y, sz)) in items.iter().enumerate() {
-        if sz >= heading_min_size {
-            // Gap before heading: distance from previous item
-            if i > 0 {
-                let gap = y - items[i - 1].0;
-                if gap > normal_line_pitch && gap < body_pt * 10.0 {
-                    before_gaps.push(gap);
-                }
+        // Find which heading level this size matches
+        let level = heading_sizes
+            .iter()
+            .position(|&hs| sz == hs && sz > body_size);
+        let Some(level) = level else { continue };
+
+        if i > 0 {
+            let gap = y - items[i - 1].0;
+            if gap > 0.0 && gap < body_pt * 15.0 {
+                before_per_level[level].push(gap);
             }
-            // Gap after heading: distance to next item
-            if i + 1 < items.len() {
-                let gap = items[i + 1].0 - y;
-                if gap > 0.0 && gap < body_pt * 10.0 {
-                    after_gaps.push(gap);
-                }
+        }
+        if i + 1 < items.len() {
+            let gap = items[i + 1].0 - y;
+            if gap > 0.0 && gap < body_pt * 15.0 {
+                after_per_level[level].push(gap);
             }
         }
     }
 
-    let before_twips = if before_gaps.is_empty() {
-        240
+    let mut result_before = default_before;
+    let mut result_after = default_after;
+
+    for level in 0..5 {
+        if !before_per_level[level].is_empty() {
+            let gaps = &mut before_per_level[level];
+            gaps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let median = gaps[gaps.len() / 2];
+            result_before[level] = (median * 20.0).round().min(1500.0) as u32;
+        }
+        if !after_per_level[level].is_empty() {
+            let gaps = &mut after_per_level[level];
+            gaps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let median = gaps[gaps.len() / 2];
+            result_after[level] = (median * 20.0).round().min(800.0) as u32;
+        }
+    }
+
+    (result_before, result_after)
+}
+
+/// Detect body paragraph spacing from rendered y-gaps between
+/// consecutive body-text lines (excluding heading-sized text).
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn detect_body_paragraph_spacing(
+    body_size: u32,
+    heading_sizes: &[u32; 5],
+    paged: &PagedDocument,
+) -> (u32, u32) {
+    let mut items: Vec<(f64, u32)> = Vec::new();
+    for page in paged.pages.iter().take(3) {
+        collect_y_and_size(&page.frame, Point::zero(), &mut items);
+    }
+    if items.len() < 4 {
+        return (0, 0);
+    }
+    items.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    items.dedup_by(|a, b| (a.0 - b.0).abs() < 1.0);
+
+    let body_pt = f64::from(body_size) / 2.0;
+    let heading_min = heading_sizes.iter().copied().min().unwrap_or(body_size + 1);
+
+    // Collect y-gaps between consecutive body-sized items
+    let mut body_gaps: Vec<f64> = Vec::new();
+    for pair in items.windows(2) {
+        let (_, sz0) = pair[0];
+        let (_, sz1) = pair[1];
+        // Both items must be body-sized (not heading-sized)
+        if sz0 < heading_min && sz1 < heading_min {
+            let gap = pair[1].0 - pair[0].0;
+            // Normal line gaps are ~body_pt * 1.65. Paragraph gaps are larger.
+            // Filter to gaps that are plausibly paragraph breaks (> 1.8x body size)
+            if gap > body_pt * 1.8 && gap < body_pt * 8.0 {
+                body_gaps.push(gap);
+            }
+        }
+    }
+
+    if body_gaps.is_empty() {
+        return (0, 0);
+    }
+
+    body_gaps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let median = body_gaps[body_gaps.len() / 2];
+
+    // The gap includes line height. Paragraph spacing = gap - normal_line_height.
+    // Normal line height ≈ body_pt * (1 + leading). We use the median of intra-paragraph
+    // line gaps if available, otherwise approximate.
+    let mut line_gaps: Vec<f64> = Vec::new();
+    for pair in items.windows(2) {
+        if pair[0].1 < heading_min && pair[1].1 < heading_min {
+            let gap = pair[1].0 - pair[0].0;
+            if gap > body_pt * 0.8 && gap <= body_pt * 1.8 {
+                line_gaps.push(gap);
+            }
+        }
+    }
+
+    let normal_line_gap = if line_gaps.is_empty() {
+        body_pt * 1.65
     } else {
-        before_gaps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        let median = before_gaps[before_gaps.len() / 2];
-        // Subtract one normal line pitch to get the extra spacing
-        let extra = (median - normal_line_pitch).max(0.0);
-        (extra * 20.0).round() as u32
+        line_gaps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        line_gaps[line_gaps.len() / 2]
     };
-    let after_twips = if after_gaps.is_empty() {
-        120
-    } else {
-        after_gaps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        let median = after_gaps[after_gaps.len() / 2];
-        let extra = (median - normal_line_pitch).max(0.0);
-        (extra * 20.0).round() as u32
-    };
-    (before_twips.clamp(0, 1000), after_twips.clamp(0, 500))
+
+    let spacing_pt = (median - normal_line_gap).max(0.0);
+    let spacing_twips = (spacing_pt * 20.0).round().min(1000.0) as u32;
+
+    // Use same value for before and after (Typst uses symmetric par spacing)
+    (spacing_twips, spacing_twips)
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -479,17 +562,300 @@ fn collect_font_info_split(
 }
 
 /// Extract page dimensions from the `PagedDocument` and apply to `PageSettings`.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub fn extract_page_settings(paged: &PagedDocument, settings: &mut PageSettings) {
     let Some(page) = paged.pages.first() else {
         return;
     };
-    let m = extract_page_metrics(&page.frame);
-    settings.width_twips = m.width_twips;
-    settings.height_twips = m.height_twips;
-    settings.margin_top = m.margin_top;
-    settings.margin_bottom = m.margin_bottom;
-    settings.margin_left = m.margin_left;
-    settings.margin_right = m.margin_right;
+    let w = page.frame.width().to_pt();
+    let h = page.frame.height().to_pt();
+    settings.width_twips = (w * 20.0).round() as u32;
+    settings.height_twips = (h * 20.0).round() as u32;
+
+    let default_margin = default_margin_pt(w, h);
+    let default_twips = (default_margin * 20.0).round() as u32;
+    settings.margin_top = default_twips;
+    settings.margin_bottom = default_twips;
+    settings.margin_left = default_twips;
+    settings.margin_right = default_twips;
+}
+
+// ---------------------------------------------------------------------------
+// Source AST extraction for page/text/par settings
+// ---------------------------------------------------------------------------
+
+/// All style overrides extracted from `#set` rules in the source AST.
+/// Each field is `None` if the source doesn't set it (use heuristic fallback).
+#[derive(Default)]
+pub struct SourceStyleOverrides {
+    // #set page(margin: ...)
+    pub margin_top: Option<u32>,
+    pub margin_bottom: Option<u32>,
+    pub margin_left: Option<u32>,
+    pub margin_right: Option<u32>,
+    // #set page(columns: N)
+    pub columns: Option<u32>,
+    // #set page(numbering: "1"/"i"/...)
+    pub page_numbering: Option<String>,
+    // #set text(font: ..., size: ...)
+    pub text_font: Option<Vec<String>>,
+    pub text_size_half_pt: Option<u32>,
+    // #set par(first-line-indent: ..., leading: ..., justify: ..., spacing: ...)
+    pub first_line_indent_twips: Option<u32>,
+    pub par_leading_twips: Option<u32>,
+    pub par_spacing_twips: Option<u32>,
+    pub justify: Option<bool>,
+}
+
+/// Extract style overrides from Typst source AST in a single walk.
+///
+/// Reads `#set page(...)`, `#set text(...)`, `#set par(...)` rules.
+/// Returns overrides that should take precedence over heuristic detection.
+#[must_use]
+pub fn extract_source_style_overrides(source: &str) -> SourceStyleOverrides {
+    let root = typst_syntax::parse(source);
+    let mut ovr = SourceStyleOverrides::default();
+    collect_set_rules(&root, &mut ovr);
+    ovr
+}
+
+fn collect_set_rules(
+    node: &typst_syntax::SyntaxNode,
+    ovr: &mut SourceStyleOverrides,
+) {
+    use typst_syntax::SyntaxKind;
+
+    // Skip SetRule nodes inside ShowRule — those apply to specific elements,
+    // not to the document globally.
+    if node.kind() == SyntaxKind::ShowRule {
+        return;
+    }
+
+    if node.kind() == SyntaxKind::SetRule
+        && let Some(set) = node.cast::<typst_syntax::ast::SetRule<'_>>()
+    {
+        let target_name = match set.target() {
+            typst_syntax::ast::Expr::Ident(ident) => Some(ident.as_str().to_string()),
+            _ => None,
+        };
+        if let Some(name) = target_name {
+            match name.as_str() {
+                "page" => parse_page_args(set.args(), ovr),
+                "text" => parse_text_args(set.args(), ovr),
+                "par" => parse_par_args(set.args(), ovr),
+                _ => {}
+            }
+        }
+    }
+
+    for child in node.children() {
+        collect_set_rules(child, ovr);
+    }
+}
+
+fn parse_page_args(
+    args: typst_syntax::ast::Args<'_>,
+    ovr: &mut SourceStyleOverrides,
+) {
+    for arg in args.items() {
+        let typst_syntax::ast::Arg::Named(named) = arg else {
+            continue;
+        };
+        match named.name().as_str() {
+            "margin" => parse_margin_value(named.expr(), ovr),
+            "columns" => {
+                if let typst_syntax::ast::Expr::Int(i) = named.expr() {
+                    ovr.columns = u32::try_from(i.get()).ok();
+                }
+            }
+            "numbering" => {
+                if let typst_syntax::ast::Expr::Str(s) = named.expr() {
+                    ovr.page_numbering = Some(s.get().to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn parse_margin_value(
+    expr: typst_syntax::ast::Expr<'_>,
+    ovr: &mut SourceStyleOverrides,
+) {
+    match expr {
+        typst_syntax::ast::Expr::Numeric(n) => {
+            let twips = numeric_to_twips(n);
+            if twips > 0 {
+                ovr.margin_top = Some(twips);
+                ovr.margin_bottom = Some(twips);
+                ovr.margin_left = Some(twips);
+                ovr.margin_right = Some(twips);
+            }
+        }
+        typst_syntax::ast::Expr::Dict(dict) => {
+            // Collect with Typst priority: rest < x/y < individual sides
+            let mut rest = None;
+            let mut x = None;
+            let mut y = None;
+            let mut top = None;
+            let mut bottom = None;
+            let mut left = None;
+            let mut right = None;
+
+            for item in dict.items() {
+                let typst_syntax::ast::DictItem::Named(entry) = item else {
+                    continue;
+                };
+                if let typst_syntax::ast::Expr::Numeric(n) = entry.expr() {
+                    let twips = numeric_to_twips(n);
+                    if twips > 0 {
+                        match entry.name().as_str() {
+                            "rest" => rest = Some(twips),
+                            "x" => x = Some(twips),
+                            "y" => y = Some(twips),
+                            "top" => top = Some(twips),
+                            "bottom" => bottom = Some(twips),
+                            "left" => left = Some(twips),
+                            "right" => right = Some(twips),
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
+            // Resolve in priority order
+            if let Some(v) = rest {
+                ovr.margin_top = Some(v);
+                ovr.margin_bottom = Some(v);
+                ovr.margin_left = Some(v);
+                ovr.margin_right = Some(v);
+            }
+            if let Some(v) = x {
+                ovr.margin_left = Some(v);
+                ovr.margin_right = Some(v);
+            }
+            if let Some(v) = y {
+                ovr.margin_top = Some(v);
+                ovr.margin_bottom = Some(v);
+            }
+            if let Some(v) = top { ovr.margin_top = Some(v); }
+            if let Some(v) = bottom { ovr.margin_bottom = Some(v); }
+            if let Some(v) = left { ovr.margin_left = Some(v); }
+            if let Some(v) = right { ovr.margin_right = Some(v); }
+        }
+        _ => {}
+    }
+}
+
+fn parse_text_args(
+    args: typst_syntax::ast::Args<'_>,
+    ovr: &mut SourceStyleOverrides,
+) {
+    for arg in args.items() {
+        match arg {
+            typst_syntax::ast::Arg::Named(named) => {
+                match named.name().as_str() {
+                    "font" => {
+                        ovr.text_font = extract_font_list(named.expr());
+                    }
+                    "size" => {
+                        if let typst_syntax::ast::Expr::Numeric(n) = named.expr() {
+                            let half_pt = numeric_to_half_pt(n);
+                            if half_pt > 0 {
+                                ovr.text_size_half_pt = Some(half_pt);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            typst_syntax::ast::Arg::Pos(typst_syntax::ast::Expr::Numeric(n)) => {
+                let half_pt = numeric_to_half_pt(n);
+                if half_pt > 0 {
+                    ovr.text_size_half_pt = Some(half_pt);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn parse_par_args(
+    args: typst_syntax::ast::Args<'_>,
+    ovr: &mut SourceStyleOverrides,
+) {
+    for arg in args.items() {
+        let typst_syntax::ast::Arg::Named(named) = arg else {
+            continue;
+        };
+        match named.name().as_str() {
+            "first-line-indent" => {
+                if let typst_syntax::ast::Expr::Numeric(n) = named.expr() {
+                    ovr.first_line_indent_twips = Some(numeric_to_twips(n));
+                }
+            }
+            "leading" => {
+                if let typst_syntax::ast::Expr::Numeric(n) = named.expr() {
+                    ovr.par_leading_twips = Some(numeric_to_twips(n));
+                }
+            }
+            "spacing" => {
+                if let typst_syntax::ast::Expr::Numeric(n) = named.expr() {
+                    ovr.par_spacing_twips = Some(numeric_to_twips(n));
+                }
+            }
+            "justify" => {
+                if let typst_syntax::ast::Expr::Bool(b) = named.expr() {
+                    ovr.justify = Some(b.get());
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn extract_font_list(expr: typst_syntax::ast::Expr<'_>) -> Option<Vec<String>> {
+    match expr {
+        typst_syntax::ast::Expr::Str(s) => Some(vec![s.get().to_string()]),
+        typst_syntax::ast::Expr::Array(arr) => {
+            let fonts: Vec<String> = arr
+                .items()
+                .filter_map(|item| {
+                    if let typst_syntax::ast::ArrayItem::Pos(typst_syntax::ast::Expr::Str(s)) = item {
+                        Some(s.get().to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            if fonts.is_empty() { None } else { Some(fonts) }
+        }
+        _ => None,
+    }
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn numeric_to_twips(n: typst_syntax::ast::Numeric<'_>) -> u32 {
+    let pt = numeric_to_pt(n);
+    (pt * 20.0).round().max(0.0) as u32
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn numeric_to_half_pt(n: typst_syntax::ast::Numeric<'_>) -> u32 {
+    let pt = numeric_to_pt(n);
+    (pt * 2.0).round().max(0.0) as u32
+}
+
+fn numeric_to_pt(n: typst_syntax::ast::Numeric<'_>) -> f64 {
+    let (value, unit) = n.get();
+    match unit {
+        typst_syntax::ast::Unit::Pt => value,
+        typst_syntax::ast::Unit::Cm => value * 72.0 / 2.54,
+        typst_syntax::ast::Unit::Mm => value * 72.0 / 25.4,
+        typst_syntax::ast::Unit::In => value * 72.0,
+        typst_syntax::ast::Unit::Em => value * 12.0,
+        _ => 0.0,
+    }
 }
 
 /// Recursively collect content bounding box from frame items.
@@ -1151,91 +1517,332 @@ pub fn detect_columns(paged: &PagedDocument) -> Option<u32> {
 }
 
 // ---------------------------------------------------------------------------
-// Heading alignment detection from PagedDocument
+// Unified per-run style recovery from PagedDocument
 // ---------------------------------------------------------------------------
 
-/// A text item from the paged output with position and width info.
-struct PagedTextItem {
-    x: f64,
+/// All per-run styling extracted from a single `TextItem` in the paged output.
+struct PagedRunStyle {
     text: String,
+    spans: Vec<typst_syntax::Span>,
+    font_family: String,
+    size_pt: f64,
+    color_hex: Option<String>,
+    is_bold: bool,
+    is_italic: bool,
+    x: f64,
     text_width: f64,
     page_width: f64,
 }
 
-/// Collect text items from the body zone of all pages with their x-positions.
-fn collect_body_text_items(paged: &PagedDocument) -> Vec<PagedTextItem> {
+/// Collect per-run style information from all pages of the `PagedDocument`.
+fn collect_paged_run_styles(paged: &PagedDocument) -> Vec<PagedRunStyle> {
     let mut items = Vec::new();
     for page in &paged.pages {
         let page_width = page.frame.width().to_pt();
-        let page_height = page.frame.height().to_pt();
-        let (body_top, body_bottom) = find_body_zone(page_width, page_height);
-        collect_body_text_items_from_frame(
-            &page.frame,
-            Point::zero(),
-            page_width,
-            body_top,
-            body_bottom,
-            &mut items,
-        );
+        collect_styles_from_frame(&page.frame, Point::zero(), page_width, &mut items);
     }
     items
 }
 
-fn collect_body_text_items_from_frame(
+fn collect_styles_from_frame(
     frame: &Frame,
     offset: Point,
     page_width: f64,
-    body_top: f64,
-    body_bottom: f64,
-    items: &mut Vec<PagedTextItem>,
+    items: &mut Vec<PagedRunStyle>,
 ) {
     for (pos, item) in frame.items() {
         let abs_x = offset.x + pos.x;
         let abs_y = offset.y + pos.y;
         match item {
             FrameItem::Text(text_item) => {
-                let y = abs_y.to_pt();
-                // Only include body-zone text
-                if y >= body_top && y <= body_bottom {
-                    let text = text_item.text.to_string();
-                    if !text.is_empty() {
-                        items.push(PagedTextItem {
-                            x: abs_x.to_pt(),
-                            text,
-                            text_width: text_item.width().to_pt(),
-                            page_width,
-                        });
-                    }
+                let text = text_item.text.to_string();
+                if text.is_empty() {
+                    continue;
                 }
+                let info = text_item.font.info();
+                let spans: Vec<typst_syntax::Span> =
+                    text_item.glyphs.iter().map(|g| g.span.0).collect();
+                items.push(PagedRunStyle {
+                    text,
+                    spans,
+                    font_family: info.family.clone(),
+                    size_pt: text_item.size.to_pt(),
+                    color_hex: extract_non_black_color(&text_item.fill),
+                    is_bold: info.variant.weight.to_number() >= 700,
+                    is_italic: matches!(
+                        info.variant.style,
+                        typst_library::text::FontStyle::Italic
+                            | typst_library::text::FontStyle::Oblique
+                    ),
+                    x: abs_x.to_pt(),
+                    text_width: text_item.width().to_pt(),
+                    page_width,
+                });
             }
             FrameItem::Group(group) => {
                 let new_offset = Point::new(abs_x, abs_y);
-                collect_body_text_items_from_frame(
-                    &group.frame,
-                    new_offset,
-                    page_width,
-                    body_top,
-                    body_bottom,
-                    items,
-                );
+                collect_styles_from_frame(&group.frame, new_offset, page_width, items);
             }
             _ => {}
         }
     }
 }
 
-/// Detect alignment of heading paragraphs by cross-referencing with the
-/// `PagedDocument`'s rendered text positions.
-///
-/// For each heading in the document model, finds its text in the paged output
-/// and determines whether it is centered, right-aligned, or left-aligned based
-/// on the x-position relative to the page width.
-pub fn apply_heading_alignment_from_paged(
+/// Detect the most common font family and size from rendered text items.
+/// Used as the baseline for per-run override comparison, independent of
+/// source-AST overrides which may reference fonts not available at render time.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn detect_rendered_body_style(styles: &[PagedRunStyle]) -> (String, u32) {
+    let mut font_counts: HashMap<&str, usize> = HashMap::new();
+    let mut size_counts: HashMap<u32, usize> = HashMap::new();
+
+    for item in styles {
+        *font_counts.entry(&item.font_family).or_insert(0) += item.text.len();
+        let half_pt = (item.size_pt * 2.0).round() as u32;
+        *size_counts.entry(half_pt).or_insert(0) += item.text.len();
+    }
+
+    let body_font = font_counts
+        .into_iter()
+        .max_by_key(|(_, c)| *c)
+        .map_or_else(|| "Times New Roman".to_string(), |(f, _)| f.to_string());
+    let body_size = size_counts
+        .into_iter()
+        .max_by_key(|(_, c)| *c)
+        .map_or(21, |(s, _)| s);
+
+    (body_font, body_size)
+}
+
+fn extract_non_black_color(paint: &typst_library::visualize::Paint) -> Option<String> {
+    let typst_library::visualize::Paint::Solid(color) = paint else {
+        return None;
+    };
+    let hex = color.to_hex();
+    let hex_str = hex.as_str();
+    let hex_digits = hex_str.strip_prefix('#').unwrap_or(hex_str);
+    if hex_digits.starts_with("000000") {
+        return None;
+    }
+    let rgb = &hex_digits[..6.min(hex_digits.len())];
+    Some(rgb.to_uppercase())
+}
+
+/// Per-run style overrides resolved from paged output, keyed by Span or text.
+struct RunStyleOverride {
+    color: Option<String>,
+    font_ascii: Option<String>,
+    font_east_asia: Option<String>,
+    size_half_pt: Option<u32>,
+    force_bold: Option<bool>,
+    force_italic: Option<bool>,
+}
+
+/// Apply all per-run styles (color, font, size, bold, italic) and paragraph
+/// alignment from the `PagedDocument` to the document model in a single pass.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+pub fn apply_styles_from_paged(
     paged: &PagedDocument,
     doc: &mut typort_ooxml::document::Document,
 ) {
-    let paged_items = collect_body_text_items(paged);
-    if paged_items.is_empty() {
+    let paged_styles = collect_paged_run_styles(paged);
+    if paged_styles.is_empty() {
+        return;
+    }
+
+    // Detect rendered body font/size from the paged output itself (most common),
+    // NOT from doc.style which may have been overridden by source AST with a
+    // font name that differs from the actual rendered fallback font.
+    let (rendered_body_font, rendered_body_size_half_pt) =
+        detect_rendered_body_style(&paged_styles);
+    let body_font_ascii = &rendered_body_font;
+    let body_font_east_asia = &rendered_body_font;
+    let body_size_half_pt = rendered_body_size_half_pt;
+
+    // Build Span → style override lookup
+    let mut span_overrides: HashMap<typst_syntax::Span, RunStyleOverride> = HashMap::new();
+    // Text-based fallback for runs without spans
+    let mut text_overrides: HashMap<String, RunStyleOverride> = HashMap::new();
+
+    for item in &paged_styles {
+        let size_half = (item.size_pt * 2.0).round() as u32;
+
+        let color = item.color_hex.clone();
+
+        // Only set font override if different from document defaults
+        let font_is_cjk = item.text.chars().any(is_cjk_char);
+        let font_differs = if font_is_cjk {
+            item.font_family != *body_font_east_asia
+        } else {
+            item.font_family != *body_font_ascii
+        };
+
+        let (font_ascii, font_east_asia) = if font_differs {
+            if font_is_cjk {
+                (None, Some(item.font_family.clone()))
+            } else {
+                (Some(item.font_family.clone()), None)
+            }
+        } else {
+            (None, None)
+        };
+
+        let size_override = if size_half == body_size_half_pt {
+            None
+        } else {
+            Some(size_half)
+        };
+
+        let has_override = color.is_some()
+            || font_ascii.is_some()
+            || font_east_asia.is_some()
+            || size_override.is_some()
+            || item.is_bold
+            || item.is_italic;
+
+        if !has_override {
+            continue;
+        }
+
+        let ovr = RunStyleOverride {
+            color,
+            font_ascii,
+            font_east_asia,
+            size_half_pt: size_override,
+            force_bold: if item.is_bold { Some(true) } else { None },
+            force_italic: if item.is_italic { Some(true) } else { None },
+        };
+
+        for &span in &item.spans {
+            if !span.is_detached() {
+                span_overrides.insert(span, RunStyleOverride {
+                    color: ovr.color.clone(),
+                    font_ascii: ovr.font_ascii.clone(),
+                    font_east_asia: ovr.font_east_asia.clone(),
+                    size_half_pt: ovr.size_half_pt,
+                    force_bold: ovr.force_bold,
+                    force_italic: ovr.force_italic,
+                });
+            }
+        }
+        text_overrides.insert(item.text.clone(), RunStyleOverride {
+            color: ovr.color,
+            font_ascii: ovr.font_ascii,
+            font_east_asia: ovr.font_east_asia,
+            size_half_pt: ovr.size_half_pt,
+            force_bold: ovr.force_bold,
+            force_italic: ovr.force_italic,
+        });
+    }
+
+    // Apply run-level overrides to body elements
+    apply_overrides_to_elements(
+        &mut doc.body.elements,
+        &span_overrides,
+        &text_overrides,
+    );
+
+    // Apply run-level overrides to footnotes
+    for footnote in &mut doc.footnotes {
+        for run in &mut footnote.content {
+            apply_override_to_run(run, &span_overrides, &text_overrides);
+        }
+    }
+
+    // Apply paragraph alignment from x-positions
+    apply_paragraph_alignment(paged, &paged_styles, doc);
+}
+
+fn apply_override_to_run(
+    run: &mut Run,
+    span_overrides: &HashMap<typst_syntax::Span, RunStyleOverride>,
+    text_overrides: &HashMap<String, RunStyleOverride>,
+) {
+    let ovr = run
+        .span
+        .and_then(|s| span_overrides.get(&s))
+        .or_else(|| text_overrides.get(&run.text));
+    let Some(ovr) = ovr else { return };
+
+    if let Some(color) = &ovr.color {
+        run.color = Some(color.clone());
+    }
+    if let Some(font) = &ovr.font_ascii {
+        run.font_ascii = Some(font.clone());
+    }
+    if let Some(font) = &ovr.font_east_asia {
+        run.font_east_asia = Some(font.clone());
+    }
+    if ovr.size_half_pt.is_some() {
+        run.size_half_pt = ovr.size_half_pt;
+    }
+    // Bold/italic: override only when paged output disagrees with HTML semantics
+    if let Some(true) = ovr.force_bold
+        && !run.bold
+    {
+        run.bold = true;
+    }
+    if let Some(true) = ovr.force_italic
+        && !run.italic
+    {
+        run.italic = true;
+    }
+}
+
+fn apply_overrides_to_elements(
+    elements: &mut [typort_ooxml::document::BlockElement],
+    span_overrides: &HashMap<typst_syntax::Span, RunStyleOverride>,
+    text_overrides: &HashMap<String, RunStyleOverride>,
+) {
+    for element in elements.iter_mut() {
+        match element {
+            typort_ooxml::document::BlockElement::Paragraph(p) => {
+                apply_overrides_to_paragraph(p, span_overrides, text_overrides);
+            }
+            typort_ooxml::document::BlockElement::Table(t) => {
+                for row in &mut t.rows {
+                    for cell in &mut row.cells {
+                        for para in &mut cell.paragraphs {
+                            apply_overrides_to_paragraph(
+                                para,
+                                span_overrides,
+                                text_overrides,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn apply_overrides_to_paragraph(
+    para: &mut Paragraph,
+    span_overrides: &HashMap<typst_syntax::Span, RunStyleOverride>,
+    text_overrides: &HashMap<String, RunStyleOverride>,
+) {
+    for inline in &mut para.inlines {
+        match inline {
+            typort_ooxml::document::InlineElement::Text(run) => {
+                apply_override_to_run(run, span_overrides, text_overrides);
+            }
+            typort_ooxml::document::InlineElement::Hyperlink { runs, .. } => {
+                for run in runs {
+                    apply_override_to_run(run, span_overrides, text_overrides);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Apply paragraph alignment by cross-referencing rendered x-positions.
+fn apply_paragraph_alignment(
+    _paged: &PagedDocument,
+    paged_styles: &[PagedRunStyle],
+    doc: &mut typort_ooxml::document::Document,
+) {
+    if paged_styles.is_empty() {
         return;
     }
 
@@ -1243,52 +1850,36 @@ pub fn apply_heading_alignment_from_paged(
         let typort_ooxml::document::BlockElement::Paragraph(p) = element else {
             continue;
         };
-        if !matches!(p.style, Some(ParagraphStyle::Heading(_))) {
-            continue;
-        }
-        // Skip if alignment is already set explicitly
         if p.alignment.is_some() {
             continue;
         }
+        if !matches!(p.style, Some(ParagraphStyle::Heading(_))) {
+            continue;
+        }
 
-        // Collect heading text from runs
         let heading_text = p.text_content();
         if heading_text.is_empty() {
             continue;
         }
 
-        // Find the first run's text in the paged items
         let first_run_text = p.text_runs().next().map_or("", |r| r.text.as_str());
         if first_run_text.is_empty() {
             continue;
         }
 
-        // Find all paged items that match the heading text.
-        // We look for the first run text to identify the heading's rendered position.
-        let matching: Vec<&PagedTextItem> = paged_items
+        let heading_items: Vec<&PagedRunStyle> = paged_styles
             .iter()
             .filter(|item| {
-                item.text.contains(first_run_text) || first_run_text.contains(&item.text)
+                heading_text.contains(&item.text)
+                    || item.text.contains(first_run_text)
+                    || first_run_text.contains(item.text.as_str())
             })
-            .collect();
-
-        if matching.is_empty() {
-            continue;
-        }
-
-        // Use the first match to determine alignment.
-        // For a heading that might span multiple text items, find all items
-        // whose text is a substring of the heading text.
-        let heading_items: Vec<&PagedTextItem> = paged_items
-            .iter()
-            .filter(|item| heading_text.contains(&item.text))
             .collect();
 
         if heading_items.is_empty() {
             continue;
         }
 
-        // Compute the bounding box of the heading text
         let min_x = heading_items
             .iter()
             .map(|i| i.x)
@@ -1301,189 +1892,12 @@ pub fn apply_heading_alignment_from_paged(
 
         let text_center = f64::midpoint(min_x, max_x);
         let page_center = page_width / 2.0;
-
-        // Determine alignment based on text position relative to page
-        // Use a tolerance of 5% of page width
         let tolerance = page_width * 0.05;
 
         if (text_center - page_center).abs() < tolerance {
             p.alignment = Some(Alignment::Center);
         } else if min_x > page_center {
             p.alignment = Some(Alignment::Right);
-        }
-        // Left alignment is the default, no need to set it
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Text color detection from PagedDocument
-// ---------------------------------------------------------------------------
-
-/// A text item from the paged output with color info.
-struct PagedColorItem {
-    text: String,
-    /// Hex color string (6 uppercase hex digits, e.g. "FF0000"), or None if black.
-    color_hex: Option<String>,
-    /// Source spans from glyphs — used for precise matching.
-    spans: Vec<typst_syntax::Span>,
-}
-
-/// Collect text items with their fill color from the paged output.
-fn collect_text_colors(paged: &PagedDocument) -> Vec<PagedColorItem> {
-    let mut items = Vec::new();
-    for page in &paged.pages {
-        collect_text_colors_from_frame(&page.frame, &mut items);
-    }
-    items
-}
-
-fn collect_text_colors_from_frame(frame: &Frame, items: &mut Vec<PagedColorItem>) {
-    for (_, item) in frame.items() {
-        match item {
-            FrameItem::Text(text_item) => {
-                let text = text_item.text.to_string();
-                if text.is_empty() {
-                    continue;
-                }
-                let color_hex = extract_non_black_color(&text_item.fill);
-                let spans: Vec<typst_syntax::Span> =
-                    text_item.glyphs.iter().map(|g| g.span.0).collect();
-                items.push(PagedColorItem {
-                    text,
-                    color_hex,
-                    spans,
-                });
-            }
-            FrameItem::Group(group) => {
-                collect_text_colors_from_frame(&group.frame, items);
-            }
-            _ => {}
-        }
-    }
-}
-
-/// Extract a hex color string from a Paint if it is not black.
-///
-/// Returns `Some("FF0000")` for red, `None` for black or near-black.
-fn extract_non_black_color(paint: &typst_library::visualize::Paint) -> Option<String> {
-    let typst_library::visualize::Paint::Solid(color) = paint else {
-        return None;
-    };
-    let hex = color.to_hex();
-    let hex_str = hex.as_str();
-    // to_hex() returns e.g. "#ff0000" or "#ff000080" (with alpha)
-    // Strip the '#' prefix
-    let hex_digits = hex_str.strip_prefix('#').unwrap_or(hex_str);
-    // Check if it's black (000000) — skip those
-    if hex_digits.starts_with("000000") {
-        return None;
-    }
-    // Return the first 6 hex digits (RGB) in uppercase for Word compatibility
-    let rgb = &hex_digits[..6.min(hex_digits.len())];
-    Some(rgb.to_uppercase())
-}
-
-/// Apply text colors from the `PagedDocument` to runs in the document model.
-///
-/// For each run in the document, finds matching text in the paged output and
-/// applies the detected color if it is not black.
-pub fn apply_text_colors_from_paged(
-    paged: &PagedDocument,
-    doc: &mut typort_ooxml::document::Document,
-) {
-    let paged_colors = collect_text_colors(paged);
-    if paged_colors.is_empty() {
-        return;
-    }
-
-    // Build a Span → color lookup for precise matching
-    let mut span_colors: HashMap<typst_syntax::Span, String> = HashMap::new();
-    // Also keep text-based fallback for runs without spans
-    let mut text_colors: HashMap<String, String> = HashMap::new();
-
-    for item in &paged_colors {
-        if let Some(color) = &item.color_hex {
-            for &span in &item.spans {
-                if !span.is_detached() {
-                    span_colors.insert(span, color.clone());
-                }
-            }
-            text_colors.insert(item.text.clone(), color.clone());
-        }
-    }
-
-    if span_colors.is_empty() && text_colors.is_empty() {
-        return;
-    }
-
-    apply_colors_to_elements(&mut doc.body.elements, &span_colors, &text_colors);
-
-    for footnote in &mut doc.footnotes {
-        for run in &mut footnote.content {
-            let matched = run
-                .span
-                .and_then(|s| span_colors.get(&s))
-                .or_else(|| text_colors.get(run.text.as_str()));
-            if let Some(color) = matched {
-                run.color = Some(color.clone());
-            }
-        }
-    }
-}
-
-fn apply_colors_to_elements(
-    elements: &mut [typort_ooxml::document::BlockElement],
-    span_colors: &HashMap<typst_syntax::Span, String>,
-    text_colors: &HashMap<String, String>,
-) {
-    for element in elements.iter_mut() {
-        match element {
-            typort_ooxml::document::BlockElement::Paragraph(p) => {
-                apply_colors_to_paragraph(p, span_colors, text_colors);
-            }
-            typort_ooxml::document::BlockElement::Table(t) => {
-                for row in &mut t.rows {
-                    for cell in &mut row.cells {
-                        for para in &mut cell.paragraphs {
-                            apply_colors_to_paragraph(para, span_colors, text_colors);
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn apply_color_to_run(
-    run: &mut Run,
-    span_colors: &HashMap<typst_syntax::Span, String>,
-    text_colors: &HashMap<String, String>,
-) {
-    let matched = run
-        .span
-        .and_then(|s| span_colors.get(&s))
-        .or_else(|| text_colors.get(&run.text));
-    if let Some(color) = matched {
-        run.color = Some(color.clone());
-    }
-}
-
-fn apply_colors_to_paragraph(
-    para: &mut Paragraph,
-    span_colors: &HashMap<typst_syntax::Span, String>,
-    text_colors: &HashMap<String, String>,
-) {
-    for inline in &mut para.inlines {
-        match inline {
-            typort_ooxml::document::InlineElement::Text(run) => {
-                apply_color_to_run(run, span_colors, text_colors);
-            }
-            typort_ooxml::document::InlineElement::Hyperlink { runs, .. } => {
-                for run in runs {
-                    apply_color_to_run(run, span_colors, text_colors);
-                }
-            }
-            _ => {}
         }
     }
 }
@@ -1611,5 +2025,31 @@ mod tests {
         let v1 = page_number_value("a", &PageNumberFormat::LowerLetter);
         let v2 = page_number_value("b", &PageNumberFormat::LowerLetter);
         assert_eq!(v2, v1 + 1);
+    }
+
+    #[test]
+    fn source_ast_extracts_text_size_and_par_spacing() {
+        let source = r#"#set text(font: "Linux Libertine", size: 10.5pt)"#;
+        let ovr = extract_source_style_overrides(source);
+        assert_eq!(ovr.text_size_half_pt, Some(21));
+        assert_eq!(ovr.text_font.as_deref(), Some(&["Linux Libertine".to_string()][..]));
+    }
+
+    #[test]
+    fn source_ast_extracts_par_settings() {
+        let source = r#"#set par(first-line-indent: 2em, spacing: 1.5em, justify: true)"#;
+        let ovr = extract_source_style_overrides(source);
+        assert!(ovr.first_line_indent_twips.unwrap() > 0);
+        assert!(ovr.par_spacing_twips.unwrap() > 0);
+        assert_eq!(ovr.justify, Some(true));
+    }
+
+    #[test]
+    fn source_ast_extracts_page_margin() {
+        let source = r#"#set page(margin: 2cm)"#;
+        let ovr = extract_source_style_overrides(source);
+        let expected = (2.0_f64 * 72.0 / 2.54 * 20.0).round() as u32;
+        assert_eq!(ovr.margin_top, Some(expected));
+        assert_eq!(ovr.margin_left, Some(expected));
     }
 }

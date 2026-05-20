@@ -60,16 +60,21 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
 
     let mut doc = Document::new();
 
-    // 3. Extract page settings and document style from PagedDocument
+    // 3. Extract page settings and document style from PagedDocument (heuristic)
     if let Some(paged) = &paged_doc {
         doc.style = page::extract_document_style(paged);
         page::extract_page_settings(paged, &mut doc.page_settings);
 
-        // 3a. Detect columns from page layout
+        // 3a. Detect columns from page layout (heuristic fallback)
         if let Some(cols) = page::detect_columns(paged) {
             doc.page_settings.columns = Some(cols);
         }
     }
+
+    // 3b. Override with authoritative values from source AST
+    let source_overrides =
+        page::extract_source_style_overrides(world.main_source().text());
+    apply_source_overrides(&source_overrides, &mut doc);
 
     // 4. First pass: extract footnote content from <section role="doc-endnotes">
     let body = find_body(&html_doc.root).unwrap_or(&html_doc.root);
@@ -137,14 +142,10 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
     // 12. Post-processing: suppress indent after headings, bibliography hanging indent
     apply_paragraph_formatting(&mut doc);
 
-    // 12a. Post-processing: detect heading alignment from PagedDocument
+    // 12a. Post-processing: apply per-run styles (color, font, size, bold,
+    //       italic) and heading alignment from PagedDocument
     if let Some(paged) = &paged_doc {
-        page::apply_heading_alignment_from_paged(paged, &mut doc);
-    }
-
-    // 12b. Post-processing: detect text colors from PagedDocument
-    if let Some(paged) = &paged_doc {
-        page::apply_text_colors_from_paged(paged, &mut doc);
+        page::apply_styles_from_paged(paged, &mut doc);
     }
 
     // 12c. Post-processing: detect small caps from source text
@@ -164,6 +165,94 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
     }
 
     Ok(doc)
+}
+
+/// Apply authoritative values from source AST, overriding heuristic guesses.
+fn apply_source_overrides(
+    ovr: &page::SourceStyleOverrides,
+    doc: &mut Document,
+) {
+    // Page margins
+    if let Some(v) = ovr.margin_top { doc.page_settings.margin_top = v; }
+    if let Some(v) = ovr.margin_bottom { doc.page_settings.margin_bottom = v; }
+    if let Some(v) = ovr.margin_left { doc.page_settings.margin_left = v; }
+    if let Some(v) = ovr.margin_right { doc.page_settings.margin_right = v; }
+
+    // Columns
+    if let Some(cols) = ovr.columns {
+        doc.page_settings.columns = Some(cols);
+    }
+
+    // Body text font
+    if let Some(fonts) = &ovr.text_font
+        && let Some(f) = fonts.first()
+    {
+        doc.style.body_font_ascii.clone_from(f);
+        doc.style.body_font_east_asia.clone_from(f);
+    }
+
+    // Body text size
+    if let Some(sz) = ovr.text_size_half_pt {
+        doc.style.body_size_half_pt = sz;
+    }
+
+    // First-line indent (Typst default: 0pt)
+    doc.style.first_line_indent_twips = ovr.first_line_indent_twips.unwrap_or(0);
+
+    // Body paragraph spacing: source AST #set par(spacing: ...) if present,
+    // otherwise Typst's documented default of 1.2em × body_size.
+    let body_pt = f64::from(doc.style.body_size_half_pt) / 2.0;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let default_par_spacing = (1.2 * body_pt * 20.0).round() as u32;
+    let par_spacing = ovr.par_spacing_twips.unwrap_or(default_par_spacing);
+    doc.style.body_spacing_before = par_spacing;
+    doc.style.body_spacing_after = par_spacing;
+
+    // Line spacing: source AST #set par(leading: ...) if present,
+    // otherwise Typst's documented default of 0.65em.
+    {
+        let body_pt = f64::from(doc.style.body_size_half_pt) / 2.0;
+        let leading_pt = if let Some(leading_twips) = ovr.par_leading_twips {
+            f64::from(leading_twips) / 20.0
+        } else {
+            0.65 * body_pt
+        };
+        let line_height_pt = body_pt + leading_pt;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let spacing = (line_height_pt / body_pt * 240.0).round() as u32;
+        doc.style.line_spacing = spacing;
+    }
+
+    // Paragraph justification
+    if let Some(justify) = ovr.justify {
+        doc.style.body_alignment = if justify {
+            "both".to_string()
+        } else {
+            "left".to_string()
+        };
+    }
+
+    // Heading spacing: compute from Typst's documented defaults.
+    // Typst heading above/below are relative to the heading's own font size:
+    //   scale = [1.4, 1.2, 1.0, 1.0, 1.0] for levels 1-5
+    //   above = (if level==1 { 1.8 } else { 1.44 }) / scale  (in em of heading size)
+    //   below = 0.75 / scale  (in em of heading size)
+    // The heading size in pt = heading_sizes[level] / 2.
+    {
+        let scales = [1.4_f64, 1.2, 1.0, 1.0, 1.0];
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        for (level, &scale) in scales.iter().enumerate() {
+            let heading_pt = f64::from(doc.style.heading_sizes[level]) / 2.0;
+            let above_em = if level == 0 { 1.8 } else { 1.44 } / scale;
+            let below_em = 0.75 / scale;
+            let above_pt = above_em * heading_pt;
+            let below_pt = below_em * heading_pt;
+            doc.style.heading_spacing_before[level] =
+                (above_pt * 20.0).round() as u32;
+            doc.style.heading_spacing_after[level] =
+                (below_pt * 20.0).round() as u32;
+        }
+    }
 }
 
 /// Recursively walk `HtmlNode` children, dispatching on `Tag::Start` element types.
@@ -2059,10 +2148,16 @@ fn find_body(root: &HtmlElement) -> Option<&HtmlElement> {
 fn apply_paragraph_formatting(doc: &mut Document) {
     let mut after_heading = false;
     let mut in_bibliography = false;
+    let mut is_first_element = true;
 
     for element in &mut doc.body.elements {
         if let BlockElement::Paragraph(p) = element {
             if matches!(p.style, Some(ParagraphStyle::Heading(_))) {
+                // Suppress above-spacing on the first heading (Typst collapses
+                // block(above) with page margin at page start).
+                if is_first_element {
+                    p.spacing_before = Some(0);
+                }
                 // Detect bibliography section
                 let text = p.text_content();
                 let text_lower = text.to_lowercase();
@@ -2083,6 +2178,7 @@ fn apply_paragraph_formatting(doc: &mut Document) {
                     p.hanging_indent = true;
                 }
             }
+            is_first_element = false;
         }
     }
 }

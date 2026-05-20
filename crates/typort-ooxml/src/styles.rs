@@ -114,7 +114,11 @@ fn write_style_normal<W: Write>(w: &mut Writer<W>, style: &DocumentStyle) -> io:
                 ppr.create_element("w:jc")
                     .with_attribute(("w:val", style.body_alignment.as_str()))
                     .write_empty()?;
+                let sp_before = style.body_spacing_before.to_string();
+                let sp_after = style.body_spacing_after.to_string();
                 ppr.create_element("w:spacing")
+                    .with_attribute(("w:before", sp_before.as_str()))
+                    .with_attribute(("w:after", sp_after.as_str()))
                     .with_attribute(("w:line", line_spacing.as_str()))
                     .with_attribute(("w:lineRule", "auto"))
                     .write_empty()?;
@@ -157,8 +161,8 @@ fn write_style_heading<W: Write>(
                 ppr.create_element("w:outlineLvl")
                     .with_attribute(("w:val", outline_level.as_str()))
                     .write_empty()?;
-                let sp_before = style.heading_spacing_before.to_string();
-                let sp_after = style.heading_spacing_after.to_string();
+                let sp_before = style.heading_spacing_before[idx].to_string();
+                let sp_after = style.heading_spacing_after[idx].to_string();
                 ppr.create_element("w:spacing")
                     .with_attribute(("w:before", sp_before.as_str()))
                     .with_attribute(("w:after", sp_after.as_str()))

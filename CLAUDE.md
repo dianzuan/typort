@@ -41,6 +41,7 @@
 - 多行对齐公式（`AlignPointElem` + `LinebreakElem` → `m:eqArr`）
 - 水平分割线（`#line(length: 100%)` → `w:pBdr` 底部边框，从 PagedDocument Shape 检测）
 - 多页 `#align()` 内容恢复（不再仅限首页，全页面扫描缺失内容）
+- Show rule 样式恢复（字体、字号、颜色、粗体、斜体从 PagedDocument per-run 恢复）
 
 ### 未实现（按优先级）
 
