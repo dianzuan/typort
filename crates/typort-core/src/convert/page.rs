@@ -609,9 +609,13 @@ pub struct SourceStyleOverrides {
     pub text_font: Option<Vec<String>>,
     pub text_size_half_pt: Option<u32>,
     // #set par(first-line-indent: ..., leading: ..., justify: ..., spacing: ...)
+    // Values in twips for absolute units, or as em*1000 (milliem) for em units.
     pub first_line_indent_twips: Option<u32>,
+    pub first_line_indent_em: Option<f64>,
     pub par_leading_twips: Option<u32>,
+    pub par_leading_em: Option<f64>,
     pub par_spacing_twips: Option<u32>,
+    pub par_spacing_em: Option<f64>,
     pub justify: Option<bool>,
 }
 
@@ -764,15 +768,18 @@ fn parse_text_args(
             typst_syntax::ast::Arg::Named(named) => {
                 match named.name().as_str() {
                     "font" => {
-                        ovr.text_font = extract_font_list(named.expr());
+                        if ovr.text_font.is_none() {
+                            ovr.text_font = extract_font_list(named.expr());
+                        }
                     }
                     "size" => {
-                        if let typst_syntax::ast::Expr::Numeric(n) = named.expr() {
-                            let half_pt = numeric_to_half_pt(n);
-                            if half_pt > 0 {
-                                ovr.text_size_half_pt = Some(half_pt);
+                        if ovr.text_size_half_pt.is_none()
+                            && let typst_syntax::ast::Expr::Numeric(n) = named.expr() {
+                                let half_pt = numeric_to_half_pt(n);
+                                if half_pt > 0 {
+                                    ovr.text_size_half_pt = Some(half_pt);
+                                }
                             }
-                        }
                     }
                     _ => {}
                 }
@@ -798,24 +805,43 @@ fn parse_par_args(
         };
         match named.name().as_str() {
             "first-line-indent" => {
-                if let typst_syntax::ast::Expr::Numeric(n) = named.expr() {
-                    ovr.first_line_indent_twips = Some(numeric_to_twips(n));
-                }
+                if ovr.first_line_indent_twips.is_none() && ovr.first_line_indent_em.is_none()
+                    && let typst_syntax::ast::Expr::Numeric(n) = named.expr() {
+                        let (value, unit) = n.get();
+                        if unit == typst_syntax::ast::Unit::Em {
+                            ovr.first_line_indent_em = Some(value);
+                        } else {
+                            ovr.first_line_indent_twips = Some(numeric_to_twips(n));
+                        }
+                    }
             }
             "leading" => {
-                if let typst_syntax::ast::Expr::Numeric(n) = named.expr() {
-                    ovr.par_leading_twips = Some(numeric_to_twips(n));
-                }
+                if ovr.par_leading_twips.is_none() && ovr.par_leading_em.is_none()
+                    && let typst_syntax::ast::Expr::Numeric(n) = named.expr() {
+                        let (value, unit) = n.get();
+                        if unit == typst_syntax::ast::Unit::Em {
+                            ovr.par_leading_em = Some(value);
+                        } else {
+                            ovr.par_leading_twips = Some(numeric_to_twips(n));
+                        }
+                    }
             }
             "spacing" => {
-                if let typst_syntax::ast::Expr::Numeric(n) = named.expr() {
-                    ovr.par_spacing_twips = Some(numeric_to_twips(n));
-                }
+                if ovr.par_spacing_twips.is_none() && ovr.par_spacing_em.is_none()
+                    && let typst_syntax::ast::Expr::Numeric(n) = named.expr() {
+                        let (value, unit) = n.get();
+                        if unit == typst_syntax::ast::Unit::Em {
+                            ovr.par_spacing_em = Some(value);
+                        } else {
+                            ovr.par_spacing_twips = Some(numeric_to_twips(n));
+                        }
+                    }
             }
             "justify" => {
-                if let typst_syntax::ast::Expr::Bool(b) = named.expr() {
-                    ovr.justify = Some(b.get());
-                }
+                if ovr.justify.is_none()
+                    && let typst_syntax::ast::Expr::Bool(b) = named.expr() {
+                        ovr.justify = Some(b.get());
+                    }
             }
             _ => {}
         }
@@ -1982,8 +2008,8 @@ mod tests {
     fn source_ast_extracts_par_settings() {
         let source = r#"#set par(first-line-indent: 2em, spacing: 1.5em, justify: true)"#;
         let ovr = extract_source_style_overrides(source);
-        assert!(ovr.first_line_indent_twips.unwrap() > 0);
-        assert!(ovr.par_spacing_twips.unwrap() > 0);
+        assert_eq!(ovr.first_line_indent_em, Some(2.0));
+        assert_eq!(ovr.par_spacing_em, Some(1.5));
         assert_eq!(ovr.justify, Some(true));
     }
 
@@ -1994,5 +2020,23 @@ mod tests {
         let expected = (2.0_f64 * 72.0 / 2.54 * 20.0).round() as u32;
         assert_eq!(ovr.margin_top, Some(expected));
         assert_eq!(ovr.margin_left, Some(expected));
+    }
+
+    #[test]
+    fn source_ast_complex_paper_pattern() {
+        let source = r#"#set par(leading: 1.5em, first-line-indent: 2em)"#;
+        let ovr = extract_source_style_overrides(source);
+        assert!(
+            ovr.first_line_indent_em.is_some(),
+            "first-line-indent should be detected, got None"
+        );
+        assert!(
+            ovr.first_line_indent_em.unwrap() > 0.0,
+            "first-line-indent should be > 0"
+        );
+        assert!(
+            ovr.par_leading_em.is_some(),
+            "leading should be detected"
+        );
     }
 }
