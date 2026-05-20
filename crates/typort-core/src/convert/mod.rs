@@ -232,7 +232,10 @@ fn apply_source_overrides(
         doc.style.body_spacing_after = par_spacing;
     }
 
-    // Line spacing: source AST or Typst default 0.65em
+    // Line spacing: compute as Word "auto" multiplier (240 = 1.0x single line).
+    // Word's "single line" includes font metrics, so this multiplier is approximate.
+    // This is the same approach Pandoc uses — accept slight inaccuracy over exact
+    // mode which can clip superscripts and tall characters.
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     {
         let leading_pt = if let Some(em) = ovr.par_leading_em {
