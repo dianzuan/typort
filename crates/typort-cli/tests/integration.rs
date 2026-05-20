@@ -587,6 +587,8 @@ fn merged_cell_emits_grid_span_and_vmerge() {
                 ],
             },
         ],
+        width_pct: None,
+        border_size: None,
     };
     doc.add_table(table);
 

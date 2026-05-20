@@ -67,8 +67,8 @@
 
 ```bash
 cargo build --workspace        # Build all crates
-cargo test --workspace         # Run all tests (163 tests)
-cargo run -p typort-cli -- input.typ -o output.docx  # Run CLI
+cargo test --workspace         # Run all tests (200 tests)
+cargo run -p typort -- input.typ -o output.docx  # Run CLI
 ```
 
 ## Architecture
@@ -88,6 +88,33 @@ Cargo workspace with 5 crates under `crates/`:
 - `quick-xml` 0.37 — XML serialization (we do NOT use docx-rs)
 - `resvg` + `tiny-skia` — SVG rasterization (SVG → PNG for embedding)
 - `zip` 2.x — .docx ZIP packaging
+
+## 转换质量验证
+
+转换正确性的标准是 **PDF 结构化对比**（Typst→PDF vs docx→PDF）：
+
+```bash
+# 单文件对比
+python3 scripts/compare-pdf.py tests/fixtures/show_rule_styles.typ
+
+# 批量对比
+python3 scripts/compare-pdf.py tests/fixtures/*.typ
+```
+
+对比脚本用 PyMuPDF 解析两个 PDF 的内部结构（文字坐标、字体、字号），输出：
+- **text coverage** — 文字保留率（100% = 无丢失）
+- **y-offset** — 平均垂直位置偏移（<10pt = GOOD, <30pt = WARN, >30pt = FAIL）
+- **missing texts** — 丢失的文字内容
+- **size mismatches** — 字号不一致的文字
+
+单元测试和集成测试验证代码正确性，但**不能替代 PDF 对比**。任何影响排版的改动都必须跑 `compare-pdf.py`。
+
+## 设计原则
+
+- **不硬编码，不猜测。** 样式值优先从源码 AST（`#set` 规则）读取，其次用 Typst 文档化默认值（如 `par(spacing: 1.2em)`、`par(leading: 0.65em)`、边距 `2.5/21 × min(w,h)`），最后才用 PagedDocument 渲染结果的启发式检测作为兜底。
+- **不对输入做假设。** 不因为"大多数中文论文用 2em 缩进"就默认 2em；不因为"标题通常居中"就硬编码居中。一切从输入文档的实际数据派生。
+- **源码 AST 解析跳过 `#show` 规则内的 `set` 规则**——`#show heading: set text(size: 18pt)` 里的 `set text` 不是全局设定。
+- **per-run 样式比较用渲染实际字体**——源码设了 `font: "Linux Libertine"` 但未安装时，渲染字体是 fallback，比较基线应该用渲染结果而非源码字体名。
 
 ## Conventions
 
