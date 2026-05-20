@@ -204,29 +204,45 @@ fn apply_source_overrides(
         doc.style.body_size_half_pt = sz;
     }
 
-    // First-line indent (Typst default: 0pt)
-    doc.style.first_line_indent_twips = ovr.first_line_indent_twips.unwrap_or(0);
-
-    // Body paragraph spacing: source AST #set par(spacing: ...) if present,
-    // otherwise Typst's documented default of 1.2em × body_size.
+    // Resolve em-based values using actual body size
     let body_pt = f64::from(doc.style.body_size_half_pt) / 2.0;
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let default_par_spacing = (1.2 * body_pt * 20.0).round() as u32;
-    let par_spacing = ovr.par_spacing_twips.unwrap_or(default_par_spacing);
-    doc.style.body_spacing_before = par_spacing;
-    doc.style.body_spacing_after = par_spacing;
 
-    // Line spacing: source AST #set par(leading: ...) if present,
-    // otherwise Typst's documented default of 0.65em.
+    // First-line indent (Typst default: 0pt)
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     {
-        let body_pt = f64::from(doc.style.body_size_half_pt) / 2.0;
-        let leading_pt = if let Some(leading_twips) = ovr.par_leading_twips {
-            f64::from(leading_twips) / 20.0
+        let indent = if let Some(em) = ovr.first_line_indent_em {
+            Some((em * body_pt * 20.0).round() as u32)
+        } else {
+            ovr.first_line_indent_twips
+        };
+        doc.style.first_line_indent_twips = indent.unwrap_or(0);
+    }
+
+    // Body paragraph spacing: source AST or Typst default 1.2em
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    {
+        let par_spacing = if let Some(em) = ovr.par_spacing_em {
+            (em * body_pt * 20.0).round() as u32
+        } else if let Some(twips) = ovr.par_spacing_twips {
+            twips
+        } else {
+            (1.2 * body_pt * 20.0).round() as u32
+        };
+        doc.style.body_spacing_before = par_spacing;
+        doc.style.body_spacing_after = par_spacing;
+    }
+
+    // Line spacing: source AST or Typst default 0.65em
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    {
+        let leading_pt = if let Some(em) = ovr.par_leading_em {
+            em * body_pt
+        } else if let Some(twips) = ovr.par_leading_twips {
+            f64::from(twips) / 20.0
         } else {
             0.65 * body_pt
         };
         let line_height_pt = body_pt + leading_pt;
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let spacing = (line_height_pt / body_pt * 240.0).round() as u32;
         doc.style.line_spacing = spacing;
     }
