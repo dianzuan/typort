@@ -7,8 +7,8 @@
 use std::collections::HashMap;
 
 use typort_ooxml::document::{
-    Alignment, DocumentStyle, FootnoteFormat, HeaderFooter, PageNumberFormat, PageSettings,
-    Paragraph, ParagraphStyle, Run, SectionBreak, SectionBreakType,
+    Alignment, DocumentStyle, FootnoteFormat, HeaderFooter, InlineElement, PageNumberFormat,
+    PageSettings, Paragraph, ParagraphStyle, Run, SectionBreak, SectionBreakType,
 };
 use typst::layout::{Frame, FrameItem, PagedDocument, Point};
 
@@ -123,12 +123,15 @@ pub fn extract_document_style(paged: &PagedDocument) -> DocumentStyle {
     }
 }
 
-fn is_cjk_char(c: char) -> bool {
+pub(crate) fn is_cjk_char(c: char) -> bool {
     matches!(c,
         '\u{4E00}'..='\u{9FFF}' | '\u{3400}'..='\u{4DBF}' |
         '\u{3000}'..='\u{303F}' | '\u{FF00}'..='\u{FFEF}' |
         '\u{AC00}'..='\u{D7AF}' | '\u{3040}'..='\u{309F}' |
-        '\u{30A0}'..='\u{30FF}'
+        '\u{30A0}'..='\u{30FF}' |
+        '\u{FE30}'..='\u{FE4F}' |
+        '\u{2E80}'..='\u{2EFF}' | '\u{2F00}'..='\u{2FDF}' |
+        '\u{20000}'..='\u{2A6DF}'
     )
 }
 
@@ -1743,8 +1746,10 @@ pub fn apply_styles_from_paged(
 
     // Apply run-level overrides to footnotes
     for footnote in &mut doc.footnotes {
-        for run in &mut footnote.content {
-            apply_override_to_run(run, &span_overrides, &text_overrides);
+        for inline in &mut footnote.content {
+            if let InlineElement::Text(run) = inline {
+                apply_override_to_run(run, &span_overrides, &text_overrides);
+            }
         }
     }
 

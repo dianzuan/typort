@@ -163,7 +163,13 @@ fn complex_paper_has_footnotes() {
     let first_fn_text: String = doc.footnotes[0]
         .content
         .iter()
-        .map(|r| r.text.as_str())
+        .filter_map(|i| {
+            if let typort_ooxml::document::InlineElement::Text(r) = i {
+                Some(r.text.as_str())
+            } else {
+                None
+            }
+        })
         .collect();
     assert!(
         first_fn_text.contains("习近平"),
@@ -1734,7 +1740,7 @@ fn nested_list_document_model_has_levels() {
         .iter()
         .filter_map(|e| {
             if let BlockElement::Paragraph(p) = e {
-                p.list_level
+                p.list_info.as_ref().map(|li| li.level)
             } else {
                 None
             }
@@ -2207,8 +2213,12 @@ fn formatted_footnote_preserves_bold_and_italic() {
         "should have at least one footnote"
     );
     let fn_content = &doc.footnotes[0].content;
-    let has_bold = fn_content.iter().any(|r| r.bold);
-    let has_italic = fn_content.iter().any(|r| r.italic);
+    let has_bold = fn_content.iter().any(|i| {
+        matches!(i, typort_ooxml::document::InlineElement::Text(r) if r.bold)
+    });
+    let has_italic = fn_content.iter().any(|i| {
+        matches!(i, typort_ooxml::document::InlineElement::Text(r) if r.italic)
+    });
     assert!(has_bold, "footnote content should have a bold run");
     assert!(has_italic, "footnote content should have an italic run");
 }
@@ -3074,5 +3084,299 @@ fn show_rule_italic_color() {
     assert!(
         doc_xml.contains(r#"<w:color w:val="0000FF"/>"#),
         "italic text should have blue color from show rule. Got:\n{doc_xml}"
+    );
+}
+
+// ── Edge case: separate numbered lists restart numbering ─────────────
+
+#[test]
+fn edge_list_restart_separate_lists_get_unique_num_ids() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/edge_list_restart.typ"))
+            .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let num_xml =
+        std::io::read_to_string(reader.by_name("word/numbering.xml").unwrap()).unwrap();
+
+    let num_ids: Vec<&str> = doc_xml
+        .match_indices("w:numId w:val=\"")
+        .map(|(pos, _)| {
+            let start = pos + 15;
+            let end = doc_xml[start..].find('"').unwrap() + start;
+            &doc_xml[start..end]
+        })
+        .collect();
+    let unique: std::collections::HashSet<&&str> = num_ids.iter().collect();
+    assert!(
+        unique.len() >= 3,
+        "3 separate lists should have at least 3 unique numIds, got {:?}",
+        num_ids
+    );
+    for id in &unique {
+        let pattern = format!("w:numId=\"{}\"", id);
+        assert!(
+            num_xml.contains(&pattern),
+            "numbering.xml should define numId {id}"
+        );
+    }
+}
+
+// ── Edge case: blockquote has non-zero left indent ───────────────────
+
+#[test]
+fn edge_blockquote_has_left_indent() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/edge_blockquote.typ"))
+            .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    assert!(
+        doc_xml.contains("w:ind w:left=\""),
+        "blockquote paragraphs should have w:ind w:left set"
+    );
+    assert!(
+        !doc_xml.contains("w:ind w:left=\"0\""),
+        "blockquote indent should not be zero"
+    );
+}
+
+// ── Edge case: math equations preserved in footnotes ─────────────────
+
+#[test]
+fn edge_math_in_footnote_preserved() {
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/edge_math_in_footnote.typ"))
+            .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let fn_xml =
+        std::io::read_to_string(reader.by_name("word/footnotes.xml").unwrap()).unwrap();
+
+    assert!(
+        fn_xml.contains("m:oMath"),
+        "footnotes.xml should contain m:oMath elements for math in footnotes"
+    );
+}
+
+// ── Edge case: super/subscript preserved in headings ─────────────────
+
+#[test]
+fn edge_super_sub_in_heading_preserved() {
+    let world = typort_core::TyportWorld::new(Path::new(
+        "../../tests/fixtures/edge_super_sub_in_heading.typ",
+    ))
+    .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    assert!(
+        doc_xml.contains("w:vertAlign w:val=\"subscript\""),
+        "heading with H₂O should have subscript vertAlign"
+    );
+    assert!(
+        doc_xml.contains("w:vertAlign w:val=\"superscript\""),
+        "heading with x² should have superscript vertAlign"
+    );
+}
+
+// ── Issue fixtures: competitor bug regression tests ─────────────────
+
+fn issue_doc_xml(fixture: &str) -> String {
+    let path = format!("../../tests/fixtures/{fixture}.typ");
+    let world = typort_core::TyportWorld::new(Path::new(&path)).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap()
+}
+
+#[test]
+fn issue_cjk_linebreak_no_spurious_spaces() {
+    let xml = issue_doc_xml("issue_cjk_linebreak");
+    assert!(
+        xml.contains("这是一段中文文本，"),
+        "first CJK text segment should be present"
+    );
+    assert!(
+        xml.contains("用来测试换行是否会"),
+        "second CJK text segment should be present"
+    );
+    // Verify no space-only text runs between consecutive CJK runs.
+    // Extract all text content in order and check no space sits between CJK chars.
+    let texts: Vec<&str> = xml
+        .split("<w:t xml:space=\"preserve\">")
+        .skip(1)
+        .filter_map(|s| s.split("</w:t>").next())
+        .collect();
+    for w in texts.windows(3) {
+        if w[1].trim().is_empty() {
+            let prev_last = w[0].chars().last().unwrap_or(' ');
+            let next_first = w[2].chars().next().unwrap_or(' ');
+            let prev_cjk = ('\u{4E00}'..='\u{9FFF}').contains(&prev_last)
+                || ('\u{3000}'..='\u{303F}').contains(&prev_last)
+                || ('\u{FF00}'..='\u{FFEF}').contains(&prev_last);
+            let next_cjk = ('\u{4E00}'..='\u{9FFF}').contains(&next_first)
+                || ('\u{3000}'..='\u{303F}').contains(&next_first)
+                || ('\u{FF00}'..='\u{FFEF}').contains(&next_first);
+            assert!(
+                !(prev_cjk && next_cjk),
+                "spurious space between CJK chars: '{}' [space] '{}'",
+                w[0],
+                w[2]
+            );
+        }
+    }
+}
+
+#[test]
+fn issue_context_equation_no_duplicate() {
+    let xml = issue_doc_xml("issue_context_equation");
+    assert!(
+        xml.contains("The value is"),
+        "context block text should be present"
+    );
+    assert!(
+        xml.contains("<m:oMath>"),
+        "inline equation should be present as OMML"
+    );
+    let p_count = xml.matches("<w:p>").count() + xml.matches("<w:p ").count();
+    assert_eq!(
+        p_count, 2,
+        "should have exactly 2 paragraphs (context content + normal text), got {p_count}"
+    );
+}
+
+#[test]
+fn issue_figure_caption_present() {
+    let xml = issue_doc_xml("issue_figure_caption");
+    assert!(
+        xml.contains("Demographics of participants"),
+        "first figure caption text should be present"
+    );
+    assert!(
+        xml.contains("Fruit prices at the market"),
+        "second figure caption text should be present"
+    );
+    assert!(
+        xml.contains("Table") && xml.contains("1"),
+        "caption should include 'Table 1' numbering"
+    );
+}
+
+#[test]
+fn issue_inline_math_spacing_preserved() {
+    let xml = issue_doc_xml("issue_inline_math_spacing");
+    assert!(
+        xml.contains("<m:oMath>"),
+        "inline math should produce OMML elements"
+    );
+    assert!(
+        xml.contains("Let"),
+        "text 'Let' should be present"
+    );
+    assert!(
+        xml.contains("be a variable"),
+        "text 'be a variable' should be present"
+    );
+    let p_count = xml.matches("<w:p>").count() + xml.matches("<w:p ").count();
+    assert_eq!(
+        p_count, 3,
+        "should have exactly 3 paragraphs (one per sentence), got {p_count}"
+    );
+}
+
+#[test]
+fn issue_mat_delimiter_omml() {
+    let xml = issue_doc_xml("issue_mat_delimiter");
+    assert!(
+        xml.contains("<m:begChr m:val=\"[\""),
+        "matrix with delim '[' should have begChr='['"
+    );
+    assert!(
+        xml.contains("<m:endChr m:val=\"]\""),
+        "matrix with delim '[' should have endChr=']'"
+    );
+    assert!(
+        xml.contains("<m:m>"),
+        "matrices should produce m:m elements"
+    );
+}
+
+#[test]
+fn issue_rotate_content_recovered() {
+    let xml = issue_doc_xml("issue_rotate_content");
+    assert!(
+        xml.contains("This text is normal."),
+        "normal text before rotate should be present"
+    );
+    assert!(
+        xml.contains("This text has zero rotation."),
+        "rotated content should be recovered from PagedDocument"
+    );
+    assert!(
+        xml.contains("This text follows rotated content."),
+        "normal text after rotate should be present"
+    );
+}
+
+#[test]
+fn issue_show_rule_heading_styles() {
+    let xml = issue_doc_xml("issue_show_rule_heading");
+    assert!(
+        xml.contains("Main Title"),
+        "heading 1 text should be present"
+    );
+    assert!(
+        xml.contains("Blue Subtitle"),
+        "heading 2 text should be present"
+    );
+    assert!(
+        xml.contains("w:val=\"36\"") || xml.contains("w:val=\"35\""),
+        "heading 1 should have ~18pt size (36 half-pts)"
+    );
+    assert!(
+        xml.contains("Heading1"),
+        "heading 1 should use Heading1 style"
+    );
+}
+
+#[test]
+fn issue_smart_quotes_preserved() {
+    let xml = issue_doc_xml("issue_smart_quotes");
+    assert!(
+        xml.contains("\u{201c}") || xml.contains("\u{201d}"),
+        "smart double quotes should be preserved"
+    );
+    assert!(
+        xml.contains("\u{2018}") || xml.contains("\u{2019}"),
+        "smart single quotes should be preserved"
+    );
+    assert!(
+        xml.contains("Hello, world!"),
+        "quoted text content should be present"
     );
 }

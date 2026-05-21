@@ -13,7 +13,7 @@ use std::num::NonZeroUsize;
 
 use typort_ooxml::document::{
     Alignment, BlockElement, CellContent, Document, FootnoteFormat, ImageData, ImageFormat,
-    InlineElement, Paragraph, ParagraphStyle, Run, Table, TableCell, TableRow, VMerge,
+    InlineElement, ListInfo, Paragraph, ParagraphStyle, Run, Table, TableCell, TableRow, VMerge,
 };
 use typst::foundations::StyleChain;
 use typst::introspection::{Location, Tag};
@@ -675,6 +675,7 @@ fn handle_par(
         bookmarks,
     );
     if !para.inlines.is_empty() {
+        strip_cjk_spaces(&mut para);
         doc.add_paragraph(para);
     }
 }
@@ -748,6 +749,7 @@ fn handle_par_with_inline_equations(
                 .introspector
                 .query_first(&typst::foundations::Selector::Location(loc))
             {
+                para.push_run(Run::new(" "));
                 let omml = typort_math::equation_to_omml(&c);
                 para.add_math(omml);
             }
@@ -763,6 +765,7 @@ fn handle_par_with_inline_equations(
         if let HtmlNode::Tag(pt) = &children[cursor] {
             let p_end = find_tag_end(children, cursor, pt.location());
             let p_inner = &children[cursor + 1..p_end];
+            para.push_run(Run::new(" "));
             collect_par_inlines(
                 p_inner,
                 html_doc,
@@ -781,11 +784,58 @@ fn handle_par_with_inline_equations(
     }
 
     if !para.inlines.is_empty() {
+        strip_cjk_spaces(&mut para);
         doc.add_paragraph(para);
     }
 
     // Return index of last consumed node (cursor - 1 since the outer loop does i += 1)
     cursor.saturating_sub(1)
+}
+
+fn strip_cjk_spaces(para: &mut Paragraph) {
+    let mut remove_indices = Vec::new();
+    for i in 1..para.inlines.len().saturating_sub(1) {
+        let InlineElement::Text(run) = &para.inlines[i] else {
+            continue;
+        };
+        if run.text.trim() != "" {
+            continue;
+        }
+        let prev_ends_cjk = match &para.inlines[i - 1] {
+            InlineElement::Text(r) => r.text.chars().last().is_some_and(page::is_cjk_char),
+            _ => false,
+        };
+        let next_starts_cjk = match &para.inlines[i + 1] {
+            InlineElement::Text(r) => r.text.chars().next().is_some_and(page::is_cjk_char),
+            _ => false,
+        };
+        if prev_ends_cjk && next_starts_cjk {
+            remove_indices.push(i);
+        }
+    }
+    for idx in remove_indices.into_iter().rev() {
+        para.inlines.remove(idx);
+    }
+}
+
+fn strip_cjk_spaces_str(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == ' '
+            && i > 0
+            && i + 1 < chars.len()
+            && page::is_cjk_char(chars[i - 1])
+            && page::is_cjk_char(chars[i + 1])
+        {
+            i += 1;
+            continue;
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
 }
 
 /// Check if position `idx` in `children` is a `Tag::Start("equation")` for an
@@ -1028,82 +1078,13 @@ fn handle_inline_tag(
             para.add_page_break();
             find_tag_end(children, i, tag.location())
         }
-        "super" => {
+        "super" | "sub" | "raw" | "underline" | "strike"
+        | "highlight" | "overline" | "smallcaps" => {
             let end = find_tag_end(children, i, tag.location());
             let text = collect_text_from_nodes(&children[i + 1..end]);
             if !text.is_empty() {
                 let mut run = Run::new(&text);
-                run.superscript = true;
-                para.push_run(run);
-            }
-            end
-        }
-        "sub" => {
-            let end = find_tag_end(children, i, tag.location());
-            let text = collect_text_from_nodes(&children[i + 1..end]);
-            if !text.is_empty() {
-                let mut run = Run::new(&text);
-                run.subscript = true;
-                para.push_run(run);
-            }
-            end
-        }
-        "raw" => {
-            let end = find_tag_end(children, i, tag.location());
-            let text = collect_text_from_nodes(&children[i + 1..end]);
-            if !text.is_empty() {
-                let mut run = Run::new(&text);
-                run.monospace = true;
-                para.push_run(run);
-            }
-            end
-        }
-        "underline" => {
-            let end = find_tag_end(children, i, tag.location());
-            let text = collect_text_from_nodes(&children[i + 1..end]);
-            if !text.is_empty() {
-                let mut run = Run::new(&text);
-                run.underline = true;
-                para.push_run(run);
-            }
-            end
-        }
-        "strike" => {
-            let end = find_tag_end(children, i, tag.location());
-            let text = collect_text_from_nodes(&children[i + 1..end]);
-            if !text.is_empty() {
-                let mut run = Run::new(&text);
-                run.strikethrough = true;
-                para.push_run(run);
-            }
-            end
-        }
-        "highlight" => {
-            let end = find_tag_end(children, i, tag.location());
-            let text = collect_text_from_nodes(&children[i + 1..end]);
-            if !text.is_empty() {
-                let mut run = Run::new(&text);
-                run.highlight = true;
-                para.push_run(run);
-            }
-            end
-        }
-        "overline" => {
-            let end = find_tag_end(children, i, tag.location());
-            let text = collect_text_from_nodes(&children[i + 1..end]);
-            if !text.is_empty() {
-                let mut run = Run::new(&text);
-                run.underline = true; // Word has no overline; underline is the closest
-                para.push_run(run);
-            }
-            end
-        }
-        "smallcaps" => {
-            let end = find_tag_end(children, i, tag.location());
-            let text = collect_text_from_nodes(&children[i + 1..end]);
-            if !text.is_empty() {
-                let mut run = Run::new(&text);
-                run.smallcaps = true;
+                apply_inline_format(elem_name, &mut run);
                 para.push_run(run);
             }
             end
@@ -1112,6 +1093,21 @@ fn handle_inline_tag(
             // Skip unknown or non-inline tags
             find_tag_end(children, i, tag.location())
         }
+    }
+}
+
+/// Apply the appropriate formatting flag to a `Run` based on the inline tag name.
+fn apply_inline_format(tag_name: &str, run: &mut Run) {
+    match tag_name {
+        "super" => run.superscript = true,
+        "sub" => run.subscript = true,
+        "raw" => run.monospace = true,
+        "underline" => run.underline = true,
+        "strike" => run.strikethrough = true,
+        "highlight" => run.highlight_color = Some("yellow".into()),
+        "overline" => run.underline = true, // Word has no overline; underline is the closest
+        "smallcaps" => run.smallcaps = true,
+        _ => {}
     }
 }
 
@@ -1853,18 +1849,17 @@ fn convert_html_table_to_model(elem: &HtmlElement, html_doc: &HtmlDocument) -> O
 
 /// Convert an HTML `<ol>` or `<ul>` element into list paragraphs.
 fn convert_html_list(elem: &HtmlElement, doc: &mut Document, ordered: bool) {
-    convert_html_list_at_level(elem, doc, ordered, 0);
+    let list_id = doc.allocate_list_id(ordered);
+    convert_html_list_at_level(elem, doc, 0, list_id);
 }
 
-fn convert_html_list_at_level(elem: &HtmlElement, doc: &mut Document, ordered: bool, level: u32) {
-    let list_id = if ordered { 1 } else { 2 };
+fn convert_html_list_at_level(elem: &HtmlElement, doc: &mut Document, level: u32, list_id: u32) {
     for child in &elem.children {
         if let HtmlNode::Element(li) = child
             && tag_name(li) == "li"
         {
             let mut para = Paragraph::new();
-            para.list_id = Some(list_id);
-            para.list_level = Some(level);
+            para.list_info = Some(ListInfo { id: list_id, level });
             // Collect only direct inline content, skipping nested sub-lists
             let non_list_children: Vec<&HtmlNode> = li
                 .children
@@ -1901,10 +1896,8 @@ fn convert_html_list_at_level(elem: &HtmlElement, doc: &mut Document, ordered: b
             for li_child in &li.children {
                 if let HtmlNode::Element(sub) = li_child {
                     let sub_tag = tag_name(sub);
-                    if sub_tag == "ul" {
-                        convert_html_list_at_level(sub, doc, false, level + 1);
-                    } else if sub_tag == "ol" {
-                        convert_html_list_at_level(sub, doc, true, level + 1);
+                    if sub_tag == "ul" || sub_tag == "ol" {
+                        convert_html_list_at_level(sub, doc, level + 1, list_id);
                     }
                 }
             }
@@ -1946,10 +1939,11 @@ fn convert_blockquote(
         bookmarks,
         page_breaks,
     );
-    // Apply left indent to all paragraphs added by the blockquote
+    // Typst quote block default pad = 1em per side
+    let indent_twips = u32::from(doc.style.body_size_half_pt) * 10;
     for element in &mut doc.body.elements[start_idx..] {
         if let BlockElement::Paragraph(para) = element {
-            para.left_indent = Some(doc.style.first_line_indent_twips);
+            para.left_indent = Some(indent_twips);
             para.suppress_indent = true;
         }
     }
@@ -2537,7 +2531,7 @@ fn get_text_content(children: &[HtmlNode]) -> Option<String> {
 }
 
 /// Extract footnote content from the <section role="doc-endnotes"> at the end of body.
-fn extract_footnote_contents(children: &[HtmlNode]) -> Vec<Vec<Run>> {
+fn extract_footnote_contents(children: &[HtmlNode]) -> Vec<Vec<InlineElement>> {
     let mut footnotes = Vec::new();
 
     for child in children {
@@ -2559,28 +2553,23 @@ fn extract_footnote_contents(children: &[HtmlNode]) -> Vec<Vec<Run>> {
 }
 
 /// Extract footnote content from <li> elements inside the <ol>.
-fn extract_footnotes_from_ol(children: &[HtmlNode], footnotes: &mut Vec<Vec<Run>>) {
+fn extract_footnotes_from_ol(children: &[HtmlNode], footnotes: &mut Vec<Vec<InlineElement>>) {
     for child in children {
         if let HtmlNode::Element(li) = child
             && tag_name(li) == "li"
         {
-            let mut runs = Vec::new();
-            collect_footnote_text(&li.children, &mut runs);
-            footnotes.push(runs);
+            let mut inlines = Vec::new();
+            collect_footnote_inlines(&li.children, &mut inlines, false, false, false);
+            footnotes.push(inlines);
         }
     }
 }
 
-/// Collect text from footnote <li> content, preserving inline formatting and
-/// skipping the backlink anchor.
-fn collect_footnote_text(children: &[HtmlNode], runs: &mut Vec<Run>) {
-    collect_footnote_text_formatted(children, runs, false, false, false);
-}
-
-/// Inner helper that tracks inherited bold/italic/monospace state.
-fn collect_footnote_text_formatted(
+/// Collect inline elements from footnote content, preserving formatting
+/// and including math equations. Skips backlink anchors.
+fn collect_footnote_inlines(
     children: &[HtmlNode],
-    runs: &mut Vec<Run>,
+    inlines: &mut Vec<InlineElement>,
     bold: bool,
     italic: bool,
     monospace: bool,
@@ -2593,7 +2582,7 @@ fn collect_footnote_text_formatted(
                     run.bold = bold;
                     run.italic = italic;
                     run.monospace = monospace;
-                    runs.push(run);
+                    inlines.push(InlineElement::Text(run));
                 }
             }
             HtmlNode::Element(elem) => {
@@ -2604,13 +2593,22 @@ fn collect_footnote_text_formatted(
                 let new_bold = bold || tag == "strong" || tag == "b";
                 let new_italic = italic || tag == "em" || tag == "i";
                 let new_monospace = monospace || tag == "code";
-                collect_footnote_text_formatted(
+                collect_footnote_inlines(
                     &elem.children,
-                    runs,
+                    inlines,
                     new_bold,
                     new_italic,
                     new_monospace,
                 );
+            }
+            HtmlNode::Tag(Tag::Start(content, _)) => {
+                if content.elem().name() == "equation" {
+                    let omml = typort_math::equation_to_omml(content);
+                    inlines.push(InlineElement::Math {
+                        omml_xml: omml,
+                        equation_number: None,
+                    });
+                }
             }
             HtmlNode::Tag(_) | HtmlNode::Frame(_) => {}
         }
@@ -2777,6 +2775,8 @@ struct FrameLine {
     page_idx: usize,
     /// Y-position in pt from top of the page.
     y_pt: f64,
+    /// True if all text items in this line use a math font.
+    all_math_font: bool,
 }
 
 /// A group of runs that belong to the same horizontal cluster on a line.
@@ -2793,6 +2793,7 @@ struct FrameTextItem {
     x: f64,
     text: String,
     size_pt: f64,
+    font_name: String,
 }
 
 /// Recover content that exists in the `PagedDocument` but was lost from the `HtmlDocument` DOM.
@@ -2808,24 +2809,53 @@ fn recover_missing_content(paged: &PagedDocument, doc: &mut Document) {
     }
 
     let title_line_count = count_title_lines(&all_page_lines, doc);
-    let body_start_line = find_body_start_line(&all_page_lines, doc);
     let full_doc_text = extract_doc_text(doc);
 
-    // Collect header/footer text to exclude from recovery
-    let header_footer_text = extract_header_footer_text(doc);
+    // Collect header/footer/footnote text to exclude from recovery
+    let mut exclude_text = extract_header_footer_text(doc);
+    for footnote in &doc.footnotes {
+        for inline in &footnote.content {
+            if let InlineElement::Text(run) = inline {
+                exclude_text.push_str(&run.text);
+            }
+        }
+    }
 
     let mut missing = Vec::new();
     for (i, line) in all_page_lines.iter().enumerate() {
-        if i < title_line_count || i >= body_start_line {
+        if i < title_line_count {
             continue;
         }
         if line.text.chars().count() < 2 {
             continue;
         }
-        // Skip text that's already in the body or in headers/footers
-        if !full_doc_text.contains(&line.text) && !header_footer_text.contains(&line.text) {
-            missing.push(line.clone());
+        if line.all_math_font {
+            continue;
         }
+        // Skip text that's already in the body, headers/footers, or footnotes.
+        // Also check with CJK spaces stripped, since Typst's paged output keeps
+        // spaces between CJK chars that we've already removed from the doc model.
+        let line_normalized = strip_cjk_spaces_str(&line.text);
+        if full_doc_text.contains(&line.text)
+            || full_doc_text.contains(&line_normalized)
+            || exclude_text.contains(&line.text)
+        {
+            continue;
+        }
+        // Word-level overlap check: if most words are found in doc text,
+        // the line is likely already present (e.g., math characters rendered
+        // with different Unicode codepoints).
+        let words: Vec<&str> = line.text.split_whitespace().collect();
+        if words.len() >= 3 {
+            let matched = words
+                .iter()
+                .filter(|w| w.len() >= 2 && full_doc_text.contains(**w))
+                .count();
+            if matched * 2 >= words.len() {
+                continue;
+            }
+        }
+        missing.push(line.clone());
     }
 
     if !missing.is_empty() {
@@ -2973,6 +3003,9 @@ fn extract_lines_from_all_pages(paged: &PagedDocument) -> Vec<FrameLine> {
 
             let trimmed = full_text.trim().to_string();
             let avg_y = items.iter().map(|i| i.y).sum::<f64>() / items.len() as f64;
+            let all_math_font = items
+                .iter()
+                .all(|i| i.font_name.contains("Math"));
             if !trimmed.is_empty() {
                 all_lines.push(FrameLine {
                     text: trimmed,
@@ -2980,6 +3013,7 @@ fn extract_lines_from_all_pages(paged: &PagedDocument) -> Vec<FrameLine> {
                     x_clusters,
                     page_idx,
                     y_pt: avg_y,
+                    all_math_font,
                 });
             }
         }
@@ -2996,11 +3030,17 @@ fn collect_text_items_with_pos(frame: &Frame, offset: Point, items: &mut Vec<Fra
             FrameItem::Text(text_item) => {
                 let text = text_item.text.to_string();
                 if !text.is_empty() {
+                    let font_name = text_item
+                        .font
+                        .info()
+                        .family
+                        .to_string();
                     items.push(FrameTextItem {
                         y: abs_y.to_pt(),
                         x: abs_x.to_pt(),
                         text,
                         size_pt: text_item.size.to_pt(),
+                        font_name,
                     });
                 }
             }
@@ -3035,42 +3075,19 @@ fn count_title_lines(paged_lines: &[FrameLine], doc: &Document) -> usize {
     count
 }
 
-/// Find which paged-line index corresponds to the start of body text.
-fn find_body_start_line(paged_lines: &[FrameLine], doc: &Document) -> usize {
-    let first_body_text = doc.body.elements.iter().find_map(|e| {
-        if let BlockElement::Paragraph(p) = e
-            && !matches!(p.style, Some(ParagraphStyle::Heading(_)))
-        {
-            p.text_runs().next().map(|r| r.text.clone())
-        } else {
-            None
-        }
-    });
-
-    if let Some(body_text) = first_body_text {
-        let search_prefix: String = body_text.chars().take(10).collect();
-        for (i, line) in paged_lines.iter().enumerate() {
-            if line.text.contains(&search_prefix) {
-                return i;
-            }
-        }
-    }
-    paged_lines.len()
-}
-
 /// Extract all text from the Document model as a single normalized string.
 fn extract_doc_text(doc: &Document) -> String {
     let mut text = String::new();
     for elem in &doc.body.elements {
         match elem {
             BlockElement::Paragraph(p) => {
-                text.push_str(&p.text_content());
+                text.push_str(&p.full_text_content());
             }
             BlockElement::Table(t) => {
                 for row in &t.rows {
                     for cell in &row.cells {
                         for para in &cell.paragraphs {
-                            text.push_str(&para.text_content());
+                            text.push_str(&para.full_text_content());
                         }
                     }
                 }

@@ -13,6 +13,18 @@ pub enum Alignment {
     Justify,
 }
 
+impl Alignment {
+    /// Return the OOXML `w:jc` value string for this alignment.
+    pub fn as_ooxml_str(&self) -> &'static str {
+        match self {
+            Alignment::Left => "left",
+            Alignment::Center => "center",
+            Alignment::Right => "right",
+            Alignment::Justify => "both",
+        }
+    }
+}
+
 /// Image format (PNG or JPEG).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImageFormat {
@@ -27,6 +39,15 @@ pub struct ImageData {
     pub format: ImageFormat,
     pub width_emu: u64,
     pub height_emu: u64,
+}
+
+/// List numbering info for a paragraph that is a list item.
+#[derive(Debug, Clone)]
+pub struct ListInfo {
+    /// Nesting level (0-based).
+    pub level: u32,
+    /// Numbering definition ID (e.g. 1=ordered, 2=unordered).
+    pub id: u32,
 }
 
 /// A single inline element within a paragraph.
@@ -78,9 +99,8 @@ pub struct Run {
     pub monospace: bool,
     pub underline: bool,
     pub strikethrough: bool,
-    pub highlight: bool,
     /// Highlight color name (e.g. "yellow", "green", "cyan").
-    /// Only used when `highlight` is true. `None` defaults to "yellow".
+    /// `Some(...)` activates highlighting; `None` means no highlight.
     pub highlight_color: Option<String>,
     pub smallcaps: bool,
     /// Text color as a 6-digit hex string (e.g. "FF0000" for red).
@@ -110,7 +130,6 @@ impl Run {
             monospace: false,
             underline: false,
             strikethrough: false,
-            highlight: false,
             highlight_color: None,
             smallcaps: false,
             color: None,
@@ -127,8 +146,8 @@ impl Run {
 pub struct Footnote {
     /// 1-based footnote ID.
     pub id: u32,
-    /// The text content of the footnote (collected as paragraph runs).
-    pub content: Vec<Run>,
+    /// The inline content of the footnote (text runs, math, etc.).
+    pub content: Vec<InlineElement>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -137,11 +156,8 @@ pub struct Paragraph {
     /// Inline elements including text runs and footnote references.
     pub inlines: Vec<InlineElement>,
     pub style: Option<ParagraphStyle>,
-    /// If this paragraph is a list item, the nesting level (0-based).
-    pub list_level: Option<u32>,
-    /// If this paragraph is a list item, the numbering definition ID.
-    /// Use 1 for ordered lists, 2 for unordered lists.
-    pub list_id: Option<u32>,
+    /// If this paragraph is a list item, its numbering info (level + ID).
+    pub list_info: Option<ListInfo>,
     /// Paragraph alignment (left, center, right, justify).
     pub alignment: Option<Alignment>,
     /// Suppress first-line indent (e.g., first paragraph after a heading).
@@ -194,6 +210,32 @@ impl Paragraph {
                 }
             })
             .collect()
+    }
+
+    pub fn full_text_content(&self) -> String {
+        let mut text = String::new();
+        for inline in &self.inlines {
+            match inline {
+                InlineElement::Text(run) => text.push_str(&run.text),
+                InlineElement::Math { omml_xml, .. } => {
+                    for part in omml_xml.split("<m:t>") {
+                        if let Some(end) = part.find("</m:t>") {
+                            text.push_str(&part[..end]);
+                        }
+                    }
+                }
+                InlineElement::Hyperlink { runs, .. } => {
+                    for run in runs {
+                        text.push_str(&run.text);
+                    }
+                }
+                InlineElement::FieldRef { display_text, .. } => {
+                    text.push_str(display_text);
+                }
+                _ => {}
+            }
+        }
+        text
     }
 
     /// Iterate over text runs (immutable).
@@ -507,7 +549,7 @@ impl Default for DocumentStyle {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Document {
     pub body: Body,
     pub page_settings: PageSettings,
@@ -526,6 +568,30 @@ pub struct Document {
     /// If set, footer contains a PAGE field code with this number format.
     /// When this is `Some`, a footer is always generated (even if `footer` is `None`).
     pub page_numbering: Option<PageNumberFormat>,
+    /// Counter for generating unique list numbering IDs (starts at 4;
+    /// 1=ordered, 2=unordered, 3=Chinese headings are reserved).
+    pub next_list_id: u32,
+    /// Mapping of dynamically allocated list IDs to their abstract numbering
+    /// definition (1=ordered, 2=unordered). Used to generate `w:num` entries.
+    pub list_num_instances: Vec<(u32, u32)>,
+}
+
+impl Default for Document {
+    fn default() -> Self {
+        Self {
+            body: Body::default(),
+            page_settings: PageSettings::default(),
+            footnotes: Vec::new(),
+            metadata: DocumentMetadata::default(),
+            style: DocumentStyle::default(),
+            bookmark_counter: 0,
+            header: None,
+            footer: None,
+            page_numbering: None,
+            next_list_id: 4,
+            list_num_instances: Vec::new(),
+        }
+    }
 }
 
 impl Document {
@@ -549,8 +615,18 @@ impl Document {
         id
     }
 
+    /// Allocate a unique list numbering ID for a new top-level list.
+    /// `ordered` selects abstractNum 1 (decimal) or 2 (bullet).
+    pub fn allocate_list_id(&mut self, ordered: bool) -> u32 {
+        let id = self.next_list_id;
+        self.next_list_id += 1;
+        let abstract_num = if ordered { 1 } else { 2 };
+        self.list_num_instances.push((id, abstract_num));
+        id
+    }
+
     /// Add a footnote and return its ID (starting from 2, since 0 and 1 are reserved by OOXML).
-    pub fn add_footnote(&mut self, content: Vec<Run>) -> u32 {
+    pub fn add_footnote(&mut self, content: Vec<InlineElement>) -> u32 {
         let id = u32::try_from(self.footnotes.len()).unwrap_or(u32::MAX - 3) + 2;
         self.footnotes.push(Footnote { id, content });
         id
