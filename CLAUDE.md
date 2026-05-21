@@ -116,6 +116,24 @@ python3 scripts/compare-pdf.py tests/fixtures/*.typ
 - **源码 AST 解析跳过 `#show` 规则内的 `set` 规则**——`#show heading: set text(size: 18pt)` 里的 `set text` 不是全局设定。
 - **per-run 样式比较用渲染实际字体**——源码设了 `font: "Linux Libertine"` 但未安装时，渲染字体是 fallback，比较基线应该用渲染结果而非源码字体名。
 
+## 竞品仓库（Issue 调研来源）
+
+每轮开发应派 agent 检查以下仓库的 issue，将竞品暴露的问题转化为 typort 的测试用例（`tests/fixtures/issue_*.typ`）。如果 typort 也有同样的 bug，修复并添加回归测试。
+
+| 仓库 | 技术路线 | 关注重点 |
+|------|----------|----------|
+| [jgm/pandoc](https://github.com/jgm/pandoc) | Haskell 重写 Typst 语法 (typst-hs) → Pandoc AST → docx | Typst reader 缺陷、docx writer bug、show rule / context / counter 不支持 |
+| [jgm/typst-hs](https://github.com/jgm/typst-hs) | Pandoc 的 Typst 解析器 | 语法不支持、数学解析错误、版本兼容性 |
+| [sghng/typ2docx](https://github.com/sghng/typ2docx) | Typst→PDF→docx (pdf2docx)，数学用 Pandoc | 行内公式空格丢失、SVG 文字变形、样式丢失 |
+| [Myriad-Dreamin/tinymist](https://github.com/Myriad-Dreamin/tinymist) | typlite：Typst→Markdown/LaTeX | 导出功能 bug、link/cite 回归、Typst 版本兼容 |
+| [typst/typst](https://github.com/typst/typst) | Typst 上游 HTML 导出 | HTML show rule 缺失（影响 HtmlDocument 策略）、`#text` 样式不输出 |
+
+**调研流程**：
+1. 用 `gh issue list -R <repo> --search "typst OR docx OR export" --limit 50` 拉 issue 列表
+2. 筛选与格式转换相关的 issue，排除已有 `tests/fixtures/issue_*.typ` 覆盖的
+3. 为每个新 issue 写最小复现 `.typ` fixture，跑 typort 转换验证
+4. 有 bug 则修复 + 加集成测试；无 bug 则仅保留 fixture 作为回归防护
+
 ## Conventions
 
 - Rust 2024 edition
