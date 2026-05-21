@@ -2621,7 +2621,7 @@ checksum = "6af6ae20167a9ece4bcb41af5b80f8a1f1df981f6391189ce00fd257af04126a"
 
 [[package]]
 name = "typort"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "typort-core",
@@ -2634,7 +2634,7 @@ dependencies = [
 
 [[package]]
 name = "typort-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "resvg",
  "tiny-skia",
@@ -2652,7 +2652,7 @@ dependencies = [
 
 [[package]]
 name = "typort-math"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "quick-xml 0.37.5",
  "typst",
@@ -2661,7 +2661,7 @@ dependencies = [
 
 [[package]]
 name = "typort-ooxml"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "quick-xml 0.37.5",
  "typst-syntax",
@@ -2670,7 +2670,7 @@ dependencies = [
 
 [[package]]
 name = "typort-presets"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "tempfile",
