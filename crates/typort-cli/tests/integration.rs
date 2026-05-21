@@ -3466,3 +3466,432 @@ fn issue_heading_numbering_correct_order() {
         "headings should appear in order: Introduction < Background < Methods"
     );
 }
+
+// ── Edge-case fixtures: content assertions ──────────────────────────
+
+#[test]
+fn edge_academic_template_structure() {
+    let xml = issue_doc_xml("edge_academic_template");
+    for text in ["Introduction", "Main Results", "Definitions", "Theorem", "Conclusion", "Supplementary"] {
+        assert!(xml.contains(text), "heading '{text}' should be present");
+    }
+    assert!(xml.contains("Heading1"), "level-1 headings should use Heading1 style");
+    assert!(xml.contains("Heading2"), "level-2 headings should use Heading2 style");
+    assert!(xml.contains("Abstract"), "abstract text should be present");
+    assert!(xml.contains("Keywords"), "keywords should be present");
+    assert!(xml.contains("Convergence"), "title word should be present");
+    assert!(
+        xml.contains("<m:oMathPara>"),
+        "display math should produce OMML"
+    );
+}
+
+#[test]
+fn edge_augmented_matrix_omml() {
+    let xml = issue_doc_xml("edge_augmented_matrix");
+    assert!(
+        xml.matches("<m:m>").count() >= 4,
+        "should have at least 4 matrices"
+    );
+    assert!(
+        xml.contains("<m:oMathPara>"),
+        "matrices should be in display math"
+    );
+    assert!(
+        xml.contains("cases") || xml.contains("<m:eqArr>") || xml.contains("<m:d>"),
+        "cases construct should produce m:d or m:eqArr"
+    );
+}
+
+#[test]
+fn edge_colored_text_has_color_runs() {
+    let xml = issue_doc_xml("edge_colored_text");
+    assert!(xml.contains("red text"), "red text content should be present");
+    assert!(xml.contains("blue text"), "blue text content should be present");
+    assert!(xml.contains("Green text"), "green text content should be present");
+    assert!(
+        xml.contains("w:val=\"FF4136\"") || xml.contains("w:val=\"ff4136\""),
+        "red color value should be present"
+    );
+    assert!(
+        xml.contains("w:val=\"0074D9\"") || xml.contains("w:val=\"0074d9\""),
+        "blue color value should be present"
+    );
+    assert!(
+        xml.contains("w:val=\"00AA00\"") || xml.contains("w:val=\"00aa00\""),
+        "green hex color value should be present"
+    );
+}
+
+#[test]
+fn edge_complex_table_merges() {
+    let xml = issue_doc_xml("edge_complex_table");
+    assert!(xml.contains("Header A-B"), "colspan header should be present");
+    assert!(xml.contains("Header C-D"), "second colspan header should be present");
+    assert!(xml.contains("Full width footer"), "full-width footer should be present");
+    assert!(
+        xml.contains("w:gridSpan"),
+        "colspan cells should produce w:gridSpan"
+    );
+    assert!(
+        xml.contains("w:vMerge"),
+        "rowspan cells should produce w:vMerge"
+    );
+}
+
+#[test]
+fn edge_custom_enum_numbering_items() {
+    let xml = issue_doc_xml("edge_custom_enum_numbering");
+    for text in ["First major point", "Alpha item", "Top level", "First clause"] {
+        assert!(xml.contains(text), "enum item '{text}' should be present");
+    }
+    let num_id_count = xml.matches("w:numId").count();
+    assert!(
+        num_id_count >= 10,
+        "should have many list items with numId, got {num_id_count}"
+    );
+}
+
+#[test]
+fn edge_deep_nested_list_all_levels() {
+    let xml = issue_doc_xml("edge_deep_nested_list");
+    for text in ["Level 0", "Level 1", "Level 2", "Level 3", "Bullet parent", "Ordered child", "Bullet grandchild"] {
+        assert!(xml.contains(text), "list item '{text}' should be present");
+    }
+    for level in ["0", "1", "2", "3"] {
+        assert!(
+            xml.contains(&format!("w:ilvl w:val=\"{level}\"")),
+            "indent level {level} should be present"
+        );
+    }
+}
+
+#[test]
+fn edge_empty_paragraphs_no_crash() {
+    let xml = issue_doc_xml("edge_empty_paragraphs");
+    assert!(xml.contains("First paragraph"), "first text should be present");
+    assert!(xml.contains("Third paragraph"), "third text should be present");
+    assert!(xml.contains("Last paragraph"), "last text should be present");
+}
+
+#[test]
+fn edge_figure_placement_tables_and_refs() {
+    let xml = issue_doc_xml("edge_figure_placement");
+    assert!(xml.contains("Performance comparison"), "first figure caption should be present");
+    assert!(xml.contains("Hyperparameters"), "second figure caption should be present");
+    assert!(xml.contains("<w:tbl>"), "tables in figures should be present");
+    assert!(xml.contains("Heading1"), "heading styles should be present");
+}
+
+#[test]
+fn edge_inline_formatting_all_decorations() {
+    let xml = issue_doc_xml("edge_inline_formatting");
+    assert!(xml.contains("strikethrough"), "strikethrough text should be present");
+    assert!(xml.contains("underlined"), "underlined text should be present");
+    assert!(xml.contains("Small Caps"), "small caps text should be present");
+    assert!(xml.contains("<w:strike/>"), "strikethrough should produce w:strike");
+    assert!(xml.contains("<w:u "), "underline should produce w:u");
+    assert!(xml.contains("<w:smallCaps/>"), "smallcaps should produce w:smallCaps");
+    assert!(xml.contains("w:vertAlign"), "super/subscript should produce w:vertAlign");
+}
+
+#[test]
+fn edge_landscape_pages_orientation() {
+    let xml = issue_doc_xml("edge_landscape_pages");
+    assert!(xml.contains("Portrait Section"), "portrait heading should be present");
+    assert!(xml.contains("Landscape Section"), "landscape heading should be present");
+    assert!(xml.contains("Back to Portrait"), "return-to-portrait heading should be present");
+    assert!(
+        xml.contains("orient"),
+        "landscape section should produce orient attribute"
+    );
+    let sect_count = xml.matches("<w:sectPr>").count() + xml.matches("<w:sectPr ").count();
+    assert!(
+        sect_count >= 3,
+        "should have at least 3 section breaks for orientation changes, got {sect_count}"
+    );
+}
+
+#[test]
+fn edge_mixed_list_content_all_present() {
+    let xml = issue_doc_xml("edge_mixed_list_content");
+    for text in ["quadratic formula", "First item", "continuation paragraph", "Summary of results", "Outer numbered", "Deepest bullet"] {
+        assert!(xml.contains(text), "content '{text}' should be present");
+    }
+    assert!(
+        xml.matches("w:numId").count() >= 10,
+        "should have many list items with numId"
+    );
+}
+
+#[test]
+fn edge_multi_section_different_page_sizes() {
+    let xml = issue_doc_xml("edge_multi_section");
+    for text in ["Section One", "Section Two", "Section Three"] {
+        assert!(xml.contains(text), "heading '{text}' should be present");
+    }
+    let sect_count = xml.matches("<w:sectPr>").count() + xml.matches("<w:sectPr ").count();
+    assert!(
+        sect_count >= 3,
+        "should have at least 3 section properties, got {sect_count}"
+    );
+    assert!(
+        xml.contains("w:w=\"11906\""),
+        "A4 width (11906 twips) should be present"
+    );
+}
+
+#[test]
+fn edge_subfigures_content() {
+    let xml = issue_doc_xml("edge_subfigures");
+    assert!(xml.contains("Subfigure placeholder"), "subfigure placeholders should be present");
+    assert!(xml.contains("Comparison of two methods"), "main figure caption should be present");
+    assert!(xml.contains("training data"), "side-by-side table caption should be present");
+}
+
+#[test]
+fn edge_term_list_bold_terms() {
+    let xml = issue_doc_xml("edge_term_list");
+    for term in ["Supervised Learning", "Unsupervised Learning", "Reinforcement Learning"] {
+        assert!(xml.contains(term), "term '{term}' should be present");
+    }
+    assert!(xml.contains("Training a model"), "definition text should be present");
+    assert!(
+        xml.matches("<w:b/>").count() >= 3,
+        "term labels should be bold"
+    );
+}
+
+#[test]
+fn edge_text_transforms_smallcaps_and_case() {
+    let xml = issue_doc_xml("edge_text_transforms");
+    assert!(
+        xml.contains("<w:smallCaps/>"),
+        "smallcaps should produce w:smallCaps"
+    );
+    assert!(xml.contains("Chapter Title"), "smallcaps heading text should be present");
+    assert!(xml.contains("Heading1"), "heading with smallcaps should keep Heading1 style");
+}
+
+#[test]
+fn edge_theorem_proof_content() {
+    let xml = issue_doc_xml("edge_theorem_proof");
+    for text in ["Continuity", "Intermediate Value", "Theorem", "Proof", "Definition", "bounded monotone", "Preliminaries"] {
+        assert!(xml.contains(text), "'{text}' should be present");
+    }
+    assert!(
+        xml.contains("<m:oMathPara>"),
+        "math in definition should produce OMML"
+    );
+}
+
+#[test]
+fn edge_bordered_blocks_text_preserved() {
+    let xml = issue_doc_xml("edge_bordered_blocks");
+    assert!(xml.contains("full border"), "bordered block text should be present");
+    assert!(xml.contains("important remark"), "admonition text should be present");
+    assert!(xml.contains("gray background"), "filled block text should be present");
+    assert!(xml.contains("Handle with care"), "rect text should be present");
+    assert!(xml.contains("Outer block content"), "nested outer text should be present");
+    assert!(xml.contains("Inner nested block"), "nested inner text should be present");
+}
+
+#[test]
+fn edge_show_rule_heading_counter_text() {
+    let xml = issue_doc_xml("edge_show_rule_heading_counter");
+    for text in ["Introduction", "Background", "Motivation", "Methods", "Data Collection", "Results"] {
+        assert!(xml.contains(text), "heading '{text}' should be present");
+    }
+}
+
+// ── Round 3: competitor issue fixtures ──────────────────────────────
+
+#[test]
+fn issue_deep_headings_all_levels() {
+    let xml = issue_doc_xml("issue_deep_headings");
+    for text in ["Level 1", "Level 2", "Level 3", "Level 4", "Level 5"] {
+        assert!(xml.contains(text), "heading '{text}' should be present");
+    }
+    assert!(xml.contains("Content under"), "body text should be present");
+    for style in ["Heading1", "Heading2", "Heading3", "Heading4", "Heading5"] {
+        assert!(xml.contains(style), "style '{style}' should be present");
+    }
+}
+
+#[test]
+fn issue_smartquotes_locale_chars() {
+    let xml = issue_doc_xml("issue_smartquotes_locale");
+    assert!(xml.contains("Citation"), "French text should be present");
+    assert!(xml.contains("Zitat"), "German text should be present");
+    assert!(xml.contains("English quote"), "English text should be present");
+    assert!(
+        xml.contains("\u{ab}") || xml.contains("\u{bb}"),
+        "French guillemets should be preserved"
+    );
+    assert!(
+        xml.contains("\u{201e}"),
+        "German low-9 quotation mark should be preserved"
+    );
+}
+
+#[test]
+fn issue_layout_dropped_text_recovered() {
+    let xml = issue_doc_xml("issue_layout_dropped");
+    assert!(xml.contains("Some text before"), "text before layout should be present");
+    assert!(xml.contains("Some text after"), "text after layout should be present");
+}
+
+#[test]
+fn issue_split_paragraph_content() {
+    let xml = issue_doc_xml("issue_split_paragraph");
+    assert!(xml.contains("following items"), "intro text should be present");
+    assert!(xml.contains("Item one"), "list item should be present");
+    assert!(xml.contains("Consider the equation"), "equation intro should be present");
+    assert!(xml.contains("<m:oMathPara>"), "display math should be present");
+    assert!(xml.contains("normal paragraph"), "trailing text should be present");
+}
+
+#[test]
+fn issue_table_hline_border_structure() {
+    let xml = issue_doc_xml("issue_table_hline_border");
+    assert!(xml.contains("Column A"), "header cell A should be present");
+    assert!(xml.contains("Column B"), "header cell B should be present");
+    assert!(xml.contains("Data 1"), "data cell should be present");
+    assert!(xml.contains("<w:tbl>"), "table should be present");
+}
+
+#[test]
+fn issue_table_figure_caption_text() {
+    let xml = issue_doc_xml("issue_table_figure_caption");
+    assert!(xml.contains("First table with a caption"), "first caption should be present");
+    assert!(xml.contains("Second table with a caption"), "second caption should be present");
+    assert!(xml.contains("<w:tbl>"), "tables should be present");
+}
+
+#[test]
+fn issue_long_crossref_label_bookmarks() {
+    let xml = issue_doc_xml("issue_long_crossref_label");
+    assert!(xml.contains("very long heading"), "long heading text should be present");
+    assert!(xml.contains("Short heading"), "short heading text should be present");
+    let bookmark_count = xml.matches("w:bookmarkStart").count();
+    assert!(
+        bookmark_count >= 2,
+        "should have at least 2 bookmarks, got {bookmark_count}"
+    );
+    assert!(
+        !xml.contains("w:name=\"very-long-heading-label-name-exceeds-forty\""),
+        "bookmark name >40 chars should be truncated"
+    );
+    assert!(
+        xml.contains("w:name=\"very-long-heading-label-name-exceeds-for\""),
+        "truncated bookmark should be exactly 40 chars"
+    );
+}
+
+#[test]
+fn issue_mixed_list_numbering_all_items() {
+    let xml = issue_doc_xml("issue_mixed_list_numbering");
+    for text in ["First ordered", "Bullet sub-item A", "Bullet sub-item B", "Second ordered", "Third ordered"] {
+        assert!(xml.contains(text), "list item '{text}' should be present");
+    }
+    let num_id_count = xml.matches("w:numId").count();
+    assert!(
+        num_id_count >= 6,
+        "should have at least 6 list items with numId, got {num_id_count}"
+    );
+}
+
+#[test]
+fn issue_blockquote_in_footnote_content() {
+    let xml = issue_doc_xml("issue_blockquote_in_footnote");
+    assert!(
+        xml.contains("w:footnoteReference"),
+        "footnote reference should be present"
+    );
+    assert!(xml.contains("Another paragraph"), "body text should be present");
+}
+
+#[test]
+fn issue_nested_table_structure() {
+    let xml = issue_doc_xml("issue_nested_table");
+    assert!(xml.contains("Outer cell"), "outer cell text should be present");
+    assert!(xml.contains("Inner A"), "inner table cell should be present");
+    let table_count = xml.matches("<w:tbl>").count();
+    assert!(
+        table_count >= 2,
+        "should have at least 2 tables (outer + inner), got {table_count}"
+    );
+}
+
+#[test]
+fn issue_cjk_latin_font_mixing_content() {
+    let xml = issue_doc_xml("issue_cjk_latin_font_mixing");
+    assert!(xml.contains("中文正文"), "CJK text should be present");
+    assert!(xml.contains("English"), "Latin text should be present");
+    assert!(xml.contains("2024"), "numbers should be present");
+}
+
+#[test]
+fn issue_table_cell_paragraph_style_content() {
+    let xml = issue_doc_xml("issue_table_cell_paragraph_style");
+    assert!(xml.contains("normal paragraph"), "body paragraph should be present");
+    assert!(xml.contains("Table cell content"), "table cell should be present");
+    assert!(xml.contains("<w:tbl>"), "table should be present");
+    assert!(
+        xml.matches("w:numId").count() >= 2,
+        "list items should have numId"
+    );
+}
+
+#[test]
+fn issue_complex_math_chain_accents() {
+    let xml = issue_doc_xml("issue_complex_math_chain");
+    assert!(
+        xml.matches("<m:acc>").count() >= 2,
+        "dot accent should produce m:acc elements"
+    );
+    assert!(
+        xml.contains("<m:sSubSup>") || xml.contains("<m:sSub>"),
+        "subscripts should produce m:sSubSup or m:sSub elements"
+    );
+    assert!(
+        xml.contains("<m:oMathPara>"),
+        "display math should be present"
+    );
+}
+
+#[test]
+fn issue_blockquote_attribution_text() {
+    let xml = issue_doc_xml("issue_blockquote_attribution");
+    assert!(xml.contains("To be, or not to be"), "first quote should be present");
+    assert!(xml.contains("All that glitters"), "second quote should be present");
+    assert!(xml.contains("Imagination"), "third quote should be present");
+    assert!(xml.contains("Shakespeare"), "first attribution should be present");
+    assert!(xml.contains("Einstein"), "second attribution should be present");
+}
+
+#[test]
+fn issue_block_content_in_table_cells() {
+    let xml = issue_doc_xml("issue_block_content_in_table");
+    assert!(xml.contains("Header 1"), "table header should be present");
+    assert!(xml.contains("Regular text"), "regular cell should be present");
+    assert!(xml.contains("hello"), "code block content should be present");
+    assert!(xml.contains("Item one"), "list in cell should be present");
+    assert!(xml.contains("<w:tbl>"), "table should be present");
+}
+
+#[test]
+fn issue_footnote_with_link_refs() {
+    let xml = issue_doc_xml("issue_footnote_with_link");
+    assert!(xml.contains("Introduction"), "heading should be present");
+    assert!(xml.contains("Conclusion"), "second heading should be present");
+    let fn_count = xml.matches("w:footnoteReference").count();
+    assert!(
+        fn_count >= 2,
+        "should have at least 2 footnotes, got {fn_count}"
+    );
+    assert!(
+        xml.matches("w:bookmarkStart").count() >= 2,
+        "cross-references should produce bookmarks"
+    );
+}

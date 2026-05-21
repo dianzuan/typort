@@ -1485,8 +1485,18 @@ fn write_image_inline<W: Write>(
     Ok(())
 }
 
+fn truncate_bookmark_name(name: &str) -> &str {
+    // Word limits bookmark names to 40 characters (Pandoc #5091)
+    if name.len() <= 40 {
+        name
+    } else {
+        &name[..40]
+    }
+}
+
 fn write_bookmark_start<W: Write>(writer: &mut Writer<W>, id: u32, name: &str) -> io::Result<()> {
     let id_str = id.to_string();
+    let name = truncate_bookmark_name(name);
     writer
         .create_element("w:bookmarkStart")
         .with_attribute(("w:id", id_str.as_str()))
@@ -1517,6 +1527,7 @@ fn write_field_ref<W: Write>(
         Ok(())
     })?;
     // instrText with REF field code
+    let bookmark_name = truncate_bookmark_name(bookmark_name);
     let instr = format!(" REF {bookmark_name} \\h ");
     writer.create_element("w:r").write_inner_content(|w| {
         w.create_element("w:instrText")
