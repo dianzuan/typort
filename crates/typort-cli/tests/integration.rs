@@ -3895,3 +3895,168 @@ fn issue_footnote_with_link_refs() {
         "cross-references should produce bookmarks"
     );
 }
+
+// ── Round 4: competitor issue fixtures ──────────────────────────────
+
+#[test]
+fn issue_footnote_separator_has_refs() {
+    let xml = issue_doc_xml("issue_footnote_separator");
+    let fn_count = xml.matches("w:footnoteReference").count();
+    assert_eq!(fn_count, 3, "should have 3 footnote references, got {fn_count}");
+}
+
+#[test]
+fn issue_list_bullet_hierarchy_levels() {
+    let xml = issue_doc_xml("issue_list_bullet_hierarchy");
+    for text in ["Level 0", "Level 1", "Level 2", "Level 3", "Back to level 0"] {
+        assert!(xml.contains(text), "list item '{text}' should be present");
+    }
+    for level in ["0", "1", "2", "3"] {
+        assert!(
+            xml.contains(&format!("w:ilvl w:val=\"{level}\"")),
+            "indent level {level} should be present for bullets"
+        );
+    }
+}
+
+#[test]
+fn issue_final_section_landscape_sections() {
+    let xml = issue_doc_xml("issue_final_section_landscape");
+    assert!(xml.contains("Portrait Section"), "portrait heading should be present");
+    assert!(xml.contains("Landscape Section"), "landscape heading should be present");
+    assert!(xml.contains("<w:tbl>"), "table should be present");
+    let sect_count = xml.matches("<w:sectPr>").count() + xml.matches("<w:sectPr ").count();
+    assert!(
+        sect_count >= 2,
+        "should have at least 2 section properties, got {sect_count}"
+    );
+}
+
+#[test]
+fn issue_custom_doc_properties_metadata() {
+    let xml = issue_doc_xml("issue_custom_doc_properties");
+    assert!(xml.contains("Abstract"), "abstract heading should be present");
+    assert!(xml.contains("Introduction"), "intro heading should be present");
+}
+
+#[test]
+fn issue_list_of_figures_toc() {
+    let xml = issue_doc_xml("issue_list_of_figures");
+    assert!(xml.contains("TOC"), "TOC field code should be present");
+    assert!(xml.contains("Introduction"), "heading should be present");
+    assert!(xml.contains("blue rectangle"), "figure caption should be present");
+    assert!(xml.contains("simple table"), "table caption should be present");
+}
+
+#[test]
+fn issue_footnote_math_formatting_content() {
+    let xml = issue_doc_xml("issue_footnote_math_formatting");
+    let fn_count = xml.matches("w:footnoteReference").count();
+    assert_eq!(fn_count, 3, "should have 3 footnotes, got {fn_count}");
+}
+
+#[test]
+fn issue_math_trailing_punct_equations() {
+    let xml = issue_doc_xml("issue_math_trailing_punct");
+    assert!(xml.contains("obtain"), "text before equation should be present");
+    let math_count = xml.matches("<m:oMathPara>").count();
+    assert!(
+        math_count >= 2,
+        "should have at least 2 display math blocks, got {math_count}"
+    );
+}
+
+#[test]
+fn issue_symbol_subscript_omml() {
+    let xml = issue_doc_xml("issue_symbol_subscript");
+    assert!(
+        xml.contains("<m:sSub>"),
+        "subscript on symbol should produce m:sSub"
+    );
+    assert!(
+        xml.contains("<m:sSup>"),
+        "superscript on symbol should produce m:sSup"
+    );
+    let math_count = xml.matches("<m:oMathPara>").count();
+    assert!(
+        math_count >= 3,
+        "should have at least 3 display math blocks, got {math_count}"
+    );
+}
+
+#[test]
+fn issue_cjk_bold_punct_formatting() {
+    let xml = issue_doc_xml("issue_cjk_bold_punct");
+    assert!(xml.contains("加粗"), "bold CJK text should be present");
+    assert!(xml.contains("斜体"), "italic text should be present");
+    assert!(xml.contains("<w:b/>"), "bold formatting should be present");
+    assert!(xml.contains("<w:i/>"), "italic formatting should be present");
+}
+
+#[test]
+fn issue_let_math_vars_content() {
+    let xml = issue_doc_xml("issue_let_math_vars");
+    assert!(
+        xml.contains("<m:oMath>"),
+        "interpolated math should produce OMML"
+    );
+}
+
+#[test]
+fn issue_show_rule_link_list_content() {
+    let xml = issue_doc_xml("issue_show_rule_link_list");
+    assert!(xml.contains("Example"), "link text should be present");
+    assert!(xml.contains("Regular item"), "plain list item should be present");
+    assert!(xml.contains("Normal paragraph"), "body text should be present");
+    assert!(
+        xml.contains("HYPERLINK"),
+        "hyperlink field should be present"
+    );
+    assert!(
+        xml.matches("w:numId").count() >= 3,
+        "list items should have numId"
+    );
+}
+
+#[test]
+fn issue_figure_counter_reset_tables() {
+    let xml = issue_doc_xml("issue_figure_counter_reset");
+    assert!(xml.contains("First table"), "first caption should be present");
+    assert!(xml.contains("Table after reset"), "reset caption should be present");
+    let table_count = xml.matches("<w:tbl>").count();
+    assert!(
+        table_count >= 2,
+        "should have at least 2 tables, got {table_count}"
+    );
+}
+
+#[test]
+fn issue_function_generated_heading() {
+    let xml = issue_doc_xml("issue_function_generated_content");
+    assert!(xml.contains("Introduction"), "first heading should be present");
+    assert!(xml.contains("Important Result"), "function-generated heading should be present");
+    assert!(xml.contains("Heading1"), "level-1 heading style should be present");
+    assert!(xml.contains("Heading2"), "function-generated heading should have Heading2 style");
+}
+
+#[test]
+fn issue_cjk_heading_numbering_content() {
+    let xml = issue_doc_xml("issue_cjk_heading_numbering");
+    assert!(xml.contains("绪论"), "CJK heading text should be present");
+    assert!(xml.contains("研究背景"), "CJK subheading should be present");
+    assert!(xml.contains("Heading1"), "Heading1 style should be present");
+}
+
+#[test]
+fn issue_math_grouping_attach_omml() {
+    let xml = issue_doc_xml("issue_math_grouping_attach");
+    assert!(
+        xml.contains("<m:sSubSup>"),
+        "combined sub+sup should produce m:sSubSup"
+    );
+    let math_count = xml.matches("<m:oMathPara>").count();
+    assert!(
+        math_count >= 4,
+        "should have at least 4 display math blocks, got {math_count}"
+    );
+}
