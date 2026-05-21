@@ -4153,3 +4153,84 @@ fn issue_nested_list_indent_levels() {
         );
     }
 }
+
+// ── Round 6: competitor issue fixtures ──────────────────────────────
+
+#[test]
+fn issue_endnote_vs_footnote_refs() {
+    let xml = issue_doc_xml("issue_endnote_vs_footnote");
+    let fn_count = xml.matches("w:footnoteReference").count();
+    assert!(
+        fn_count >= 4,
+        "should have at least 4 footnote references, got {fn_count}"
+    );
+}
+
+#[test]
+fn issue_list_paragraph_style_items() {
+    let xml = issue_doc_xml("issue_list_paragraph_style");
+    assert!(
+        xml.matches("w:numId").count() >= 6,
+        "should have list items with numId"
+    );
+}
+
+#[test]
+fn issue_table_compact_style_override_content() {
+    let xml = issue_doc_xml("issue_table_compact_style_override");
+    assert!(xml.contains("<w:tbl>"), "table should be present");
+    assert!(xml.contains("<w:b/>"), "bold text in table should be preserved");
+}
+
+#[test]
+fn issue_cjk_heading_number_spacing_headings() {
+    let xml = issue_doc_xml("issue_cjk_heading_number_spacing");
+    assert!(
+        xml.matches("Heading").count() >= 3,
+        "should have multiple heading styles"
+    );
+}
+
+#[test]
+fn issue_show_rule_removes_heading_semantics_text() {
+    let xml = issue_doc_xml("issue_show_rule_removes_heading_semantics");
+    assert!(
+        xml.matches("Heading").count() >= 3,
+        "headings should be present despite show rules"
+    );
+}
+
+#[test]
+fn issue_cjk_url_encoding_links() {
+    let xml = issue_doc_xml("issue_cjk_url_encoding");
+    assert!(
+        xml.matches("HYPERLINK").count() >= 2,
+        "hyperlinks should be present"
+    );
+}
+
+#[test]
+fn issue_table_header_border_override_tables() {
+    let xml = issue_doc_xml("issue_table_header_border_override");
+    let table_count = xml.matches("<w:tbl>").count();
+    assert!(
+        table_count >= 3,
+        "should have at least 3 tables, got {table_count}"
+    );
+}
+
+#[test]
+fn issue_crossref_field_code_bookmarks() {
+    let xml = issue_doc_xml("issue_crossref_field_code");
+    assert!(
+        xml.matches("w:bookmarkStart").count() >= 3,
+        "labeled elements should produce bookmarks"
+    );
+    assert!(xml.contains("<m:oMathPara>"), "display equations should be present");
+}
+
+#[test]
+fn issue_html_whitespace_in_styled_spans_text() {
+    let xml = issue_doc_xml("issue_html_whitespace_in_styled_spans");
+    assert!(xml.contains("<w:u ") || xml.contains("<w:color"), "styled spans should be present");
+}
