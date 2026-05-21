@@ -1486,12 +1486,14 @@ fn write_image_inline<W: Write>(
 }
 
 fn truncate_bookmark_name(name: &str) -> &str {
-    // Word limits bookmark names to 40 characters (Pandoc #5091)
     if name.len() <= 40 {
-        name
-    } else {
-        &name[..40]
+        return name;
     }
+    let mut end = 40;
+    while !name.is_char_boundary(end) {
+        end -= 1;
+    }
+    &name[..end]
 }
 
 fn write_bookmark_start<W: Write>(writer: &mut Writer<W>, id: u32, name: &str) -> io::Result<()> {
