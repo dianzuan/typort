@@ -36,14 +36,15 @@ input.typ ──► Typst compiler ──► HtmlDocument (structure)
 | Headings (h1–h6) | Heading styles with detected font sizes |
 | Bold, italic, underline, strikethrough, highlight, superscript, subscript, small caps | Full formatting |
 | Math (inline & display) | OMML: fractions, scripts, roots, sums, integrals, matrices, accents, cases, aligned equations, overbrace/underbrace |
-| Tables | colspan, rowspan, multi-paragraph cells, nested tables |
-| Lists | Ordered/unordered, nested up to 5+ levels |
-| Footnotes | Including inside table cells, with formatting |
+| Tables | colspan, rowspan, multi-paragraph cells, nested tables, cell shading, dashed borders |
+| Lists | Ordered/unordered, nested up to 5+ levels, contextual spacing |
+| Footnotes | Including inside table cells, with formatting and circled numbers |
 | Images | PNG, JPG embedded; SVG rasterized via resvg |
 | Code blocks | Detected monospace font, shading |
 | Cross-references | `@label` to bookmarks + REF field codes |
 | Hyperlinks | With preserved formatting (bold links, etc.) |
 | Page breaks | Detected via Introspector page boundaries |
+| Column breaks | `#colbreak()` to `w:br type="column"` |
 | Section breaks | Auto-detected from page setting changes |
 | Headers & footers | Extracted from page margin zones |
 | Page numbering | `#set page(numbering: "1")` to PAGE field code |
@@ -52,9 +53,9 @@ input.typ ──► Typst compiler ──► HtmlDocument (structure)
 | Horizontal rules | `#line()` to paragraph border |
 | Figure captions | Combined into single paragraph |
 | Grid layouts | Recovered with tab stops |
-| Show rule styling | Heading alignment + text colors from rendered output |
+| Show rule styling | Font, size, color, bold, italic per-run from rendered output |
 | Equation numbering | Chapter-aware `(1.1)` format |
-| CJK typography | Kinsoku, overflow punct, auto-spacing, justify detection |
+| CJK typography | Kinsoku, overflow punct, auto-spacing, justify, font mixing |
 | Document metadata | Title + author from `#set document(...)` |
 | Package support | `@preview/...` packages downloaded automatically |
 
@@ -85,7 +86,7 @@ crates/
 
 ```bash
 cargo build --workspace
-cargo test --workspace          # 212 tests
+cargo test --workspace          # 339 tests
 cargo clippy --workspace        # 0 warnings
 ```
 
@@ -93,9 +94,8 @@ cargo clippy --workspace        # 0 warnings
 
 - **OMML** does not support math coloring, extensible arrows, or strikethrough/cancel
 - **Word** forces Cambria Math font in math zones
-- **Show rule font sizes** applied via `#show heading: set text(size: ...)` are not transferred (detected heading sizes come from rendered output, which is close but not pixel-identical)
 - **Ruby annotations** (`w:ruby`) — Typst 0.14.2 has no native ruby support
 
 ## License
 
-MIT OR Apache-2.0
+Apache-2.0
