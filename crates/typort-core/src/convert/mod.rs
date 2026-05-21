@@ -1117,10 +1117,9 @@ fn apply_inline_format(tag_name: &str, run: &mut Run) {
         "super" => run.superscript = true,
         "sub" => run.subscript = true,
         "raw" => run.monospace = true,
-        "underline" => run.underline = true,
+        "underline" | "overline" => run.underline = true,
         "strike" => run.strikethrough = true,
         "highlight" => run.highlight_color = Some("yellow".into()),
-        "overline" => run.underline = true, // Word has no overline; underline is the closest
         "smallcaps" => run.smallcaps = true,
         _ => {}
     }
@@ -1955,7 +1954,7 @@ fn convert_blockquote(
         page_breaks,
     );
     // Typst quote block default pad = 1em per side
-    let indent_twips = u32::from(doc.style.body_size_half_pt) * 10;
+    let indent_twips = doc.style.body_size_half_pt * 10;
     for element in &mut doc.body.elements[start_idx..] {
         if let BlockElement::Paragraph(para) = element {
             para.left_indent = Some(indent_twips);
@@ -3052,7 +3051,7 @@ fn collect_text_items_with_pos(frame: &Frame, offset: Point, items: &mut Vec<Fra
                         .font
                         .info()
                         .family
-                        .to_string();
+                        .clone();
                     items.push(FrameTextItem {
                         y: abs_y.to_pt(),
                         x: abs_x.to_pt(),

@@ -15,6 +15,7 @@ pub enum Alignment {
 
 impl Alignment {
     /// Return the OOXML `w:jc` value string for this alignment.
+    #[must_use]
     pub fn as_ooxml_str(&self) -> &'static str {
         match self {
             Alignment::Left => "left",
@@ -212,6 +213,7 @@ impl Paragraph {
             .collect()
     }
 
+    #[must_use]
     pub fn full_text_content(&self) -> String {
         let mut text = String::new();
         for inline in &self.inlines {
@@ -512,7 +514,7 @@ pub struct DocumentStyle {
     /// Hyperlink color as a 6-digit hex string (e.g. "0563C1").
     pub hyperlink_color: String,
     /// Body font's cap-height ratio (em units). Used to compute line pitch:
-    /// line_pitch = cap_height_ratio × body_size + leading.
+    /// `line_pitch = cap_height_ratio × body_size + leading`.
     pub body_cap_height_ratio: f64,
 }
 

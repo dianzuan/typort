@@ -11,6 +11,7 @@ use typst_library::text::{SmallcapsElem, SpaceElem, SubElem, SuperElem, TextElem
 
 /// Formatting state accumulated while walking the Content tree.
 #[derive(Clone, Default)]
+#[allow(clippy::struct_excessive_bools)]
 struct InlineCtx {
     bold: bool,
     italic: bool,
