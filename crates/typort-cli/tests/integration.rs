@@ -4060,3 +4060,96 @@ fn issue_math_grouping_attach_omml() {
         "should have at least 4 display math blocks, got {math_count}"
     );
 }
+
+// ── Round 5: competitor issue fixtures ──────────────────────────────
+
+#[test]
+fn issue_text_deco_inline_math_decorations() {
+    let xml = issue_doc_xml("issue_text_deco_inline_math");
+    assert!(xml.contains("underlined"), "underline text should be present");
+    assert!(xml.contains("highlighted"), "highlight text should be present");
+    assert!(xml.contains("struck-through"), "strikethrough text should be present");
+    assert!(xml.contains("<w:u "), "underline should produce w:u");
+    assert!(xml.contains("<w:strike"), "strikethrough should produce w:strike");
+}
+
+#[test]
+fn issue_math_dot_punctuation_equations() {
+    let xml = issue_doc_xml("issue_math_dot_punctuation");
+    let math_count = xml.matches("<m:oMathPara>").count();
+    assert!(
+        math_count >= 4,
+        "should have at least 4 display math blocks, got {math_count}"
+    );
+}
+
+#[test]
+fn issue_section_equation_numbering_refs() {
+    let xml = issue_doc_xml("issue_section_equation_numbering");
+    assert!(xml.contains("Introduction"), "heading should be present");
+    assert!(xml.contains("Methods"), "second heading should be present");
+    assert!(
+        xml.matches("<m:oMathPara>").count() >= 3,
+        "should have at least 3 display equations"
+    );
+    assert!(
+        xml.matches("w:bookmarkStart").count() >= 3,
+        "labeled equations should produce bookmarks"
+    );
+}
+
+#[test]
+fn issue_color_primitives_text() {
+    let xml = issue_doc_xml("issue_color_primitives");
+    assert!(xml.contains("RGB colored"), "RGB text should be present");
+    assert!(xml.contains("Lightened blue"), "lightened color text should be present");
+    assert!(xml.contains("Named color"), "named color text should be present");
+    assert!(
+        xml.matches("<w:color").count() >= 3,
+        "colored text should produce w:color elements"
+    );
+}
+
+#[test]
+fn issue_nested_term_list_hierarchy() {
+    let xml = issue_doc_xml("issue_nested_term_list");
+    for text in ["Compiler", "Frontend", "Lexer", "Parser", "Backend", "Interpreter"] {
+        assert!(xml.contains(text), "term '{text}' should be present");
+    }
+    assert!(
+        xml.matches("<w:b/>").count() >= 4,
+        "term labels should be bold"
+    );
+}
+
+#[test]
+fn issue_caption_prefix_custom_supplement() {
+    let xml = issue_doc_xml("issue_caption_prefix_custom");
+    assert!(xml.contains("Sample data"), "first caption should be present");
+    assert!(xml.contains("A diagram"), "second caption should be present");
+    assert!(xml.contains("表"), "Chinese supplement should be present");
+    assert!(xml.contains("Fig."), "custom supplement should be present");
+}
+
+#[test]
+fn issue_table_cell_spacing_structure() {
+    let xml = issue_doc_xml("issue_table_cell_spacing");
+    assert!(xml.contains("Fruit"), "header cell should be present");
+    assert!(xml.contains("Bananas"), "data cell should be present");
+    assert!(xml.contains("Built-in wrapper"), "multi-paragraph cell should be present");
+    assert!(xml.contains("<w:tbl>"), "table should be present");
+}
+
+#[test]
+fn issue_nested_list_indent_levels() {
+    let xml = issue_doc_xml("issue_nested_list_indent");
+    for text in ["Level one", "Level two", "Level three", "Bullet level"] {
+        assert!(xml.contains(text), "list item '{text}' should be present");
+    }
+    for level in ["0", "1", "2", "3"] {
+        assert!(
+            xml.contains(&format!("w:ilvl w:val=\"{level}\"")),
+            "indent level {level} should be present"
+        );
+    }
+}
