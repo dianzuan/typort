@@ -818,6 +818,21 @@ fn strip_cjk_spaces(para: &mut Paragraph) {
     }
 }
 
+fn strip_visual_markers(s: &str) -> String {
+    let trimmed = s.trim_start_matches(|c: char| {
+        matches!(c, '•' | '‣' | '◦' | '▪' | '▸' | '–' | '—')
+    });
+    let trimmed = trimmed.trim_start();
+    // Strip leading "1." or "1.1" or "1.1.1" numbering patterns
+    let trimmed = if let Some(rest) = trimmed.strip_prefix(|c: char| c.is_ascii_digit()) {
+        let rest = rest.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.');
+        rest.trim_start()
+    } else {
+        trimmed
+    };
+    trimmed.to_string()
+}
+
 fn strip_cjk_spaces_str(s: &str) -> String {
     let chars: Vec<char> = s.chars().collect();
     let mut out = String::with_capacity(s.len());
@@ -2836,22 +2851,25 @@ fn recover_missing_content(paged: &PagedDocument, doc: &mut Document) {
         // Also check with CJK spaces stripped, since Typst's paged output keeps
         // spaces between CJK chars that we've already removed from the doc model.
         let line_normalized = strip_cjk_spaces_str(&line.text);
+        let line_stripped = strip_visual_markers(&line.text);
         if full_doc_text.contains(&line.text)
             || full_doc_text.contains(&line_normalized)
+            || full_doc_text.contains(&line_stripped)
             || exclude_text.contains(&line.text)
         {
             continue;
         }
-        // Word-level overlap check: if most words are found in doc text,
-        // the line is likely already present (e.g., math characters rendered
-        // with different Unicode codepoints).
+        // Word-level overlap check: if most significant words (3+ chars) are
+        // found in doc text, the line is likely already present (e.g., math
+        // characters rendered with different Unicode codepoints).
         let words: Vec<&str> = line.text.split_whitespace().collect();
-        if words.len() >= 3 {
+        if words.len() >= 2 {
+            let sig_count = words.iter().filter(|w| w.chars().count() >= 3).count();
             let matched = words
                 .iter()
-                .filter(|w| w.len() >= 2 && full_doc_text.contains(**w))
+                .filter(|w| w.chars().count() >= 3 && full_doc_text.contains(**w))
                 .count();
-            if matched * 2 >= words.len() {
+            if sig_count >= 2 && matched * 2 > sig_count {
                 continue;
             }
         }
