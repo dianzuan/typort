@@ -4234,3 +4234,84 @@ fn issue_html_whitespace_in_styled_spans_text() {
     let xml = issue_doc_xml("issue_html_whitespace_in_styled_spans");
     assert!(xml.contains("<w:u ") || xml.contains("<w:color"), "styled spans should be present");
 }
+
+// ── Round 7: competitor issues ──────────────────────────────────────────
+
+#[test]
+fn issue_bookmark_inside_paragraph() {
+    let xml = issue_doc_xml("issue_bookmark_inside_paragraph");
+    assert!(xml.contains("w:bookmarkStart"), "should have bookmarkStart for <intro> label");
+    assert!(xml.contains("w:bookmarkEnd"), "should have bookmarkEnd");
+    assert!(xml.contains("Introduction"), "heading text present");
+    assert!(xml.contains("Methods"), "second heading present");
+    assert!(xml.contains("intro"), "bookmark name should reference intro label");
+}
+
+#[test]
+fn issue_rtl_table_bidi() {
+    let xml = issue_doc_xml("issue_rtl_table_bidi");
+    assert!(xml.contains("w:tbl"), "should contain a table");
+    assert!(
+        xml.contains("\u{627}\u{644}\u{639}\u{645}\u{648}\u{62f}"),
+        "Arabic text should be present"
+    );
+}
+
+#[test]
+fn issue_nested_table_alignment() {
+    let xml = issue_doc_xml("issue_nested_table_alignment");
+    assert!(xml.contains("w:tbl"), "should contain at least one table");
+    assert!(xml.contains("Normal right cell"), "outer cell text present");
+}
+
+#[test]
+fn issue_cjk_font_east_asia() {
+    let xml = issue_doc_xml("issue_cjk_font_east_asia");
+    assert!(xml.contains("eastAsia"), "should set w:rFonts eastAsia attribute for CJK");
+    assert!(
+        xml.contains("\u{65E5}\u{672C}\u{8A9E}"),
+        "Japanese text should be present"
+    );
+    assert!(
+        xml.contains("\u{4E2D}\u{6587}"),
+        "Chinese text should be present"
+    );
+}
+
+#[test]
+fn issue_list_in_blockquote() {
+    let xml = issue_doc_xml("issue_list_in_blockquote");
+    assert!(xml.contains("First"), "ordered list item present");
+    assert!(xml.contains("Second"), "ordered list item present");
+    assert!(xml.contains("Bullet"), "bullet list item present");
+    let num_count = xml.matches("w:numId").count();
+    assert!(num_count >= 2, "should have multiple list numbering references, got {num_count}");
+}
+
+#[test]
+fn issue_underline_font_size_change() {
+    let xml = issue_doc_xml("issue_underline_font_size_change");
+    assert!(xml.contains("<w:u "), "should have underline formatting");
+    assert!(xml.contains("w:strike"), "should have strikethrough formatting");
+    assert!(xml.contains("Normal size"), "underlined text present");
+    assert!(xml.contains("Regular"), "strikethrough text present");
+}
+
+#[test]
+fn issue_text_fill_color() {
+    let xml = issue_doc_xml("issue_text_fill_color");
+    let color_count = xml.matches("<w:color").count();
+    assert!(color_count >= 3, "should have multiple color tags for different fills, got {color_count}");
+    assert!(xml.contains("This entire paragraph is red"), "red paragraph present");
+    assert!(xml.contains("blue"), "blue text reference present");
+    assert!(xml.contains("Green text"), "green text present");
+}
+
+#[test]
+fn issue_space_between_styled_runs() {
+    let xml = issue_doc_xml("issue_space_between_styled_runs");
+    assert!(xml.contains("bold"), "bold text present");
+    assert!(xml.contains("italic"), "italic text present");
+    let preserve_count = xml.matches("xml:space=\"preserve\"").count();
+    assert!(preserve_count >= 5, "should preserve spaces between styled runs, got {preserve_count}");
+}
