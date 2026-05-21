@@ -4315,3 +4315,57 @@ fn issue_space_between_styled_runs() {
     let preserve_count = xml.matches("xml:space=\"preserve\"").count();
     assert!(preserve_count >= 5, "should preserve spaces between styled runs, got {preserve_count}");
 }
+
+// ── Round 8: competitor issues ──────────────────────────────────────────
+
+#[test]
+fn issue_list_contextual_spacing() {
+    let xml = issue_doc_xml("issue_list_contextual_spacing");
+    assert!(xml.contains("Item A"), "first list item present");
+    assert!(xml.contains("Item B"), "second list item present");
+    let num_count = xml.matches("w:numId").count();
+    assert!(num_count >= 5, "should have multiple list numbering refs, got {num_count}");
+}
+
+#[test]
+fn issue_table_colspan_borders() {
+    let xml = issue_doc_xml("issue_table_colspan_borders");
+    assert!(xml.contains("AB"), "merged cell AB present");
+    assert!(xml.contains("FGH"), "merged cell FGH present");
+    let gridspan = xml.matches("gridSpan").count();
+    assert!(gridspan >= 2, "should have gridSpan for merged cells, got {gridspan}");
+    let tc_count = xml.matches("<w:tc>").count();
+    assert!(tc_count >= 9, "should have at least 9 table cells, got {tc_count}");
+}
+
+#[test]
+fn issue_math_accent_subsup_chain() {
+    let xml = issue_doc_xml("issue_math_accent_subsup_chain");
+    let acc_count = xml.matches("m:acc").count();
+    assert!(acc_count >= 4, "should have accent elements for dot/hat/tilde/arrow, got {acc_count}");
+    let math_para = xml.matches("oMathPara").count();
+    assert!(math_para >= 4, "should have display math paragraphs, got {math_para}");
+    assert!(
+        xml.contains("m:sSubSup") || xml.contains("m:sSub"),
+        "should have sub/superscript elements"
+    );
+}
+
+#[test]
+fn issue_table_caption_crossref() {
+    let xml = issue_doc_xml("issue_table_caption_crossref");
+    assert!(xml.contains("Sample data"), "first table caption present");
+    assert!(xml.contains("Another table"), "second table caption present");
+    let bk_count = xml.matches("bookmarkStart").count();
+    assert!(bk_count >= 2, "should have bookmarks for labeled figures, got {bk_count}");
+}
+
+#[test]
+fn issue_table_multipage_borders() {
+    let xml = issue_doc_xml("issue_table_multipage_borders");
+    assert!(xml.contains("<w:tbl>"), "should contain a table");
+    let tr_count = xml.matches("<w:tr>").count();
+    assert!(tr_count >= 7, "should have at least 7 table rows, got {tr_count}");
+    assert!(xml.contains("Header A"), "header row present");
+    assert!(xml.contains("Row 6"), "last data row present");
+}
