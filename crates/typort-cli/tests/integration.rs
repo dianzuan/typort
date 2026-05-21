@@ -3380,3 +3380,89 @@ fn issue_smart_quotes_preserved() {
         "quoted text content should be present"
     );
 }
+
+#[test]
+fn issue_linebreak_in_heading_preserved() {
+    let xml = issue_doc_xml("issue_linebreak_heading");
+    assert!(
+        xml.contains("Heading with"),
+        "heading text before line break should be present"
+    );
+    assert!(
+        xml.contains("line break"),
+        "heading text after line break should be present"
+    );
+    assert!(
+        xml.contains("Heading1"),
+        "should have Heading1 style"
+    );
+}
+
+#[test]
+fn issue_display_math_in_list_numbering() {
+    let xml = issue_doc_xml("issue_display_math_in_list");
+    assert!(
+        xml.contains("First item"),
+        "first list item should be present"
+    );
+    assert!(
+        xml.contains("Third item"),
+        "third list item should be present"
+    );
+    let num_id_count = xml.matches("w:numId").count();
+    assert!(
+        num_id_count >= 3,
+        "should have at least 3 list items with numId, got {num_id_count}"
+    );
+}
+
+#[test]
+fn issue_nested_enum_all_items_present() {
+    let xml = issue_doc_xml("issue_nested_enum_reset");
+    for text in ["Parent A", "Parent B", "Parent C", "Sub one", "Sub two", "Sub one again"] {
+        assert!(
+            xml.contains(text),
+            "nested enum should contain '{text}'"
+        );
+    }
+}
+
+#[test]
+fn issue_subscript_scope_omml() {
+    let xml = issue_doc_xml("issue_subscript_scope");
+    assert!(
+        xml.contains("<m:sSub>") || xml.contains("<m:sSup>"),
+        "subscript/superscript math should produce m:sSub/m:sSup"
+    );
+    let math_count = xml.matches("<m:oMathPara>").count();
+    assert!(
+        math_count >= 4,
+        "should have 4 display math equations, got {math_count}"
+    );
+}
+
+#[test]
+fn issue_tight_list_no_duplicate() {
+    let xml = issue_doc_xml("issue_tight_list_sublist");
+    let item1_count = xml.matches("Item 1").count();
+    assert_eq!(
+        item1_count, 1,
+        "'Item 1' should appear exactly once (no recovery duplication), got {item1_count}"
+    );
+    assert!(
+        xml.contains("Sub-item A"),
+        "sub-item should be present"
+    );
+}
+
+#[test]
+fn issue_heading_numbering_correct_order() {
+    let xml = issue_doc_xml("issue_heading_numbering_show");
+    let intro_pos = xml.find("Introduction").expect("Introduction should exist");
+    let bg_pos = xml.find("Background").expect("Background should exist");
+    let methods_pos = xml.find("Methods").expect("Methods should exist");
+    assert!(
+        intro_pos < bg_pos && bg_pos < methods_pos,
+        "headings should appear in order: Introduction < Background < Methods"
+    );
+}
