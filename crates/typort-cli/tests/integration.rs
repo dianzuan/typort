@@ -4427,3 +4427,56 @@ fn issue_footnote_tab_format() {
     let xml = issue_doc_xml("issue_footnote_tab_format");
     assert!(xml.contains("footnote"), "footnote reference should be in document");
 }
+
+// ── Round 10: competitor issues (final round) ───────────────────────────
+
+#[test]
+fn issue_cjk_super_sub_metrics() {
+    let xml = issue_doc_xml("issue_cjk_super_sub_metrics");
+    let valign_count = xml.matches("vertAlign").count();
+    assert!(valign_count >= 2, "should have vertAlign for super/sub, got {valign_count}");
+    assert!(
+        xml.contains("\u{4E0A}\u{6807}"),
+        "Chinese superscript text present"
+    );
+}
+
+#[test]
+fn issue_link_show_rule_ref() {
+    let xml = issue_doc_xml("issue_link_show_rule_ref");
+    assert!(xml.contains("bookmarkStart"), "should have bookmark for heading label");
+    assert!(xml.contains("HYPERLINK"), "should have hyperlink field");
+    assert!(xml.contains("Introduction"), "heading text present");
+}
+
+#[test]
+fn issue_smallcaps_text() {
+    let xml = issue_doc_xml("issue_smallcaps_text");
+    let sc_count = xml.matches("smallCaps").count();
+    assert!(sc_count >= 2, "should have w:smallCaps for smallcaps text, got {sc_count}");
+    assert!(xml.contains("Small Caps"), "smallcaps text content present");
+}
+
+#[test]
+fn issue_footnote_in_heading_toc() {
+    let xml = issue_doc_xml("issue_footnote_in_heading_toc");
+    let heading_count = xml.matches("Heading1").count();
+    assert!(heading_count >= 3, "should have 3 Heading1 styles, got {heading_count}");
+    assert!(xml.contains("TOC"), "should have TOC field");
+    assert!(xml.contains("Introduction"), "first heading text present");
+    assert!(xml.contains("Results"), "third heading text present");
+}
+
+#[test]
+fn issue_column_break() {
+    let xml = issue_doc_xml("issue_column_break");
+    assert!(xml.contains("First column"), "first column content present");
+    assert!(xml.contains("Second column"), "second column content present");
+    assert!(xml.contains("column"), "should reference column layout");
+}
+
+#[test]
+fn issue_metadata_case_dedup() {
+    let xml = issue_doc_xml("issue_metadata_case_dedup");
+    assert!(xml.contains("test document"), "document body text present");
+}
