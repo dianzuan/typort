@@ -4480,3 +4480,21 @@ fn issue_metadata_case_dedup() {
     let xml = issue_doc_xml("issue_metadata_case_dedup");
     assert!(xml.contains("test document"), "document body text present");
 }
+
+// ── Orphan fixture coverage ─────────────────────────────────────────────
+
+#[test]
+fn issue_highlight_space_preserved() {
+    let xml = issue_doc_xml("issue_highlight_space");
+    assert!(xml.contains("Hello"), "highlight text present");
+    assert!(xml.contains("World"), "adjacent text present");
+    assert!(xml.contains("bold"), "bold text present");
+}
+
+#[test]
+fn issue_show_rule_heading_replace_recovery() {
+    let xml = issue_doc_xml("issue_show_rule_heading_replace");
+    assert!(xml.contains("First Heading"), "first heading text present");
+    assert!(xml.contains("Second Heading"), "second heading text present");
+    assert!(xml.contains("Body text"), "body text present");
+}
