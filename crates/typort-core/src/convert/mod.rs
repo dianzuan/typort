@@ -5,19 +5,21 @@
 //! that element, giving us direct access to `HeadingElem`, `EquationElem`,
 //! `FootnoteElem`, etc. without parsing HTML tags.
 
+mod footnote;
+mod image;
 pub mod inline;
 pub mod page;
+mod recovery;
 
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
-use std::num::NonZeroUsize;
+use std::collections::{HashSet, VecDeque};
 
 use typort_ooxml::document::{
-    Alignment, BlockElement, CellContent, Document, FootnoteFormat, ImageData, ImageFormat,
-    InlineElement, ListInfo, Paragraph, ParagraphStyle, Run, Table, TableCell, TableRow, VMerge,
+    Alignment, BlockElement, CellContent, Document, ImageData, InlineElement, ListInfo, Paragraph,
+    ParagraphStyle, Run, Table, TableCell, TableRow, VMerge,
 };
 use typst::foundations::StyleChain;
 use typst::introspection::{Location, Tag};
-use typst::layout::{Frame, FrameItem, PagedDocument, Point};
+use typst::layout::PagedDocument;
 use typst::model::Numbering;
 use typst_html::{HtmlDocument, HtmlElement, HtmlNode};
 use typst_library::math::EquationElem;
@@ -78,21 +80,21 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
 
     // 4. First pass: extract footnote content from <section role="doc-endnotes">
     let body = find_body(&html_doc.root).unwrap_or(&html_doc.root);
-    let footnote_contents = extract_footnote_contents(&body.children);
+    let footnote_contents = footnote::extract_footnote_contents(&body.children);
     for content in &footnote_contents {
         doc.add_footnote(content.clone());
     }
 
     // 5. Extract images from PagedDocument for embedding
     let mut image_queue: VecDeque<ImageData> = if let Some(paged) = &paged_doc {
-        extract_images_from_paged(paged).into()
+        image::extract_images_from_paged(paged).into()
     } else {
         VecDeque::new()
     };
 
     // 6. Pre-compute page break locations from PagedDocument introspector
     let page_breaks: HashSet<Location> = if let Some(paged) = &paged_doc {
-        collect_page_break_locations(&body.children, paged)
+        recovery::collect_page_break_locations(&body.children, paged)
     } else {
         HashSet::new()
     };
@@ -112,7 +114,7 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
     );
 
     // 8. Detect footnote format (circled numbers)
-    detect_footnote_format(&body.children, &mut doc);
+    footnote::detect_footnote_format(&body.children, &mut doc);
 
     // 9. Extract headers and footers from PagedDocument (before content
     //    recovery so header/footer text is not misidentified as missing body content)
@@ -133,7 +135,7 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
 
     // 10. Recover missing content from PagedDocument (e.g. #align(center) blocks)
     if let Some(paged) = &paged_doc {
-        recover_missing_content(paged, &mut doc);
+        recovery::recover_missing_content(paged, &mut doc);
     }
 
     // 11. Extract title/author from document metadata, falling back to first heading
@@ -154,7 +156,7 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
     // 12d. Build element→page mapping from block tag locations for precise
     //       section break and horizontal rule placement.
     let element_page_map: Vec<usize> = if let Some(paged) = &paged_doc {
-        build_element_page_map(&body.children, paged, doc.body.elements.len())
+        recovery::build_element_page_map(&body.children, paged, doc.body.elements.len())
     } else {
         Vec::new()
     };
@@ -169,7 +171,7 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
 
     // 14. Detect horizontal rules from PagedDocument and insert them
     if let Some(paged) = &paged_doc {
-        insert_horizontal_rules_from_paged(paged, &mut doc, &element_page_map);
+        recovery::insert_horizontal_rules_from_paged(paged, &mut doc, &element_page_map);
     }
 
     Ok(doc)
@@ -818,7 +820,7 @@ fn strip_cjk_spaces(para: &mut Paragraph) {
     }
 }
 
-fn strip_visual_markers(s: &str) -> String {
+pub(super) fn strip_visual_markers(s: &str) -> String {
     let trimmed = s.trim_start_matches(|c: char| {
         matches!(c, '•' | '‣' | '◦' | '▪' | '▸' | '–' | '—')
     });
@@ -833,7 +835,7 @@ fn strip_visual_markers(s: &str) -> String {
     trimmed.to_string()
 }
 
-fn strip_cjk_spaces_str(s: &str) -> String {
+pub(super) fn strip_cjk_spaces_str(s: &str) -> String {
     let chars: Vec<char> = s.chars().collect();
     let mut out = String::with_capacity(s.len());
     let mut i = 0;
@@ -1035,7 +1037,7 @@ fn handle_inline_tag(
         }
         "footnote" => {
             let start_loc = tag.location();
-            if let Some(id) = find_footnote_id_in_range(&children[i..]) {
+            if let Some(id) = footnote::find_footnote_id_in_range(&children[i..]) {
                 para.add_footnote_ref(id + 1);
             }
             find_tag_end(children, i, start_loc)
@@ -1058,7 +1060,7 @@ fn handle_inline_tag(
                 && let Some(ref_elem) = c.to_packed::<RefElem>()
             {
                 let target_label = format!("{}", ref_elem.target.resolve());
-                let display = collect_text_from_nodes(&children[i + 1..end]);
+                let display = collect_flat_text(&children[i + 1..end]);
                 para.add_field_ref(target_label, display);
             }
             end
@@ -1096,7 +1098,7 @@ fn handle_inline_tag(
         "super" | "sub" | "raw" | "underline" | "strike"
         | "highlight" | "overline" | "smallcaps" => {
             let end = find_tag_end(children, i, tag.location());
-            let text = collect_text_from_nodes(&children[i + 1..end]);
+            let text = collect_flat_text(&children[i + 1..end]);
             if !text.is_empty() {
                 let mut run = Run::new(&text);
                 apply_inline_format(elem_name, &mut run);
@@ -1273,7 +1275,7 @@ fn collect_html_inlines_with_doc(
                 if let Tag::Start(content, _) = tag {
                     let elem_name = content.elem().name();
                     if elem_name == "footnote" {
-                        if let Some(id) = find_footnote_id_in_range(
+                        if let Some(id) = footnote::find_footnote_id_in_range(
                             &children[children
                                 .iter()
                                 .position(|c| std::ptr::eq(c, child))
@@ -1354,7 +1356,7 @@ fn handle_block_footnote(
     _html_doc: &HtmlDocument,
     doc: &mut Document,
 ) {
-    let footnote_id = find_footnote_id_in_range(children_from_here);
+    let footnote_id = footnote::find_footnote_id_in_range(children_from_here);
     if let Some(id) = footnote_id {
         // Add footnote ref to the last paragraph in the document
         if let Some(BlockElement::Paragraph(para)) = doc.body.elements.last_mut() {
@@ -1921,7 +1923,7 @@ fn convert_html_list_at_level(elem: &HtmlElement, doc: &mut Document, level: u32
 
 /// Convert a `<pre>` code block into monospace paragraphs (one per line).
 fn convert_code_block(elem: &HtmlElement, doc: &mut Document) {
-    let text = collect_all_text(&elem.children);
+    let text = collect_deep_text(&elem.children);
     for line in text.split('\n') {
         let mut para = Paragraph::new();
         para.code_block = true;
@@ -1993,13 +1995,13 @@ fn convert_term_list(elem: &HtmlElement, doc: &mut Document) {
 }
 
 /// Recursively collect all text content from a node tree.
-fn collect_all_text(children: &[HtmlNode]) -> String {
+fn collect_deep_text(children: &[HtmlNode]) -> String {
     let mut text = String::new();
     let mut line_started = false;
     for child in children {
         match child {
             HtmlNode::Text(t, _) => text.push_str(t),
-            HtmlNode::Element(elem) => text.push_str(&collect_all_text(&elem.children)),
+            HtmlNode::Element(elem) => text.push_str(&collect_deep_text(&elem.children)),
             HtmlNode::Tag(tag) => {
                 if is_tag_start(tag, "line") {
                     if line_started {
@@ -2037,12 +2039,12 @@ fn compute_equation_number(
 }
 
 /// Collect all text content from a slice of `HtmlNode` (used for cross-reference display text).
-fn collect_text_from_nodes(nodes: &[HtmlNode]) -> String {
+fn collect_flat_text(nodes: &[HtmlNode]) -> String {
     let mut text = String::new();
     for node in nodes {
         match node {
             HtmlNode::Text(t, _) => text.push_str(t),
-            HtmlNode::Element(elem) => text.push_str(&collect_all_text(&elem.children)),
+            HtmlNode::Element(elem) => text.push_str(&collect_deep_text(&elem.children)),
             HtmlNode::Tag(_) | HtmlNode::Frame(_) => {}
         }
     }
@@ -2152,7 +2154,7 @@ fn collect_formatted_runs_inner(
 // ---------------------------------------------------------------------------
 
 /// Find the index of the `Tag::End` matching the given start location.
-fn find_tag_end(
+pub(super) fn find_tag_end(
     children: &[HtmlNode],
     start_idx: usize,
     start_loc: typst::introspection::Location,
@@ -2422,7 +2424,7 @@ fn extract_document_metadata(html_doc: &HtmlDocument, doc: &mut Document) {
 }
 
 /// Get the tag name of an HTML element.
-fn tag_name(elem: &HtmlElement) -> String {
+pub(super) fn tag_name(elem: &HtmlElement) -> String {
     elem.tag.resolve().as_str().to_string()
 }
 
@@ -2459,12 +2461,12 @@ fn is_tag_end_for(tag: &Tag, start_loc: typst::introspection::Location) -> bool 
 }
 
 /// Check if an element has a specific attribute value.
-fn has_attr_value(elem: &HtmlElement, attr_name: &str, attr_value: &str) -> bool {
+pub(super) fn has_attr_value(elem: &HtmlElement, attr_name: &str, attr_value: &str) -> bool {
     get_attr_value(elem, attr_name).as_deref() == Some(attr_value)
 }
 
 /// Get the value of an attribute by name.
-fn get_attr_value(elem: &HtmlElement, attr_name: &str) -> Option<String> {
+pub(super) fn get_attr_value(elem: &HtmlElement, attr_name: &str) -> Option<String> {
     for (k, v) in &elem.attrs.0 {
         if k.resolve().as_str() == attr_name {
             return Some(v.to_string());
@@ -2473,68 +2475,8 @@ fn get_attr_value(elem: &HtmlElement, attr_name: &str) -> Option<String> {
     None
 }
 
-/// Find the footnote number from the children starting at a TAG Start("footnote").
-/// Looks for <a role="doc-noteref"> -> <sup> -> text number.
-fn find_footnote_id_in_range(children: &[HtmlNode]) -> Option<u32> {
-    for child in children {
-        match child {
-            HtmlNode::Element(elem) => {
-                if has_attr_value(elem, "role", "doc-noteref") {
-                    return find_sup_number(&elem.children);
-                }
-                if let Some(id) = find_footnote_id_in_range(&elem.children) {
-                    return Some(id);
-                }
-            }
-            HtmlNode::Tag(tag) => {
-                if matches!(tag, Tag::End(..)) {
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-/// Find a number inside <sup> elements.
-fn find_sup_number(children: &[HtmlNode]) -> Option<u32> {
-    for child in children {
-        if let HtmlNode::Element(elem) = child {
-            let tag = tag_name(elem);
-            if tag == "sup"
-                && let Some(text) = get_text_content(&elem.children)
-            {
-                let trimmed = text.trim();
-                if let Ok(n) = trimmed.parse() {
-                    return Some(n);
-                }
-                if let Some(n) = parse_circled_number(trimmed) {
-                    return Some(n);
-                }
-            }
-            if let Some(n) = find_sup_number(&elem.children) {
-                return Some(n);
-            }
-        }
-    }
-    None
-}
-
-/// Parse a circled number character into its numeric value.
-fn parse_circled_number(s: &str) -> Option<u32> {
-    let c = s.chars().next()?;
-    let code = c as u32;
-    match code {
-        0x2460..=0x2473 => Some(code - 0x2460 + 1),
-        0x3251..=0x325F => Some(code - 0x3251 + 21),
-        0x32B1..=0x32BF => Some(code - 0x32B1 + 36),
-        _ => None,
-    }
-}
-
 /// Get concatenated text content from children.
-fn get_text_content(children: &[HtmlNode]) -> Option<String> {
+pub(super) fn get_text_content(children: &[HtmlNode]) -> Option<String> {
     let mut text = String::new();
     for child in children {
         if let HtmlNode::Text(t, _) = child {
@@ -2542,91 +2484,6 @@ fn get_text_content(children: &[HtmlNode]) -> Option<String> {
         }
     }
     if text.is_empty() { None } else { Some(text) }
-}
-
-/// Extract footnote content from the <section role="doc-endnotes"> at the end of body.
-fn extract_footnote_contents(children: &[HtmlNode]) -> Vec<Vec<InlineElement>> {
-    let mut footnotes = Vec::new();
-
-    for child in children {
-        if let HtmlNode::Element(elem) = child
-            && tag_name(elem) == "section"
-            && has_attr_value(elem, "role", "doc-endnotes")
-        {
-            for ol_child in &elem.children {
-                if let HtmlNode::Element(ol) = ol_child
-                    && tag_name(ol) == "ol"
-                {
-                    extract_footnotes_from_ol(&ol.children, &mut footnotes);
-                }
-            }
-        }
-    }
-
-    footnotes
-}
-
-/// Extract footnote content from <li> elements inside the <ol>.
-fn extract_footnotes_from_ol(children: &[HtmlNode], footnotes: &mut Vec<Vec<InlineElement>>) {
-    for child in children {
-        if let HtmlNode::Element(li) = child
-            && tag_name(li) == "li"
-        {
-            let mut inlines = Vec::new();
-            collect_footnote_inlines(&li.children, &mut inlines, false, false, false);
-            footnotes.push(inlines);
-        }
-    }
-}
-
-/// Collect inline elements from footnote content, preserving formatting
-/// and including math equations. Skips backlink anchors.
-fn collect_footnote_inlines(
-    children: &[HtmlNode],
-    inlines: &mut Vec<InlineElement>,
-    bold: bool,
-    italic: bool,
-    monospace: bool,
-) {
-    for child in children {
-        match child {
-            HtmlNode::Text(text, _) => {
-                if !text.is_empty() {
-                    let mut run = Run::new(text.as_str());
-                    run.bold = bold;
-                    run.italic = italic;
-                    run.monospace = monospace;
-                    inlines.push(InlineElement::Text(run));
-                }
-            }
-            HtmlNode::Element(elem) => {
-                if has_attr_value(elem, "role", "doc-backlink") {
-                    continue;
-                }
-                let tag = tag_name(elem);
-                let new_bold = bold || tag == "strong" || tag == "b";
-                let new_italic = italic || tag == "em" || tag == "i";
-                let new_monospace = monospace || tag == "code";
-                collect_footnote_inlines(
-                    &elem.children,
-                    inlines,
-                    new_bold,
-                    new_italic,
-                    new_monospace,
-                );
-            }
-            HtmlNode::Tag(Tag::Start(content, _)) => {
-                if content.elem().name() == "equation" {
-                    let omml = typort_math::equation_to_omml(content);
-                    inlines.push(InlineElement::Math {
-                        omml_xml: omml,
-                        equation_number: None,
-                    });
-                }
-            }
-            HtmlNode::Tag(_) | HtmlNode::Frame(_) => {}
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2645,760 +2502,12 @@ fn detect_alignment(elem: &HtmlElement) -> Option<Alignment> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Footnote format detection (I3)
-// ---------------------------------------------------------------------------
-
-/// Detect whether footnotes use circled number format (①②③) by scanning the
-/// HTML DOM for `<a role="doc-noteref">` containing `<sup>` with circled numbers.
-fn detect_footnote_format(children: &[HtmlNode], doc: &mut Document) {
-    for child in children {
-        if let HtmlNode::Element(elem) = child {
-            if has_attr_value(elem, "role", "doc-noteref")
-                && let Some(text) = get_text_content(&elem.children)
-                && parse_circled_number(text.trim()).is_some()
-            {
-                doc.style.footnote_format = FootnoteFormat::CircledNumber;
-                return;
-            }
-            for inner in &elem.children {
-                if let HtmlNode::Element(sup) = inner
-                    && tag_name(sup) == "sup"
-                    && let Some(text) = get_text_content(&sup.children)
-                    && parse_circled_number(text.trim()).is_some()
-                {
-                    doc.style.footnote_format = FootnoteFormat::CircledNumber;
-                    return;
-                }
-            }
-            detect_footnote_format(&elem.children, doc);
-            if doc.style.footnote_format == FootnoteFormat::CircledNumber {
-                return;
-            }
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Image extraction from PagedDocument
-// ---------------------------------------------------------------------------
-
-/// Extract all images from a `PagedDocument` in document order.
-///
-/// Walks all page frames and converts `FrameItem::Image` into `ImageData`
-/// with EMU dimensions based on the rendered size (not pixel size).
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn extract_images_from_paged(paged: &PagedDocument) -> Vec<ImageData> {
-    let mut images = Vec::new();
-    for page in &paged.pages {
-        collect_frame_images(&page.frame, &mut images);
-    }
-    images
-}
-
-/// Recursively collect images from a frame.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn collect_frame_images(frame: &Frame, images: &mut Vec<ImageData>) {
-    for (_, item) in frame.items() {
-        match item {
-            FrameItem::Image(img, size, _) => {
-                if let Some(data) = convert_typst_image(img, size) {
-                    images.push(data);
-                }
-            }
-            FrameItem::Group(group) => {
-                collect_frame_images(&group.frame, images);
-            }
-            _ => {}
-        }
-    }
-}
-
-/// Convert a Typst Image + rendered Size into an `ImageData`.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn convert_typst_image(
-    img: &typst::visualize::Image,
-    size: &typst::layout::Size,
-) -> Option<ImageData> {
-    use typst_library::visualize::ImageKind;
-
-    // Use the rendered size for EMU dimensions: 1 pt = 12700 EMU
-    let width_emu = (size.x.to_pt() * 12700.0) as u64;
-    let height_emu = (size.y.to_pt() * 12700.0) as u64;
-
-    match img.kind() {
-        ImageKind::Raster(raster) => {
-            use typst_library::visualize::ExchangeFormat;
-            let bytes = raster.data().to_vec();
-            let format = match raster.format() {
-                typst_library::visualize::RasterFormat::Exchange(ExchangeFormat::Png) => {
-                    ImageFormat::Png
-                }
-                typst_library::visualize::RasterFormat::Exchange(ExchangeFormat::Jpg) => {
-                    ImageFormat::Jpeg
-                }
-                typst_library::visualize::RasterFormat::Exchange(
-                    ExchangeFormat::Gif | ExchangeFormat::Webp,
-                )
-                | typst_library::visualize::RasterFormat::Pixel(_) => return None,
-            };
-            Some(ImageData {
-                bytes,
-                format,
-                width_emu,
-                height_emu,
-            })
-        }
-        ImageKind::Svg(svg) => {
-            let tree = svg.tree();
-            let svg_size = tree.size();
-            let pixel_w = svg_size.width().ceil() as u32;
-            let pixel_h = svg_size.height().ceil() as u32;
-            if pixel_w == 0 || pixel_h == 0 {
-                return None;
-            }
-            let mut pixmap = tiny_skia::Pixmap::new(pixel_w, pixel_h)?;
-            resvg::render(tree, tiny_skia::Transform::default(), &mut pixmap.as_mut());
-            let png_bytes = pixmap.encode_png().ok()?;
-
-            Some(ImageData {
-                bytes: png_bytes,
-                format: ImageFormat::Png,
-                width_emu,
-                height_emu,
-            })
-        }
-        ImageKind::Pdf(_) => None,
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Content recovery from PagedDocument (I2)
-// ---------------------------------------------------------------------------
-
-/// A text line extracted from a `PagedDocument` frame, preserving run-level info.
-#[derive(Debug, Clone)]
-struct FrameLine {
-    text: String,
-    runs: Vec<Run>,
-    /// If this line has multiple x-clusters (e.g., from a grid layout),
-    /// each cluster is stored as a group of runs.  When `x_clusters` has
-    /// 2+ entries the line should be emitted as a tab-separated paragraph.
-    x_clusters: Vec<XCluster>,
-    /// Page index (0-based) this line appears on.
-    page_idx: usize,
-    /// Y-position in pt from top of the page.
-    y_pt: f64,
-    /// True if all text items in this line use a math font.
-    all_math_font: bool,
-}
-
-/// A group of runs that belong to the same horizontal cluster on a line.
-#[derive(Debug, Clone)]
-struct XCluster {
-    /// Average x position of this cluster (in pt).
-    x_pt: f64,
-    runs: Vec<Run>,
-}
-
-/// A text fragment from a rendered frame with position and size info.
-struct FrameTextItem {
-    y: f64,
-    x: f64,
-    text: String,
-    size_pt: f64,
-    font_name: String,
-}
-
-/// Recover content that exists in the `PagedDocument` but was lost from the `HtmlDocument` DOM.
-///
-/// This handles the case where `#align(center)[...]` content completely vanishes from the
-/// HTML semantic output (no show rule exists for `AlignElem` in Typst's HTML target). We detect
-/// the missing text by comparing the paged output with our converted document, then insert
-/// the missing lines as centered paragraphs at the appropriate position.
-fn recover_missing_content(paged: &PagedDocument, doc: &mut Document) {
-    let all_page_lines = extract_lines_from_all_pages(paged);
-    if all_page_lines.is_empty() {
-        return;
-    }
-
-    let title_line_count = count_title_lines(&all_page_lines, doc);
-    let full_doc_text = extract_doc_text(doc);
-
-    // Collect header/footer/footnote text to exclude from recovery
-    let mut exclude_text = extract_header_footer_text(doc);
-    for footnote in &doc.footnotes {
-        for inline in &footnote.content {
-            if let InlineElement::Text(run) = inline {
-                exclude_text.push_str(&run.text);
-            }
-        }
-    }
-
-    let mut missing = Vec::new();
-    for (i, line) in all_page_lines.iter().enumerate() {
-        if i < title_line_count {
-            continue;
-        }
-        if line.text.chars().count() < 2 {
-            continue;
-        }
-        if line.all_math_font {
-            continue;
-        }
-        // Skip text that's already in the body, headers/footers, or footnotes.
-        // Also check with CJK spaces stripped, since Typst's paged output keeps
-        // spaces between CJK chars that we've already removed from the doc model.
-        let line_normalized = strip_cjk_spaces_str(&line.text);
-        let line_stripped = strip_visual_markers(&line.text);
-        if full_doc_text.contains(&line.text)
-            || full_doc_text.contains(&line_normalized)
-            || full_doc_text.contains(&line_stripped)
-            || exclude_text.contains(&line.text)
-        {
-            continue;
-        }
-        // Word-level overlap check: if most significant words (3+ chars) are
-        // found in doc text, the line is likely already present (e.g., math
-        // characters rendered with different Unicode codepoints).
-        let words: Vec<&str> = line.text.split_whitespace().collect();
-        if words.len() >= 2 {
-            let sig_count = words.iter().filter(|w| w.chars().count() >= 3).count();
-            let matched = words
-                .iter()
-                .filter(|w| w.chars().count() >= 3 && full_doc_text.contains(**w))
-                .count();
-            if sig_count >= 2 && matched * 2 > sig_count {
-                continue;
-            }
-        }
-        missing.push(line.clone());
-    }
-
-    if !missing.is_empty() {
-        insert_missing_at_position(doc, &missing, &all_page_lines);
-    }
-}
-
-/// Extract all text from the document's header and footer for deduplication.
-fn extract_header_footer_text(doc: &Document) -> String {
-    let mut text = String::new();
-    if let Some(header) = &doc.header {
-        for para in &header.paragraphs {
-            text.push_str(&para.text_content());
-        }
-    }
-    if let Some(footer) = &doc.footer {
-        for para in &footer.paragraphs {
-            text.push_str(&para.text_content());
-        }
-    }
-    text
-}
-
-/// Cluster text items by x-position.
-///
-/// Items within `gap_threshold` pt of each other are considered part of the
-/// same cluster. Returns clusters sorted by x-position.
-fn cluster_by_x<'a>(
-    items: &[&'a FrameTextItem],
-    gap_threshold: f64,
-) -> Vec<Vec<&'a FrameTextItem>> {
-    if items.is_empty() {
-        return Vec::new();
-    }
-    let mut sorted: Vec<&FrameTextItem> = items.to_vec();
-    sorted.sort_by(|a, b| a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal));
-
-    let mut clusters: Vec<Vec<&FrameTextItem>> = Vec::new();
-    let mut current: Vec<&FrameTextItem> = vec![sorted[0]];
-
-    for item in &sorted[1..] {
-        let last_x = current.last().map_or(0.0, |i| i.x);
-        if item.x - last_x > gap_threshold {
-            clusters.push(std::mem::take(&mut current));
-        }
-        current.push(item);
-    }
-    if !current.is_empty() {
-        clusters.push(current);
-    }
-    clusters
-}
-
-/// Extract text lines from all pages of a `PagedDocument`.
-///
-/// For each visual line (y-group), detect whether text items form
-/// multiple x-clusters (e.g., from a `#grid()` layout).  When there are
-/// 2+ clusters the resulting `FrameLine` carries `x_clusters` so that
-/// recovery can emit tab-separated paragraphs.
-#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
-fn extract_lines_from_all_pages(paged: &PagedDocument) -> Vec<FrameLine> {
-    let mut all_lines = Vec::new();
-
-    let body_size = paged.pages.first().map_or(10.5, |p| {
-        let mut items = Vec::new();
-        collect_text_items_with_pos(&p.frame, Point::zero(), &mut items);
-        let mut sizes: HashMap<i32, usize> = HashMap::new();
-        for item in &items {
-            *sizes.entry((item.size_pt * 10.0) as i32).or_default() += item.text.len();
-        }
-        sizes
-            .into_iter()
-            .max_by_key(|(_, c)| *c)
-            .map_or(10.5, |(s, _)| f64::from(s) / 10.0)
-    });
-
-    for (page_idx, page) in paged.pages.iter().enumerate() {
-        let mut text_items = Vec::new();
-        collect_text_items_with_pos(&page.frame, Point::zero(), &mut text_items);
-
-        let mut y_groups: BTreeMap<i64, Vec<&FrameTextItem>> = BTreeMap::new();
-        for item in &text_items {
-            // Use 8pt tolerance so superscript text (offset ~3-5pt up) stays grouped
-            // with its base text on the same line
-            let y_key = (item.y / 8.0).round() as i64;
-            y_groups.entry(y_key).or_default().push(item);
-        }
-
-        for items in y_groups.values() {
-            // Detect x-clusters with a 36pt (~0.5in) gap threshold.
-            // Items closer than this are part of the same column.
-            let page_width_pt = paged
-                .pages
-                .first()
-                .map_or(595.0, |p| p.frame.width().to_pt());
-            let max_font_size = items.iter().map(|i| i.size_pt).fold(0.0_f64, f64::max);
-            // Scale gap threshold with font size: for CJK at 22pt, consecutive
-            // characters are ~22pt apart, but word spacing and centering offsets
-            // can create gaps up to ~5x the font size. Use max(default, font*5)
-            // so large text is not falsely split into multiple "columns".
-            let gap_threshold = (page_width_pt * 0.06).max(20.0).max(max_font_size * 5.0);
-            let raw_clusters = cluster_by_x(items, gap_threshold);
-
-            // Post-clustering merge: detect false splits from large-font
-            // character spacing. If items have a large uniform font size,
-            // the clusters are likely individual characters of a title — not
-            // a real multi-column layout. Real grid columns span a significant
-            // portion of the page width each.
-            let clusters = if raw_clusters.len() >= 2 {
-                let max_size = raw_clusters
-                    .iter()
-                    .flat_map(|c| c.iter().map(|i| i.size_pt))
-                    .fold(0.0_f64, f64::max);
-                // If the largest text on this line is significantly bigger than
-                // body text, it's likely a title — don't split into tab columns.
-                if max_size > body_size * 1.3 {
-                    vec![raw_clusters.into_iter().flatten().collect()]
-                } else {
-                    raw_clusters
-                }
-            } else {
-                raw_clusters
-            };
-
-            let mut x_clusters = Vec::new();
-            let mut all_runs = Vec::new();
-            let mut full_text = String::new();
-
-            for cluster in &clusters {
-                let mut cluster_runs = Vec::new();
-                let cluster_x: f64 = cluster.first().map_or(0.0, |i| i.x);
-                for item in cluster {
-                    let is_super = item.size_pt < body_size * 0.8;
-                    let mut run = Run::new(&item.text);
-                    run.superscript = is_super;
-                    cluster_runs.push(run.clone());
-                    all_runs.push(run);
-                    full_text.push_str(&item.text);
-                }
-                x_clusters.push(XCluster {
-                    x_pt: cluster_x,
-                    runs: cluster_runs,
-                });
-            }
-
-            let trimmed = full_text.trim().to_string();
-            let avg_y = items.iter().map(|i| i.y).sum::<f64>() / items.len() as f64;
-            let all_math_font = items
-                .iter()
-                .all(|i| i.font_name.contains("Math"));
-            if !trimmed.is_empty() {
-                all_lines.push(FrameLine {
-                    text: trimmed,
-                    runs: all_runs,
-                    x_clusters,
-                    page_idx,
-                    y_pt: avg_y,
-                    all_math_font,
-                });
-            }
-        }
-    }
-    all_lines
-}
-
-/// Recursively collect text items from a frame with their absolute positions.
-fn collect_text_items_with_pos(frame: &Frame, offset: Point, items: &mut Vec<FrameTextItem>) {
-    for (pos, item) in frame.items() {
-        let abs_x = offset.x + pos.x;
-        let abs_y = offset.y + pos.y;
-        match item {
-            FrameItem::Text(text_item) => {
-                let text = text_item.text.to_string();
-                if !text.is_empty() {
-                    let font_name = text_item
-                        .font
-                        .info()
-                        .family
-                        .clone();
-                    items.push(FrameTextItem {
-                        y: abs_y.to_pt(),
-                        x: abs_x.to_pt(),
-                        text,
-                        size_pt: text_item.size.to_pt(),
-                        font_name,
-                    });
-                }
-            }
-            FrameItem::Group(group) => {
-                let new_offset = Point::new(abs_x, abs_y);
-                collect_text_items_with_pos(&group.frame, new_offset, items);
-            }
-            _ => {}
-        }
-    }
-}
-
-/// Count how many leading lines on page 1 correspond to headings in our document.
-fn count_title_lines(paged_lines: &[FrameLine], doc: &Document) -> usize {
-    let mut count = 0;
-    for line in paged_lines {
-        let is_heading = doc.body.elements.iter().any(|e| {
-            if let BlockElement::Paragraph(p) = e
-                && matches!(p.style, Some(ParagraphStyle::Heading(_)))
-            {
-                p.text_runs().any(|r| line.text.contains(&r.text))
-            } else {
-                false
-            }
-        });
-        if is_heading {
-            count += 1;
-        } else {
-            break;
-        }
-    }
-    count
-}
-
-/// Extract all text from the Document model as a single normalized string.
-fn extract_doc_text(doc: &Document) -> String {
-    let mut text = String::new();
-    for elem in &doc.body.elements {
-        match elem {
-            BlockElement::Paragraph(p) => {
-                text.push_str(&p.full_text_content());
-            }
-            BlockElement::Table(t) => {
-                for row in &t.rows {
-                    for cell in &row.cells {
-                        for para in &cell.paragraphs {
-                            text.push_str(&para.full_text_content());
-                        }
-                    }
-                }
-            }
-        }
-    }
-    text
-}
-
-/// Find where the title headings end in the document (first non-heading element).
-fn find_title_section_end(doc: &Document) -> usize {
-    for (i, elem) in doc.body.elements.iter().enumerate() {
-        if let BlockElement::Paragraph(p) = elem {
-            if !matches!(p.style, Some(ParagraphStyle::Heading(_))) {
-                return i;
-            }
-        } else {
-            return i;
-        }
-    }
-    doc.body.elements.len()
-}
-
-/// Convert a position in points to twips (1 pt = 20 twips).
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn pt_to_twips(pt: f64) -> u32 {
-    (pt * 20.0).round().max(0.0) as u32
-}
-
-/// Insert missing lines as paragraphs at the correct position in the document.
-///
-/// Uses the y-position of missing lines relative to existing content in the
-/// paged output to determine the insertion point, rather than assuming a
-/// fixed "after headings" structure. Falls back to inserting after the title
-/// section if position matching fails.
-///
-/// `all_page_lines` is the full ordered list of lines from the paged output,
-/// used to find the existing line just before each group of missing lines.
-///
-/// Lines with multiple x-clusters (from `#grid()` layouts) are emitted as
-/// tab-separated paragraphs with right-aligned tab stops. Lines with a single
-/// cluster are emitted as centered paragraphs (the existing behaviour for
-/// `#align(center)` recovery).
-fn insert_missing_at_position(
-    doc: &mut Document,
-    missing_lines: &[FrameLine],
-    all_page_lines: &[FrameLine],
-) {
-    let insert_idx = find_insert_position_by_y(doc, missing_lines, all_page_lines);
-
-    // Compute actual page content width for tab stop positioning instead of
-    // assuming A4 with default margins.
-    let ps = &doc.page_settings;
-    let content_width_twips = ps.width_twips.saturating_sub(ps.margin_left + ps.margin_right);
-
-    let mut paragraphs: Vec<BlockElement> = Vec::new();
-    for line in missing_lines {
-        let mut para = Paragraph::new();
-        para.suppress_indent = true;
-
-        // Real grid columns each have meaningful content (>= 3 chars).
-        // A title split into individual characters will have 1-2 char clusters.
-        let is_real_grid = line.x_clusters.len() >= 2
-            && line
-                .x_clusters
-                .iter()
-                .all(|c| c.runs.iter().map(|r| r.text.chars().count()).sum::<usize>() >= 3);
-        if is_real_grid {
-            // Multi-column line: emit runs from each cluster separated by tabs,
-            // with a right-aligned tab stop for the last cluster.
-            let last_cluster = &line.x_clusters[line.x_clusters.len() - 1];
-            let tab_pos = pt_to_twips(last_cluster.x_pt);
-            // Use the actual page content width as the tab stop fallback.
-            let tab_stop = if tab_pos > 0 { tab_pos } else { content_width_twips };
-            para.tab_stops.push(tab_stop);
-            for (idx, cluster) in line.x_clusters.iter().enumerate() {
-                if idx > 0 {
-                    para.add_tab();
-                }
-                for run in &cluster.runs {
-                    para.push_run(run.clone());
-                }
-            }
-        } else {
-            // Single-column line: emit as centered paragraph (existing behaviour)
-            para.alignment = Some(Alignment::Center);
-            for run in &line.runs {
-                para.push_run(run.clone());
-            }
-        }
-        paragraphs.push(BlockElement::Paragraph(para));
-    }
-
-    if !paragraphs.is_empty() {
-        let tail = doc.body.elements.split_off(insert_idx);
-        doc.body.elements.extend(paragraphs);
-        doc.body.elements.extend(tail);
-    }
-}
-
-/// Find the best insertion position for missing lines by comparing their
-/// y-position in the paged output with surrounding present lines.
-///
-/// Looks for the line in `all_page_lines` that immediately precedes the first
-/// missing line (by page and y-position) and is present in the document model,
-/// then finds that text in the doc elements to determine the insertion index.
-///
-/// Falls back to `find_title_section_end` if no preceding line can be matched.
-fn find_insert_position_by_y(
-    doc: &Document,
-    missing_lines: &[FrameLine],
-    all_page_lines: &[FrameLine],
-) -> usize {
-    let Some(first_missing) = missing_lines.first() else {
-        return find_title_section_end(doc);
-    };
-
-    // Find the first missing line in all_page_lines by matching text, page, and y.
-    let missing_idx = all_page_lines.iter().position(|line| {
-        line.text == first_missing.text
-            && line.page_idx == first_missing.page_idx
-            && (line.y_pt - first_missing.y_pt).abs() < 2.0
-    });
-
-    if let Some(idx) = missing_idx {
-        // Search backwards for the nearest line that IS present in the doc.
-        for j in (0..idx).rev() {
-            let candidate = &all_page_lines[j];
-            if let Some(elem_idx) = find_element_by_text(doc, &candidate.text) {
-                return elem_idx + 1;
-            }
-        }
-    }
-
-    // Fallback: insert after the title section (legacy behaviour)
-    find_title_section_end(doc)
-}
-
-/// Find the index of a document element whose text content contains the given text.
-fn find_element_by_text(doc: &Document, text: &str) -> Option<usize> {
-    if text.is_empty() {
-        return None;
-    }
-    let search_prefix: String = text.chars().take(15).collect();
-    for (i, elem) in doc.body.elements.iter().enumerate() {
-        let elem_text = match elem {
-            BlockElement::Paragraph(p) => p.text_content(),
-            BlockElement::Table(_) => continue,
-        };
-        if elem_text.contains(&search_prefix) {
-            return Some(i);
-        }
-    }
-    None
-}
-
-// ---------------------------------------------------------------------------
-// Element → page mapping via Introspector
-// ---------------------------------------------------------------------------
-
-/// Build a mapping from document body element index to page number.
-///
-/// Collects all block-level `Tag::Start` locations from the HTML tree (in
-/// document order), queries the `PagedDocument` introspector for each
-/// location's page number, then distributes those page numbers across the
-/// `total_elements` in the document model.
-///
-/// Returns a `Vec<usize>` of length `total_elements` where each entry is
-/// the 1-based page number for that element. Elements beyond the range of
-/// collected tags inherit the last known page number.
-fn build_element_page_map(
-    children: &[HtmlNode],
-    paged: &PagedDocument,
-    total_elements: usize,
-) -> Vec<usize> {
-    if total_elements == 0 || paged.pages.is_empty() {
-        return Vec::new();
-    }
-
-    let mut locs: Vec<Location> = Vec::new();
-    collect_block_tag_locations(children, &mut locs);
-
-    if locs.is_empty() {
-        return vec![1; total_elements];
-    }
-
-    // Query page numbers for each block tag location.
-    let tag_pages: Vec<usize> = locs
-        .iter()
-        .map(|loc| paged.introspector.page(*loc).get())
-        .collect();
-
-    // The block tags correspond roughly 1:1 with doc elements, but the
-    // doc may have extra elements (page-break paragraphs, recovered content).
-    // Distribute: assign each doc element the page of the nearest tag.
-    let mut result = vec![1_usize; total_elements];
-    let n_tags = tag_pages.len();
-
-    for (elem_idx, slot) in result.iter_mut().enumerate() {
-        // Map element index to the nearest tag index proportionally.
-        let tag_idx = if n_tags >= total_elements {
-            // More tags than elements: map directly
-            elem_idx.min(n_tags - 1)
-        } else {
-            // Fewer tags than elements: proportional mapping
-            (elem_idx * n_tags / total_elements).min(n_tags - 1)
-        };
-        *slot = tag_pages[tag_idx];
-    }
-
-    result
-}
-
-// ---------------------------------------------------------------------------
-// Page break detection via Introspector
-// ---------------------------------------------------------------------------
-
-/// Walk the HTML tree's block-level `Tag::Start` nodes, query the
-/// `PagedDocument`'s `Introspector` for each element's page number, and return
-/// a `HashSet<Location>` of elements that need a page break inserted **before**
-/// them (i.e. the first element on each new page after a page boundary).
-///
-/// A page transition is treated as an explicit page break only if a
-/// `PagebreakElem` exists on that page (queried via the Introspector).
-/// When no `PagebreakElem` is found anywhere in the document, falls back
-/// to a content-height heuristic (page < 95% full).
-fn collect_page_break_locations(children: &[HtmlNode], paged: &PagedDocument) -> HashSet<Location> {
-    // 1. Collect all block-level Tag::Start locations in document order.
-    let mut locs: Vec<Location> = Vec::new();
-    collect_block_tag_locations(children, &mut locs);
-
-    if locs.is_empty() || paged.pages.len() < 2 {
-        return HashSet::new();
-    }
-
-    // 2. Query the PagedDocument introspector for each location's page number.
-    let page_nums: Vec<NonZeroUsize> = locs
-        .iter()
-        .map(|loc| paged.introspector.page(*loc))
-        .collect();
-
-    // 3. Query all PagebreakElem locations and collect the pages they appear on.
-    //    A page containing an explicit #pagebreak() should produce a page break
-    //    in the Word output; natural page overflow should not.
-    let explicit_break_pages: HashSet<usize> = {
-        use typst::foundations::{NativeElement, Selector};
-        let selector =
-            Selector::Elem(typst_library::layout::PagebreakElem::ELEM, None);
-        let pagebreaks = paged.introspector.query(&selector);
-        pagebreaks
-            .iter()
-            .filter_map(typst::foundations::Content::location)
-            .map(|loc| paged.introspector.page(loc).get())
-            .collect()
-    };
-    let has_any_pagebreak_elems = !explicit_break_pages.is_empty();
-
-    // 4. Find page boundaries: where consecutive elements jump to a higher page.
-    let mut result = HashSet::new();
-    for i in 1..locs.len() {
-        if page_nums[i] > page_nums[i - 1] {
-            let prev_page_num = page_nums[i - 1].get();
-            if has_any_pagebreak_elems {
-                // Check if any page in the gap has an explicit PagebreakElem.
-                let has_explicit = (prev_page_num..page_nums[i].get())
-                    .any(|p| explicit_break_pages.contains(&p));
-                if !has_explicit {
-                    continue;
-                }
-            } else {
-                // Fallback: use content height heuristic when no PagebreakElem
-                // was found by the introspector.
-                let prev_page_idx = prev_page_num - 1;
-                if prev_page_idx < paged.pages.len() {
-                    let page = &paged.pages[prev_page_idx];
-                    let page_height = page.frame.height().to_pt();
-                    let content_y = find_max_content_y_in_frame(&page.frame, Point::zero());
-                    if page_height > 0.0 && content_y >= page_height * 0.95 {
-                        continue;
-                    }
-                }
-            }
-            result.insert(locs[i]);
-        }
-    }
-    result
-}
-
 /// Recursively collect `Location`s of block-level `Tag::Start` nodes from
 /// the HTML tree, preserving document order.  Only introspectable tags for
 /// block-level elements (heading, par, equation, table, list, enum, figure,
 /// image, section, outline) are collected — these are the tags whose page
 /// numbers are meaningful for page-break detection.
-fn collect_block_tag_locations(children: &[HtmlNode], out: &mut Vec<Location>) {
+pub(super) fn collect_block_tag_locations(children: &[HtmlNode], out: &mut Vec<Location>) {
     let mut i = 0;
     while i < children.len() {
         match &children[i] {
@@ -3433,163 +2542,5 @@ fn collect_block_tag_locations(children: &[HtmlNode], out: &mut Vec<Location>) {
             _ => {}
         }
         i += 1;
-    }
-}
-
-/// Find the maximum y-coordinate of any content in a frame (recursively).
-fn find_max_content_y_in_frame(frame: &Frame, offset: Point) -> f64 {
-    let mut max_y: f64 = 0.0;
-    for (pos, item) in frame.items() {
-        let abs_y = offset.y + pos.y;
-        match item {
-            FrameItem::Text(text_item) => {
-                let y = abs_y.to_pt() + text_item.size.to_pt();
-                if y > max_y {
-                    max_y = y;
-                }
-            }
-            FrameItem::Group(group) => {
-                let new_offset = Point::new(offset.x + pos.x, abs_y);
-                let group_max = find_max_content_y_in_frame(&group.frame, new_offset);
-                if group_max > max_y {
-                    max_y = group_max;
-                }
-            }
-            FrameItem::Image(_, size, _) => {
-                let y = abs_y.to_pt() + size.y.to_pt();
-                if y > max_y {
-                    max_y = y;
-                }
-            }
-            _ => {}
-        }
-    }
-    max_y
-}
-
-// ---------------------------------------------------------------------------
-// Horizontal rule detection from PagedDocument
-// ---------------------------------------------------------------------------
-
-/// Detect horizontal line shapes in the `PagedDocument` and insert horizontal
-/// rule paragraphs at the corresponding positions in the document.
-///
-/// A horizontal rule is detected as a `FrameItem::Shape` with `Geometry::Line`
-/// whose horizontal extent is at least 80% of the page content width.
-///
-/// Uses the introspector-based `element_page_map` (`element_index` → page)
-/// to place rules precisely at the correct page boundary instead of
-/// proportional estimation.
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::cast_precision_loss
-)]
-fn insert_horizontal_rules_from_paged(
-    paged: &PagedDocument,
-    doc: &mut Document,
-    element_page_map: &[usize],
-) {
-    let total_pages = paged.pages.len();
-    if total_pages == 0 {
-        return;
-    }
-
-    let total_elements = doc.body.elements.len();
-    if total_elements == 0 {
-        return;
-    }
-
-    // Collect all horizontal rules with their page number and y-position
-    // (page_number is 1-based, y is in pt from top of page).
-    let mut hrules: Vec<(usize, f64)> = Vec::new();
-
-    for (page_idx, page) in paged.pages.iter().enumerate() {
-        let page_width = page.frame.width().to_pt();
-        let content_width = page_width * 0.6; // Minimum 60% of page width to be a rule
-
-        let mut lines = Vec::new();
-        collect_horizontal_lines(&page.frame, Point::zero(), content_width, &mut lines);
-
-        for line_y in lines {
-            hrules.push((page_idx + 1, line_y)); // 1-based page number
-        }
-    }
-
-    if hrules.is_empty() {
-        return;
-    }
-
-    // Sort by position (page, then y) in reverse for back-to-front insertion
-    hrules.sort_by(|a, b| {
-        b.0.cmp(&a.0)
-            .then_with(|| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal))
-    });
-
-    let full_doc_text = extract_doc_text(doc);
-
-    for (page_num, _line_y) in &hrules {
-        // Find the insertion point: the first element on this page.
-        // The hrule should be inserted before that element.
-        let insert_idx = if !element_page_map.is_empty() && element_page_map.len() == total_elements {
-            element_page_map
-                .iter()
-                .position(|&p| p >= *page_num)
-                .unwrap_or(total_elements)
-        } else {
-            // Fallback: proportional mapping
-            let normalized = f64::from(*page_num as u32 - 1) / f64::from(total_pages as u32);
-            let idx = (normalized * total_elements as f64).round() as usize;
-            idx.min(total_elements)
-        };
-
-        // Don't insert if we already have a horizontal rule nearby
-        let already_has_hrule = doc.body.elements.get(insert_idx).is_some_and(|e| {
-            if let BlockElement::Paragraph(p) = e {
-                p.horizontal_rule
-            } else {
-                false
-            }
-        });
-
-        if already_has_hrule {
-            continue;
-        }
-
-        // Skip if the document is nearly empty (no real text to separate)
-        if full_doc_text.len() < 10 {
-            continue;
-        }
-
-        let mut hr_para = Paragraph::new();
-        hr_para.horizontal_rule = true;
-        doc.body
-            .elements
-            .insert(insert_idx, BlockElement::Paragraph(hr_para));
-    }
-}
-
-/// Recursively collect y-positions of horizontal lines from a frame.
-fn collect_horizontal_lines(frame: &Frame, offset: Point, min_width: f64, lines: &mut Vec<f64>) {
-    for (pos, item) in frame.items() {
-        let abs_x = offset.x + pos.x;
-        let abs_y = offset.y + pos.y;
-        match item {
-            FrameItem::Shape(shape, _) => {
-                if let typst::visualize::Geometry::Line(end_pt) = &shape.geometry {
-                    let line_width = end_pt.x.to_pt().abs();
-                    let line_height = end_pt.y.to_pt().abs();
-                    // Horizontal line: significant width, minimal height
-                    if line_width >= min_width && line_height < 5.0 {
-                        lines.push(abs_y.to_pt());
-                    }
-                }
-            }
-            FrameItem::Group(group) => {
-                let new_offset = Point::new(abs_x, abs_y);
-                collect_horizontal_lines(&group.frame, new_offset, min_width, lines);
-            }
-            _ => {}
-        }
     }
 }

@@ -3,15 +3,7 @@ use std::path::Path;
 
 #[test]
 fn complex_paper_has_table_structure() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("complex_paper");
 
     // Verify w:tbl structure is present
     assert!(
@@ -129,15 +121,7 @@ fn end_to_end_hello_typ_to_docx() {
 
 #[test]
 fn complex_paper_has_semantic_structure() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("complex_paper");
 
     assert!(doc_xml.contains("Heading1"), "should have Heading1");
     assert!(doc_xml.contains("Heading2"), "should have Heading2");
@@ -237,15 +221,7 @@ fn complex_paper_has_footnotes() {
 
 #[test]
 fn italic_text_produces_w_i_element() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/italic_test.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("italic_test");
 
     assert!(
         doc_xml.contains("<w:i/>"),
@@ -259,15 +235,7 @@ fn italic_text_produces_w_i_element() {
 
 #[test]
 fn math_test_produces_omml() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/math_test.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("math_test");
 
     // Verify OMML namespace is present
     assert!(
@@ -453,15 +421,7 @@ fn preset_overrides_page_margins() {
 
 #[test]
 fn numbered_equation_has_right_aligned_number() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/numbered_eq.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("numbered_eq");
 
     // Verify equation number "(1)" appears in the document
     assert!(
@@ -802,15 +762,7 @@ fn features_footnote_restart_and_font_hint() {
 
 #[test]
 fn features_suppress_indent_and_bibliography() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("complex_paper");
 
     // Feature 3: First paragraph after heading has firstLine="0" (suppress indent)
     // The Normal style has firstLine="420", so paragraphs after headings should override
@@ -828,15 +780,7 @@ fn features_suppress_indent_and_bibliography() {
 
 #[test]
 fn features_table_width_percentage() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("complex_paper");
 
     // Feature 6: Table uses percentage width (100%)
     assert!(
@@ -1299,14 +1243,7 @@ fn math_aligned_equation_produces_standalone_eqarr() {
 
 #[test]
 fn toc_produces_field_code() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/toc_test.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("toc_test");
 
     assert!(
         doc_xml.contains("fldCharType=\"begin\""),
@@ -1522,15 +1459,7 @@ fn header_footer_produces_xml_parts() {
 
 #[test]
 fn header_footer_text_not_in_body() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/header_footer_test.typ"))
-            .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("header_footer_test");
 
     // Header/footer text should NOT leak into the document body
     assert!(
@@ -1545,15 +1474,7 @@ fn header_footer_text_not_in_body() {
 
 #[test]
 fn header_footer_referenced_in_sect_pr() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/header_footer_test.typ"))
-            .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("header_footer_test");
 
     // The sectPr should reference header and footer
     assert!(
@@ -1586,14 +1507,7 @@ fn columns_detected_in_document_model() {
 
 #[test]
 fn columns_produces_w_cols_in_xml() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/columns_test.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("columns_test");
 
     // Should have w:cols with w:num="2" in the section properties
     assert!(
@@ -1612,15 +1526,7 @@ fn columns_produces_w_cols_in_xml() {
 
 #[test]
 fn section_break_produces_multiple_sect_pr() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/section_break_test.typ"))
-            .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("section_break_test");
 
     // Count w:sectPr elements — should be at least 2 (one inline break + final section)
     let sect_pr_count = doc_xml.matches("<w:sectPr>").count();
@@ -1676,15 +1582,7 @@ fn section_break_document_model_has_section_break() {
 
 #[test]
 fn section_break_has_content_from_both_sections() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/section_break_test.typ"))
-            .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("section_break_test");
 
     // Both sections' content should appear in the document
     assert!(
@@ -1703,14 +1601,7 @@ fn section_break_has_content_from_both_sections() {
 
 #[test]
 fn nested_list_has_multiple_levels() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/nested_list.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("nested_list");
 
     assert!(
         doc_xml.contains(r#"w:ilvl w:val="0""#),
@@ -1867,14 +1758,7 @@ fn inline_smallcaps_text_preserved() {
 
 #[test]
 fn pagebreak_inserts_w_br_page() {
-    let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/pagebreak_test.typ"))
-        .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("pagebreak_test");
 
     // The document should contain a page break element
     assert!(
@@ -1961,14 +1845,7 @@ fn pagebreak_after_nearly_full_page_is_detected() {
 
 #[test]
 fn hrule_produces_paragraph_with_bottom_border() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/hrule_test.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("hrule_test");
 
     // The document should contain a paragraph border for horizontal rules
     assert!(
@@ -2003,14 +1880,7 @@ fn hrule_document_model_has_horizontal_rule_flag() {
 
 #[test]
 fn hrule_content_is_preserved() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/hrule_test.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("hrule_test");
 
     // The text around the horizontal rules should be preserved
     assert!(
@@ -2029,15 +1899,7 @@ fn hrule_content_is_preserved() {
 
 #[test]
 fn math_in_heading_produces_omml() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/math_in_heading.typ"))
-            .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("math_in_heading");
 
     assert!(
         doc_xml.contains("m:oMath"),
@@ -2080,14 +1942,7 @@ fn footnote_in_table_cell_has_reference() {
 
 #[test]
 fn rowspan_produces_vmerge_continue_cells() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/rowspan_test.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("rowspan_test");
 
     // The first cell of row 0 has rowspan=2 -> vMerge restart
     assert!(
@@ -2176,15 +2031,7 @@ fn multi_paragraph_cell_has_multiple_paragraphs() {
 
 #[test]
 fn multi_paragraph_cell_produces_multiple_w_p_in_tc() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/multi_para_cell.typ"))
-            .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("multi_para_cell");
 
     assert!(
         doc_xml.contains("First paragraph"),
@@ -2251,14 +2098,7 @@ fn formatted_footnote_xml_has_formatting_elements() {
 
 #[test]
 fn bold_link_preserves_formatting_in_hyperlink() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/bold_link.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("bold_link");
 
     // The hyperlink should exist
     assert!(doc_xml.contains("HYPERLINK"), "should have HYPERLINK field");
@@ -2312,14 +2152,7 @@ fn bold_link_document_model_has_bold_runs() {
 
 #[test]
 fn grid_content_recovered_in_output() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/grid_test.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("grid_test");
 
     // All grid text should appear in the output
     assert!(
@@ -2347,14 +2180,7 @@ fn grid_content_recovered_in_output() {
 
 #[test]
 fn grid_multi_column_has_tab_stops() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/grid_test.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("grid_test");
 
     // Multi-column grid lines should produce tab stops in the XML
     assert!(
@@ -2461,15 +2287,7 @@ fn page_numbering_typ_generates_page_field_footer() {
 
 #[test]
 fn math_in_table_cells_is_preserved() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/math_in_table.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("math_in_table");
 
     // The table must exist
     assert!(
@@ -2501,15 +2319,7 @@ fn math_in_table_cells_is_preserved() {
 
 #[test]
 fn figure_caption_is_single_paragraph() {
-    let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/figure_caption.typ"))
-        .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("figure_caption");
 
     // Count how many paragraphs contain parts of the caption text.
     // The caption "Table 1: A simple data table" should NOT be split into
@@ -2786,15 +2596,7 @@ fn visual_regression_complex_paper() {
 
 #[test]
 fn equation_label_produces_bookmark() {
-    let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/equation_label.typ"))
-        .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("equation_label");
 
     assert!(
         doc_xml.contains("w:bookmarkStart") && doc_xml.contains("eq:pythagoras"),
@@ -2808,15 +2610,7 @@ fn equation_label_produces_bookmark() {
 
 #[test]
 fn equation_label_cross_reference_produces_ref_field() {
-    let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/equation_label.typ"))
-        .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("equation_label");
 
     assert!(
         doc_xml.contains("REF eq:pythagoras"),
@@ -2868,16 +2662,7 @@ fn doc_author_from_set_document() {
 
 #[test]
 fn show_rule_heading_centered() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/centered_heading.typ"))
-            .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("centered_heading");
 
     // The heading should be detected as centered from the PagedDocument
     // Look for a Heading1 paragraph with center alignment
@@ -2889,15 +2674,7 @@ fn show_rule_heading_centered() {
 
 #[test]
 fn show_rule_colored_bold() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/colored_text.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("colored_text");
 
     // The bold text should have red color.
     // Typst's `red` is #ff4136, not #ff0000.
@@ -2909,16 +2686,7 @@ fn show_rule_colored_bold() {
 
 #[test]
 fn large_title_not_split_by_tabs() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/large_title_test.typ"))
-            .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("large_title_test");
 
     // The large centered title "大标题测试文档" should NOT be split by tab characters.
     // Previously, large CJK characters at 22pt exceeded the x-cluster gap threshold,
@@ -2937,16 +2705,7 @@ fn large_title_not_split_by_tabs() {
 
 #[test]
 fn nested_table_produces_nested_w_tbl() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/nested_table_test.typ"))
-            .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("nested_table_test");
 
     // There should be 2 w:tbl elements: the outer table and the nested inner table
     let table_count = doc_xml.matches("<w:tbl>").count();
@@ -3017,16 +2776,7 @@ fn nested_table_document_model_has_cell_content() {
 
 #[test]
 fn show_rule_heading_font_and_size() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/show_rule_styles.typ"))
-            .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("show_rule_styles");
 
     // Heading should be centered (from show rule: align(center))
     assert!(
@@ -3049,16 +2799,7 @@ fn show_rule_heading_font_and_size() {
 
 #[test]
 fn show_rule_bold_size_override() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/show_rule_styles.typ"))
-            .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("show_rule_styles");
 
     // Bold text should have 14pt = 28 half-points (from show rule: set text(size: 14pt))
     assert!(
@@ -3069,16 +2810,7 @@ fn show_rule_bold_size_override() {
 
 #[test]
 fn show_rule_italic_color() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/show_rule_styles.typ"))
-            .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("show_rule_styles");
 
     // Italic text should be blue (from show rule: set text(fill: rgb("#0000FF")))
     assert!(
@@ -3131,16 +2863,7 @@ fn edge_list_restart_separate_lists_get_unique_num_ids() {
 
 #[test]
 fn edge_blockquote_has_left_indent() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/edge_blockquote.typ"))
-            .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("edge_blockquote");
 
     assert!(
         doc_xml.contains("w:ind w:left=\""),
@@ -3178,17 +2901,7 @@ fn edge_math_in_footnote_preserved() {
 
 #[test]
 fn edge_super_sub_in_heading_preserved() {
-    let world = typort_core::TyportWorld::new(Path::new(
-        "../../tests/fixtures/edge_super_sub_in_heading.typ",
-    ))
-    .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = fixture_doc_xml("edge_super_sub_in_heading");
 
     assert!(
         doc_xml.contains("w:vertAlign w:val=\"subscript\""),
@@ -3202,7 +2915,7 @@ fn edge_super_sub_in_heading_preserved() {
 
 // ── Issue fixtures: competitor bug regression tests ─────────────────
 
-fn issue_doc_xml(fixture: &str) -> String {
+fn fixture_doc_xml(fixture: &str) -> String {
     let path = format!("../../tests/fixtures/{fixture}.typ");
     let world = typort_core::TyportWorld::new(Path::new(&path)).unwrap();
     let doc = typort_core::convert::convert(&world).unwrap();
@@ -3216,7 +2929,7 @@ fn issue_doc_xml(fixture: &str) -> String {
 
 #[test]
 fn issue_cjk_linebreak_no_spurious_spaces() {
-    let xml = issue_doc_xml("issue_cjk_linebreak");
+    let xml = fixture_doc_xml("issue_cjk_linebreak");
     assert!(
         xml.contains("这是一段中文文本，"),
         "first CJK text segment should be present"
@@ -3254,7 +2967,7 @@ fn issue_cjk_linebreak_no_spurious_spaces() {
 
 #[test]
 fn issue_context_equation_no_duplicate() {
-    let xml = issue_doc_xml("issue_context_equation");
+    let xml = fixture_doc_xml("issue_context_equation");
     assert!(
         xml.contains("The value is"),
         "context block text should be present"
@@ -3272,7 +2985,7 @@ fn issue_context_equation_no_duplicate() {
 
 #[test]
 fn issue_figure_caption_present() {
-    let xml = issue_doc_xml("issue_figure_caption");
+    let xml = fixture_doc_xml("issue_figure_caption");
     assert!(
         xml.contains("Demographics of participants"),
         "first figure caption text should be present"
@@ -3289,7 +3002,7 @@ fn issue_figure_caption_present() {
 
 #[test]
 fn issue_inline_math_spacing_preserved() {
-    let xml = issue_doc_xml("issue_inline_math_spacing");
+    let xml = fixture_doc_xml("issue_inline_math_spacing");
     assert!(
         xml.contains("<m:oMath>"),
         "inline math should produce OMML elements"
@@ -3311,7 +3024,7 @@ fn issue_inline_math_spacing_preserved() {
 
 #[test]
 fn issue_mat_delimiter_omml() {
-    let xml = issue_doc_xml("issue_mat_delimiter");
+    let xml = fixture_doc_xml("issue_mat_delimiter");
     assert!(
         xml.contains("<m:begChr m:val=\"[\""),
         "matrix with delim '[' should have begChr='['"
@@ -3328,7 +3041,7 @@ fn issue_mat_delimiter_omml() {
 
 #[test]
 fn issue_rotate_content_recovered() {
-    let xml = issue_doc_xml("issue_rotate_content");
+    let xml = fixture_doc_xml("issue_rotate_content");
     assert!(
         xml.contains("This text is normal."),
         "normal text before rotate should be present"
@@ -3345,7 +3058,7 @@ fn issue_rotate_content_recovered() {
 
 #[test]
 fn issue_show_rule_heading_styles() {
-    let xml = issue_doc_xml("issue_show_rule_heading");
+    let xml = fixture_doc_xml("issue_show_rule_heading");
     assert!(
         xml.contains("Main Title"),
         "heading 1 text should be present"
@@ -3366,7 +3079,7 @@ fn issue_show_rule_heading_styles() {
 
 #[test]
 fn issue_smart_quotes_preserved() {
-    let xml = issue_doc_xml("issue_smart_quotes");
+    let xml = fixture_doc_xml("issue_smart_quotes");
     assert!(
         xml.contains("\u{201c}") || xml.contains("\u{201d}"),
         "smart double quotes should be preserved"
@@ -3383,7 +3096,7 @@ fn issue_smart_quotes_preserved() {
 
 #[test]
 fn issue_linebreak_in_heading_preserved() {
-    let xml = issue_doc_xml("issue_linebreak_heading");
+    let xml = fixture_doc_xml("issue_linebreak_heading");
     assert!(
         xml.contains("Heading with"),
         "heading text before line break should be present"
@@ -3400,7 +3113,7 @@ fn issue_linebreak_in_heading_preserved() {
 
 #[test]
 fn issue_display_math_in_list_numbering() {
-    let xml = issue_doc_xml("issue_display_math_in_list");
+    let xml = fixture_doc_xml("issue_display_math_in_list");
     assert!(
         xml.contains("First item"),
         "first list item should be present"
@@ -3418,7 +3131,7 @@ fn issue_display_math_in_list_numbering() {
 
 #[test]
 fn issue_nested_enum_all_items_present() {
-    let xml = issue_doc_xml("issue_nested_enum_reset");
+    let xml = fixture_doc_xml("issue_nested_enum_reset");
     for text in ["Parent A", "Parent B", "Parent C", "Sub one", "Sub two", "Sub one again"] {
         assert!(
             xml.contains(text),
@@ -3429,7 +3142,7 @@ fn issue_nested_enum_all_items_present() {
 
 #[test]
 fn issue_subscript_scope_omml() {
-    let xml = issue_doc_xml("issue_subscript_scope");
+    let xml = fixture_doc_xml("issue_subscript_scope");
     assert!(
         xml.contains("<m:sSub>") || xml.contains("<m:sSup>"),
         "subscript/superscript math should produce m:sSub/m:sSup"
@@ -3443,7 +3156,7 @@ fn issue_subscript_scope_omml() {
 
 #[test]
 fn issue_tight_list_no_duplicate() {
-    let xml = issue_doc_xml("issue_tight_list_sublist");
+    let xml = fixture_doc_xml("issue_tight_list_sublist");
     let item1_count = xml.matches("Item 1").count();
     assert_eq!(
         item1_count, 1,
@@ -3457,7 +3170,7 @@ fn issue_tight_list_no_duplicate() {
 
 #[test]
 fn issue_heading_numbering_correct_order() {
-    let xml = issue_doc_xml("issue_heading_numbering_show");
+    let xml = fixture_doc_xml("issue_heading_numbering_show");
     let intro_pos = xml.find("Introduction").expect("Introduction should exist");
     let bg_pos = xml.find("Background").expect("Background should exist");
     let methods_pos = xml.find("Methods").expect("Methods should exist");
@@ -3471,7 +3184,7 @@ fn issue_heading_numbering_correct_order() {
 
 #[test]
 fn edge_academic_template_structure() {
-    let xml = issue_doc_xml("edge_academic_template");
+    let xml = fixture_doc_xml("edge_academic_template");
     for text in ["Introduction", "Main Results", "Definitions", "Theorem", "Conclusion", "Supplementary"] {
         assert!(xml.contains(text), "heading '{text}' should be present");
     }
@@ -3488,7 +3201,7 @@ fn edge_academic_template_structure() {
 
 #[test]
 fn edge_augmented_matrix_omml() {
-    let xml = issue_doc_xml("edge_augmented_matrix");
+    let xml = fixture_doc_xml("edge_augmented_matrix");
     assert!(
         xml.matches("<m:m>").count() >= 4,
         "should have at least 4 matrices"
@@ -3505,7 +3218,7 @@ fn edge_augmented_matrix_omml() {
 
 #[test]
 fn edge_colored_text_has_color_runs() {
-    let xml = issue_doc_xml("edge_colored_text");
+    let xml = fixture_doc_xml("edge_colored_text");
     assert!(xml.contains("red text"), "red text content should be present");
     assert!(xml.contains("blue text"), "blue text content should be present");
     assert!(xml.contains("Green text"), "green text content should be present");
@@ -3525,7 +3238,7 @@ fn edge_colored_text_has_color_runs() {
 
 #[test]
 fn edge_complex_table_merges() {
-    let xml = issue_doc_xml("edge_complex_table");
+    let xml = fixture_doc_xml("edge_complex_table");
     assert!(xml.contains("Header A-B"), "colspan header should be present");
     assert!(xml.contains("Header C-D"), "second colspan header should be present");
     assert!(xml.contains("Full width footer"), "full-width footer should be present");
@@ -3541,7 +3254,7 @@ fn edge_complex_table_merges() {
 
 #[test]
 fn edge_custom_enum_numbering_items() {
-    let xml = issue_doc_xml("edge_custom_enum_numbering");
+    let xml = fixture_doc_xml("edge_custom_enum_numbering");
     for text in ["First major point", "Alpha item", "Top level", "First clause"] {
         assert!(xml.contains(text), "enum item '{text}' should be present");
     }
@@ -3554,7 +3267,7 @@ fn edge_custom_enum_numbering_items() {
 
 #[test]
 fn edge_deep_nested_list_all_levels() {
-    let xml = issue_doc_xml("edge_deep_nested_list");
+    let xml = fixture_doc_xml("edge_deep_nested_list");
     for text in ["Level 0", "Level 1", "Level 2", "Level 3", "Bullet parent", "Ordered child", "Bullet grandchild"] {
         assert!(xml.contains(text), "list item '{text}' should be present");
     }
@@ -3568,7 +3281,7 @@ fn edge_deep_nested_list_all_levels() {
 
 #[test]
 fn edge_empty_paragraphs_no_crash() {
-    let xml = issue_doc_xml("edge_empty_paragraphs");
+    let xml = fixture_doc_xml("edge_empty_paragraphs");
     assert!(xml.contains("First paragraph"), "first text should be present");
     assert!(xml.contains("Third paragraph"), "third text should be present");
     assert!(xml.contains("Last paragraph"), "last text should be present");
@@ -3576,7 +3289,7 @@ fn edge_empty_paragraphs_no_crash() {
 
 #[test]
 fn edge_figure_placement_tables_and_refs() {
-    let xml = issue_doc_xml("edge_figure_placement");
+    let xml = fixture_doc_xml("edge_figure_placement");
     assert!(xml.contains("Performance comparison"), "first figure caption should be present");
     assert!(xml.contains("Hyperparameters"), "second figure caption should be present");
     assert!(xml.contains("<w:tbl>"), "tables in figures should be present");
@@ -3585,7 +3298,7 @@ fn edge_figure_placement_tables_and_refs() {
 
 #[test]
 fn edge_inline_formatting_all_decorations() {
-    let xml = issue_doc_xml("edge_inline_formatting");
+    let xml = fixture_doc_xml("edge_inline_formatting");
     assert!(xml.contains("strikethrough"), "strikethrough text should be present");
     assert!(xml.contains("underlined"), "underlined text should be present");
     assert!(xml.contains("Small Caps"), "small caps text should be present");
@@ -3597,7 +3310,7 @@ fn edge_inline_formatting_all_decorations() {
 
 #[test]
 fn edge_landscape_pages_orientation() {
-    let xml = issue_doc_xml("edge_landscape_pages");
+    let xml = fixture_doc_xml("edge_landscape_pages");
     assert!(xml.contains("Portrait Section"), "portrait heading should be present");
     assert!(xml.contains("Landscape Section"), "landscape heading should be present");
     assert!(xml.contains("Back to Portrait"), "return-to-portrait heading should be present");
@@ -3614,7 +3327,7 @@ fn edge_landscape_pages_orientation() {
 
 #[test]
 fn edge_mixed_list_content_all_present() {
-    let xml = issue_doc_xml("edge_mixed_list_content");
+    let xml = fixture_doc_xml("edge_mixed_list_content");
     for text in ["quadratic formula", "First item", "continuation paragraph", "Summary of results", "Outer numbered", "Deepest bullet"] {
         assert!(xml.contains(text), "content '{text}' should be present");
     }
@@ -3626,7 +3339,7 @@ fn edge_mixed_list_content_all_present() {
 
 #[test]
 fn edge_multi_section_different_page_sizes() {
-    let xml = issue_doc_xml("edge_multi_section");
+    let xml = fixture_doc_xml("edge_multi_section");
     for text in ["Section One", "Section Two", "Section Three"] {
         assert!(xml.contains(text), "heading '{text}' should be present");
     }
@@ -3643,7 +3356,7 @@ fn edge_multi_section_different_page_sizes() {
 
 #[test]
 fn edge_subfigures_content() {
-    let xml = issue_doc_xml("edge_subfigures");
+    let xml = fixture_doc_xml("edge_subfigures");
     assert!(xml.contains("Subfigure placeholder"), "subfigure placeholders should be present");
     assert!(xml.contains("Comparison of two methods"), "main figure caption should be present");
     assert!(xml.contains("training data"), "side-by-side table caption should be present");
@@ -3651,7 +3364,7 @@ fn edge_subfigures_content() {
 
 #[test]
 fn edge_term_list_bold_terms() {
-    let xml = issue_doc_xml("edge_term_list");
+    let xml = fixture_doc_xml("edge_term_list");
     for term in ["Supervised Learning", "Unsupervised Learning", "Reinforcement Learning"] {
         assert!(xml.contains(term), "term '{term}' should be present");
     }
@@ -3664,7 +3377,7 @@ fn edge_term_list_bold_terms() {
 
 #[test]
 fn edge_text_transforms_smallcaps_and_case() {
-    let xml = issue_doc_xml("edge_text_transforms");
+    let xml = fixture_doc_xml("edge_text_transforms");
     assert!(
         xml.contains("<w:smallCaps/>"),
         "smallcaps should produce w:smallCaps"
@@ -3675,7 +3388,7 @@ fn edge_text_transforms_smallcaps_and_case() {
 
 #[test]
 fn edge_theorem_proof_content() {
-    let xml = issue_doc_xml("edge_theorem_proof");
+    let xml = fixture_doc_xml("edge_theorem_proof");
     for text in ["Continuity", "Intermediate Value", "Theorem", "Proof", "Definition", "bounded monotone", "Preliminaries"] {
         assert!(xml.contains(text), "'{text}' should be present");
     }
@@ -3687,7 +3400,7 @@ fn edge_theorem_proof_content() {
 
 #[test]
 fn edge_bordered_blocks_text_preserved() {
-    let xml = issue_doc_xml("edge_bordered_blocks");
+    let xml = fixture_doc_xml("edge_bordered_blocks");
     assert!(xml.contains("full border"), "bordered block text should be present");
     assert!(xml.contains("important remark"), "admonition text should be present");
     assert!(xml.contains("gray background"), "filled block text should be present");
@@ -3698,7 +3411,7 @@ fn edge_bordered_blocks_text_preserved() {
 
 #[test]
 fn edge_show_rule_heading_counter_text() {
-    let xml = issue_doc_xml("edge_show_rule_heading_counter");
+    let xml = fixture_doc_xml("edge_show_rule_heading_counter");
     for text in ["Introduction", "Background", "Motivation", "Methods", "Data Collection", "Results"] {
         assert!(xml.contains(text), "heading '{text}' should be present");
     }
@@ -3708,7 +3421,7 @@ fn edge_show_rule_heading_counter_text() {
 
 #[test]
 fn issue_deep_headings_all_levels() {
-    let xml = issue_doc_xml("issue_deep_headings");
+    let xml = fixture_doc_xml("issue_deep_headings");
     for text in ["Level 1", "Level 2", "Level 3", "Level 4", "Level 5"] {
         assert!(xml.contains(text), "heading '{text}' should be present");
     }
@@ -3720,7 +3433,7 @@ fn issue_deep_headings_all_levels() {
 
 #[test]
 fn issue_smartquotes_locale_chars() {
-    let xml = issue_doc_xml("issue_smartquotes_locale");
+    let xml = fixture_doc_xml("issue_smartquotes_locale");
     assert!(xml.contains("Citation"), "French text should be present");
     assert!(xml.contains("Zitat"), "German text should be present");
     assert!(xml.contains("English quote"), "English text should be present");
@@ -3736,14 +3449,14 @@ fn issue_smartquotes_locale_chars() {
 
 #[test]
 fn issue_layout_dropped_text_recovered() {
-    let xml = issue_doc_xml("issue_layout_dropped");
+    let xml = fixture_doc_xml("issue_layout_dropped");
     assert!(xml.contains("Some text before"), "text before layout should be present");
     assert!(xml.contains("Some text after"), "text after layout should be present");
 }
 
 #[test]
 fn issue_split_paragraph_content() {
-    let xml = issue_doc_xml("issue_split_paragraph");
+    let xml = fixture_doc_xml("issue_split_paragraph");
     assert!(xml.contains("following items"), "intro text should be present");
     assert!(xml.contains("Item one"), "list item should be present");
     assert!(xml.contains("Consider the equation"), "equation intro should be present");
@@ -3753,7 +3466,7 @@ fn issue_split_paragraph_content() {
 
 #[test]
 fn issue_table_hline_border_structure() {
-    let xml = issue_doc_xml("issue_table_hline_border");
+    let xml = fixture_doc_xml("issue_table_hline_border");
     assert!(xml.contains("Column A"), "header cell A should be present");
     assert!(xml.contains("Column B"), "header cell B should be present");
     assert!(xml.contains("Data 1"), "data cell should be present");
@@ -3762,7 +3475,7 @@ fn issue_table_hline_border_structure() {
 
 #[test]
 fn issue_table_figure_caption_text() {
-    let xml = issue_doc_xml("issue_table_figure_caption");
+    let xml = fixture_doc_xml("issue_table_figure_caption");
     assert!(xml.contains("First table with a caption"), "first caption should be present");
     assert!(xml.contains("Second table with a caption"), "second caption should be present");
     assert!(xml.contains("<w:tbl>"), "tables should be present");
@@ -3770,7 +3483,7 @@ fn issue_table_figure_caption_text() {
 
 #[test]
 fn issue_long_crossref_label_bookmarks() {
-    let xml = issue_doc_xml("issue_long_crossref_label");
+    let xml = fixture_doc_xml("issue_long_crossref_label");
     assert!(xml.contains("very long heading"), "long heading text should be present");
     assert!(xml.contains("Short heading"), "short heading text should be present");
     let bookmark_count = xml.matches("w:bookmarkStart").count();
@@ -3790,7 +3503,7 @@ fn issue_long_crossref_label_bookmarks() {
 
 #[test]
 fn issue_mixed_list_numbering_all_items() {
-    let xml = issue_doc_xml("issue_mixed_list_numbering");
+    let xml = fixture_doc_xml("issue_mixed_list_numbering");
     for text in ["First ordered", "Bullet sub-item A", "Bullet sub-item B", "Second ordered", "Third ordered"] {
         assert!(xml.contains(text), "list item '{text}' should be present");
     }
@@ -3803,7 +3516,7 @@ fn issue_mixed_list_numbering_all_items() {
 
 #[test]
 fn issue_blockquote_in_footnote_content() {
-    let xml = issue_doc_xml("issue_blockquote_in_footnote");
+    let xml = fixture_doc_xml("issue_blockquote_in_footnote");
     assert!(
         xml.contains("w:footnoteReference"),
         "footnote reference should be present"
@@ -3813,7 +3526,7 @@ fn issue_blockquote_in_footnote_content() {
 
 #[test]
 fn issue_nested_table_structure() {
-    let xml = issue_doc_xml("issue_nested_table");
+    let xml = fixture_doc_xml("issue_nested_table");
     assert!(xml.contains("Outer cell"), "outer cell text should be present");
     assert!(xml.contains("Inner A"), "inner table cell should be present");
     let table_count = xml.matches("<w:tbl>").count();
@@ -3825,7 +3538,7 @@ fn issue_nested_table_structure() {
 
 #[test]
 fn issue_cjk_latin_font_mixing_content() {
-    let xml = issue_doc_xml("issue_cjk_latin_font_mixing");
+    let xml = fixture_doc_xml("issue_cjk_latin_font_mixing");
     assert!(xml.contains("中文正文"), "CJK text should be present");
     assert!(xml.contains("English"), "Latin text should be present");
     assert!(xml.contains("2024"), "numbers should be present");
@@ -3833,7 +3546,7 @@ fn issue_cjk_latin_font_mixing_content() {
 
 #[test]
 fn issue_table_cell_paragraph_style_content() {
-    let xml = issue_doc_xml("issue_table_cell_paragraph_style");
+    let xml = fixture_doc_xml("issue_table_cell_paragraph_style");
     assert!(xml.contains("normal paragraph"), "body paragraph should be present");
     assert!(xml.contains("Table cell content"), "table cell should be present");
     assert!(xml.contains("<w:tbl>"), "table should be present");
@@ -3845,7 +3558,7 @@ fn issue_table_cell_paragraph_style_content() {
 
 #[test]
 fn issue_complex_math_chain_accents() {
-    let xml = issue_doc_xml("issue_complex_math_chain");
+    let xml = fixture_doc_xml("issue_complex_math_chain");
     assert!(
         xml.matches("<m:acc>").count() >= 2,
         "dot accent should produce m:acc elements"
@@ -3862,7 +3575,7 @@ fn issue_complex_math_chain_accents() {
 
 #[test]
 fn issue_blockquote_attribution_text() {
-    let xml = issue_doc_xml("issue_blockquote_attribution");
+    let xml = fixture_doc_xml("issue_blockquote_attribution");
     assert!(xml.contains("To be, or not to be"), "first quote should be present");
     assert!(xml.contains("All that glitters"), "second quote should be present");
     assert!(xml.contains("Imagination"), "third quote should be present");
@@ -3872,7 +3585,7 @@ fn issue_blockquote_attribution_text() {
 
 #[test]
 fn issue_block_content_in_table_cells() {
-    let xml = issue_doc_xml("issue_block_content_in_table");
+    let xml = fixture_doc_xml("issue_block_content_in_table");
     assert!(xml.contains("Header 1"), "table header should be present");
     assert!(xml.contains("Regular text"), "regular cell should be present");
     assert!(xml.contains("hello"), "code block content should be present");
@@ -3882,7 +3595,7 @@ fn issue_block_content_in_table_cells() {
 
 #[test]
 fn issue_footnote_with_link_refs() {
-    let xml = issue_doc_xml("issue_footnote_with_link");
+    let xml = fixture_doc_xml("issue_footnote_with_link");
     assert!(xml.contains("Introduction"), "heading should be present");
     assert!(xml.contains("Conclusion"), "second heading should be present");
     let fn_count = xml.matches("w:footnoteReference").count();
@@ -3900,14 +3613,14 @@ fn issue_footnote_with_link_refs() {
 
 #[test]
 fn issue_footnote_separator_has_refs() {
-    let xml = issue_doc_xml("issue_footnote_separator");
+    let xml = fixture_doc_xml("issue_footnote_separator");
     let fn_count = xml.matches("w:footnoteReference").count();
     assert_eq!(fn_count, 3, "should have 3 footnote references, got {fn_count}");
 }
 
 #[test]
 fn issue_list_bullet_hierarchy_levels() {
-    let xml = issue_doc_xml("issue_list_bullet_hierarchy");
+    let xml = fixture_doc_xml("issue_list_bullet_hierarchy");
     for text in ["Level 0", "Level 1", "Level 2", "Level 3", "Back to level 0"] {
         assert!(xml.contains(text), "list item '{text}' should be present");
     }
@@ -3921,7 +3634,7 @@ fn issue_list_bullet_hierarchy_levels() {
 
 #[test]
 fn issue_final_section_landscape_sections() {
-    let xml = issue_doc_xml("issue_final_section_landscape");
+    let xml = fixture_doc_xml("issue_final_section_landscape");
     assert!(xml.contains("Portrait Section"), "portrait heading should be present");
     assert!(xml.contains("Landscape Section"), "landscape heading should be present");
     assert!(xml.contains("<w:tbl>"), "table should be present");
@@ -3934,14 +3647,14 @@ fn issue_final_section_landscape_sections() {
 
 #[test]
 fn issue_custom_doc_properties_metadata() {
-    let xml = issue_doc_xml("issue_custom_doc_properties");
+    let xml = fixture_doc_xml("issue_custom_doc_properties");
     assert!(xml.contains("Abstract"), "abstract heading should be present");
     assert!(xml.contains("Introduction"), "intro heading should be present");
 }
 
 #[test]
 fn issue_list_of_figures_toc() {
-    let xml = issue_doc_xml("issue_list_of_figures");
+    let xml = fixture_doc_xml("issue_list_of_figures");
     assert!(xml.contains("TOC"), "TOC field code should be present");
     assert!(xml.contains("Introduction"), "heading should be present");
     assert!(xml.contains("blue rectangle"), "figure caption should be present");
@@ -3950,14 +3663,14 @@ fn issue_list_of_figures_toc() {
 
 #[test]
 fn issue_footnote_math_formatting_content() {
-    let xml = issue_doc_xml("issue_footnote_math_formatting");
+    let xml = fixture_doc_xml("issue_footnote_math_formatting");
     let fn_count = xml.matches("w:footnoteReference").count();
     assert_eq!(fn_count, 3, "should have 3 footnotes, got {fn_count}");
 }
 
 #[test]
 fn issue_math_trailing_punct_equations() {
-    let xml = issue_doc_xml("issue_math_trailing_punct");
+    let xml = fixture_doc_xml("issue_math_trailing_punct");
     assert!(xml.contains("obtain"), "text before equation should be present");
     let math_count = xml.matches("<m:oMathPara>").count();
     assert!(
@@ -3968,7 +3681,7 @@ fn issue_math_trailing_punct_equations() {
 
 #[test]
 fn issue_symbol_subscript_omml() {
-    let xml = issue_doc_xml("issue_symbol_subscript");
+    let xml = fixture_doc_xml("issue_symbol_subscript");
     assert!(
         xml.contains("<m:sSub>"),
         "subscript on symbol should produce m:sSub"
@@ -3986,7 +3699,7 @@ fn issue_symbol_subscript_omml() {
 
 #[test]
 fn issue_cjk_bold_punct_formatting() {
-    let xml = issue_doc_xml("issue_cjk_bold_punct");
+    let xml = fixture_doc_xml("issue_cjk_bold_punct");
     assert!(xml.contains("加粗"), "bold CJK text should be present");
     assert!(xml.contains("斜体"), "italic text should be present");
     assert!(xml.contains("<w:b/>"), "bold formatting should be present");
@@ -3995,7 +3708,7 @@ fn issue_cjk_bold_punct_formatting() {
 
 #[test]
 fn issue_let_math_vars_content() {
-    let xml = issue_doc_xml("issue_let_math_vars");
+    let xml = fixture_doc_xml("issue_let_math_vars");
     assert!(
         xml.contains("<m:oMath>"),
         "interpolated math should produce OMML"
@@ -4004,7 +3717,7 @@ fn issue_let_math_vars_content() {
 
 #[test]
 fn issue_show_rule_link_list_content() {
-    let xml = issue_doc_xml("issue_show_rule_link_list");
+    let xml = fixture_doc_xml("issue_show_rule_link_list");
     assert!(xml.contains("Example"), "link text should be present");
     assert!(xml.contains("Regular item"), "plain list item should be present");
     assert!(xml.contains("Normal paragraph"), "body text should be present");
@@ -4020,7 +3733,7 @@ fn issue_show_rule_link_list_content() {
 
 #[test]
 fn issue_figure_counter_reset_tables() {
-    let xml = issue_doc_xml("issue_figure_counter_reset");
+    let xml = fixture_doc_xml("issue_figure_counter_reset");
     assert!(xml.contains("First table"), "first caption should be present");
     assert!(xml.contains("Table after reset"), "reset caption should be present");
     let table_count = xml.matches("<w:tbl>").count();
@@ -4032,7 +3745,7 @@ fn issue_figure_counter_reset_tables() {
 
 #[test]
 fn issue_function_generated_heading() {
-    let xml = issue_doc_xml("issue_function_generated_content");
+    let xml = fixture_doc_xml("issue_function_generated_content");
     assert!(xml.contains("Introduction"), "first heading should be present");
     assert!(xml.contains("Important Result"), "function-generated heading should be present");
     assert!(xml.contains("Heading1"), "level-1 heading style should be present");
@@ -4041,7 +3754,7 @@ fn issue_function_generated_heading() {
 
 #[test]
 fn issue_cjk_heading_numbering_content() {
-    let xml = issue_doc_xml("issue_cjk_heading_numbering");
+    let xml = fixture_doc_xml("issue_cjk_heading_numbering");
     assert!(xml.contains("绪论"), "CJK heading text should be present");
     assert!(xml.contains("研究背景"), "CJK subheading should be present");
     assert!(xml.contains("Heading1"), "Heading1 style should be present");
@@ -4049,7 +3762,7 @@ fn issue_cjk_heading_numbering_content() {
 
 #[test]
 fn issue_math_grouping_attach_omml() {
-    let xml = issue_doc_xml("issue_math_grouping_attach");
+    let xml = fixture_doc_xml("issue_math_grouping_attach");
     assert!(
         xml.contains("<m:sSubSup>"),
         "combined sub+sup should produce m:sSubSup"
@@ -4065,7 +3778,7 @@ fn issue_math_grouping_attach_omml() {
 
 #[test]
 fn issue_text_deco_inline_math_decorations() {
-    let xml = issue_doc_xml("issue_text_deco_inline_math");
+    let xml = fixture_doc_xml("issue_text_deco_inline_math");
     assert!(xml.contains("underlined"), "underline text should be present");
     assert!(xml.contains("highlighted"), "highlight text should be present");
     assert!(xml.contains("struck-through"), "strikethrough text should be present");
@@ -4075,7 +3788,7 @@ fn issue_text_deco_inline_math_decorations() {
 
 #[test]
 fn issue_math_dot_punctuation_equations() {
-    let xml = issue_doc_xml("issue_math_dot_punctuation");
+    let xml = fixture_doc_xml("issue_math_dot_punctuation");
     let math_count = xml.matches("<m:oMathPara>").count();
     assert!(
         math_count >= 4,
@@ -4085,7 +3798,7 @@ fn issue_math_dot_punctuation_equations() {
 
 #[test]
 fn issue_section_equation_numbering_refs() {
-    let xml = issue_doc_xml("issue_section_equation_numbering");
+    let xml = fixture_doc_xml("issue_section_equation_numbering");
     assert!(xml.contains("Introduction"), "heading should be present");
     assert!(xml.contains("Methods"), "second heading should be present");
     assert!(
@@ -4100,7 +3813,7 @@ fn issue_section_equation_numbering_refs() {
 
 #[test]
 fn issue_color_primitives_text() {
-    let xml = issue_doc_xml("issue_color_primitives");
+    let xml = fixture_doc_xml("issue_color_primitives");
     assert!(xml.contains("RGB colored"), "RGB text should be present");
     assert!(xml.contains("Lightened blue"), "lightened color text should be present");
     assert!(xml.contains("Named color"), "named color text should be present");
@@ -4112,7 +3825,7 @@ fn issue_color_primitives_text() {
 
 #[test]
 fn issue_nested_term_list_hierarchy() {
-    let xml = issue_doc_xml("issue_nested_term_list");
+    let xml = fixture_doc_xml("issue_nested_term_list");
     for text in ["Compiler", "Frontend", "Lexer", "Parser", "Backend", "Interpreter"] {
         assert!(xml.contains(text), "term '{text}' should be present");
     }
@@ -4124,7 +3837,7 @@ fn issue_nested_term_list_hierarchy() {
 
 #[test]
 fn issue_caption_prefix_custom_supplement() {
-    let xml = issue_doc_xml("issue_caption_prefix_custom");
+    let xml = fixture_doc_xml("issue_caption_prefix_custom");
     assert!(xml.contains("Sample data"), "first caption should be present");
     assert!(xml.contains("A diagram"), "second caption should be present");
     assert!(xml.contains("表"), "Chinese supplement should be present");
@@ -4133,7 +3846,7 @@ fn issue_caption_prefix_custom_supplement() {
 
 #[test]
 fn issue_table_cell_spacing_structure() {
-    let xml = issue_doc_xml("issue_table_cell_spacing");
+    let xml = fixture_doc_xml("issue_table_cell_spacing");
     assert!(xml.contains("Fruit"), "header cell should be present");
     assert!(xml.contains("Bananas"), "data cell should be present");
     assert!(xml.contains("Built-in wrapper"), "multi-paragraph cell should be present");
@@ -4142,7 +3855,7 @@ fn issue_table_cell_spacing_structure() {
 
 #[test]
 fn issue_nested_list_indent_levels() {
-    let xml = issue_doc_xml("issue_nested_list_indent");
+    let xml = fixture_doc_xml("issue_nested_list_indent");
     for text in ["Level one", "Level two", "Level three", "Bullet level"] {
         assert!(xml.contains(text), "list item '{text}' should be present");
     }
@@ -4158,7 +3871,7 @@ fn issue_nested_list_indent_levels() {
 
 #[test]
 fn issue_endnote_vs_footnote_refs() {
-    let xml = issue_doc_xml("issue_endnote_vs_footnote");
+    let xml = fixture_doc_xml("issue_endnote_vs_footnote");
     let fn_count = xml.matches("w:footnoteReference").count();
     assert!(
         fn_count >= 4,
@@ -4168,7 +3881,7 @@ fn issue_endnote_vs_footnote_refs() {
 
 #[test]
 fn issue_list_paragraph_style_items() {
-    let xml = issue_doc_xml("issue_list_paragraph_style");
+    let xml = fixture_doc_xml("issue_list_paragraph_style");
     assert!(
         xml.matches("w:numId").count() >= 6,
         "should have list items with numId"
@@ -4177,14 +3890,14 @@ fn issue_list_paragraph_style_items() {
 
 #[test]
 fn issue_table_compact_style_override_content() {
-    let xml = issue_doc_xml("issue_table_compact_style_override");
+    let xml = fixture_doc_xml("issue_table_compact_style_override");
     assert!(xml.contains("<w:tbl>"), "table should be present");
     assert!(xml.contains("<w:b/>"), "bold text in table should be preserved");
 }
 
 #[test]
 fn issue_cjk_heading_number_spacing_headings() {
-    let xml = issue_doc_xml("issue_cjk_heading_number_spacing");
+    let xml = fixture_doc_xml("issue_cjk_heading_number_spacing");
     assert!(
         xml.matches("Heading").count() >= 3,
         "should have multiple heading styles"
@@ -4193,7 +3906,7 @@ fn issue_cjk_heading_number_spacing_headings() {
 
 #[test]
 fn issue_show_rule_removes_heading_semantics_text() {
-    let xml = issue_doc_xml("issue_show_rule_removes_heading_semantics");
+    let xml = fixture_doc_xml("issue_show_rule_removes_heading_semantics");
     assert!(
         xml.matches("Heading").count() >= 3,
         "headings should be present despite show rules"
@@ -4202,7 +3915,7 @@ fn issue_show_rule_removes_heading_semantics_text() {
 
 #[test]
 fn issue_cjk_url_encoding_links() {
-    let xml = issue_doc_xml("issue_cjk_url_encoding");
+    let xml = fixture_doc_xml("issue_cjk_url_encoding");
     assert!(
         xml.matches("HYPERLINK").count() >= 2,
         "hyperlinks should be present"
@@ -4211,7 +3924,7 @@ fn issue_cjk_url_encoding_links() {
 
 #[test]
 fn issue_table_header_border_override_tables() {
-    let xml = issue_doc_xml("issue_table_header_border_override");
+    let xml = fixture_doc_xml("issue_table_header_border_override");
     let table_count = xml.matches("<w:tbl>").count();
     assert!(
         table_count >= 3,
@@ -4221,7 +3934,7 @@ fn issue_table_header_border_override_tables() {
 
 #[test]
 fn issue_crossref_field_code_bookmarks() {
-    let xml = issue_doc_xml("issue_crossref_field_code");
+    let xml = fixture_doc_xml("issue_crossref_field_code");
     assert!(
         xml.matches("w:bookmarkStart").count() >= 3,
         "labeled elements should produce bookmarks"
@@ -4231,7 +3944,7 @@ fn issue_crossref_field_code_bookmarks() {
 
 #[test]
 fn issue_html_whitespace_in_styled_spans_text() {
-    let xml = issue_doc_xml("issue_html_whitespace_in_styled_spans");
+    let xml = fixture_doc_xml("issue_html_whitespace_in_styled_spans");
     assert!(xml.contains("<w:u ") || xml.contains("<w:color"), "styled spans should be present");
 }
 
@@ -4239,7 +3952,7 @@ fn issue_html_whitespace_in_styled_spans_text() {
 
 #[test]
 fn issue_bookmark_inside_paragraph() {
-    let xml = issue_doc_xml("issue_bookmark_inside_paragraph");
+    let xml = fixture_doc_xml("issue_bookmark_inside_paragraph");
     assert!(xml.contains("w:bookmarkStart"), "should have bookmarkStart for <intro> label");
     assert!(xml.contains("w:bookmarkEnd"), "should have bookmarkEnd");
     assert!(xml.contains("Introduction"), "heading text present");
@@ -4249,7 +3962,7 @@ fn issue_bookmark_inside_paragraph() {
 
 #[test]
 fn issue_rtl_table_bidi() {
-    let xml = issue_doc_xml("issue_rtl_table_bidi");
+    let xml = fixture_doc_xml("issue_rtl_table_bidi");
     assert!(xml.contains("w:tbl"), "should contain a table");
     assert!(
         xml.contains("\u{627}\u{644}\u{639}\u{645}\u{648}\u{62f}"),
@@ -4259,14 +3972,14 @@ fn issue_rtl_table_bidi() {
 
 #[test]
 fn issue_nested_table_alignment() {
-    let xml = issue_doc_xml("issue_nested_table_alignment");
+    let xml = fixture_doc_xml("issue_nested_table_alignment");
     assert!(xml.contains("w:tbl"), "should contain at least one table");
     assert!(xml.contains("Normal right cell"), "outer cell text present");
 }
 
 #[test]
 fn issue_cjk_font_east_asia() {
-    let xml = issue_doc_xml("issue_cjk_font_east_asia");
+    let xml = fixture_doc_xml("issue_cjk_font_east_asia");
     assert!(xml.contains("eastAsia"), "should set w:rFonts eastAsia attribute for CJK");
     assert!(
         xml.contains("\u{65E5}\u{672C}\u{8A9E}"),
@@ -4280,7 +3993,7 @@ fn issue_cjk_font_east_asia() {
 
 #[test]
 fn issue_list_in_blockquote() {
-    let xml = issue_doc_xml("issue_list_in_blockquote");
+    let xml = fixture_doc_xml("issue_list_in_blockquote");
     assert!(xml.contains("First"), "ordered list item present");
     assert!(xml.contains("Second"), "ordered list item present");
     assert!(xml.contains("Bullet"), "bullet list item present");
@@ -4290,7 +4003,7 @@ fn issue_list_in_blockquote() {
 
 #[test]
 fn issue_underline_font_size_change() {
-    let xml = issue_doc_xml("issue_underline_font_size_change");
+    let xml = fixture_doc_xml("issue_underline_font_size_change");
     assert!(xml.contains("<w:u "), "should have underline formatting");
     assert!(xml.contains("w:strike"), "should have strikethrough formatting");
     assert!(xml.contains("Normal size"), "underlined text present");
@@ -4299,7 +4012,7 @@ fn issue_underline_font_size_change() {
 
 #[test]
 fn issue_text_fill_color() {
-    let xml = issue_doc_xml("issue_text_fill_color");
+    let xml = fixture_doc_xml("issue_text_fill_color");
     let color_count = xml.matches("<w:color").count();
     assert!(color_count >= 3, "should have multiple color tags for different fills, got {color_count}");
     assert!(xml.contains("This entire paragraph is red"), "red paragraph present");
@@ -4309,7 +4022,7 @@ fn issue_text_fill_color() {
 
 #[test]
 fn issue_space_between_styled_runs() {
-    let xml = issue_doc_xml("issue_space_between_styled_runs");
+    let xml = fixture_doc_xml("issue_space_between_styled_runs");
     assert!(xml.contains("bold"), "bold text present");
     assert!(xml.contains("italic"), "italic text present");
     let preserve_count = xml.matches("xml:space=\"preserve\"").count();
@@ -4320,7 +4033,7 @@ fn issue_space_between_styled_runs() {
 
 #[test]
 fn issue_list_contextual_spacing() {
-    let xml = issue_doc_xml("issue_list_contextual_spacing");
+    let xml = fixture_doc_xml("issue_list_contextual_spacing");
     assert!(xml.contains("Item A"), "first list item present");
     assert!(xml.contains("Item B"), "second list item present");
     let num_count = xml.matches("w:numId").count();
@@ -4329,7 +4042,7 @@ fn issue_list_contextual_spacing() {
 
 #[test]
 fn issue_table_colspan_borders() {
-    let xml = issue_doc_xml("issue_table_colspan_borders");
+    let xml = fixture_doc_xml("issue_table_colspan_borders");
     assert!(xml.contains("AB"), "merged cell AB present");
     assert!(xml.contains("FGH"), "merged cell FGH present");
     let gridspan = xml.matches("gridSpan").count();
@@ -4340,7 +4053,7 @@ fn issue_table_colspan_borders() {
 
 #[test]
 fn issue_math_accent_subsup_chain() {
-    let xml = issue_doc_xml("issue_math_accent_subsup_chain");
+    let xml = fixture_doc_xml("issue_math_accent_subsup_chain");
     let acc_count = xml.matches("m:acc").count();
     assert!(acc_count >= 4, "should have accent elements for dot/hat/tilde/arrow, got {acc_count}");
     let math_para = xml.matches("oMathPara").count();
@@ -4353,7 +4066,7 @@ fn issue_math_accent_subsup_chain() {
 
 #[test]
 fn issue_table_caption_crossref() {
-    let xml = issue_doc_xml("issue_table_caption_crossref");
+    let xml = fixture_doc_xml("issue_table_caption_crossref");
     assert!(xml.contains("Sample data"), "first table caption present");
     assert!(xml.contains("Another table"), "second table caption present");
     let bk_count = xml.matches("bookmarkStart").count();
@@ -4362,7 +4075,7 @@ fn issue_table_caption_crossref() {
 
 #[test]
 fn issue_table_multipage_borders() {
-    let xml = issue_doc_xml("issue_table_multipage_borders");
+    let xml = fixture_doc_xml("issue_table_multipage_borders");
     assert!(xml.contains("<w:tbl>"), "should contain a table");
     let tr_count = xml.matches("<w:tr>").count();
     assert!(tr_count >= 7, "should have at least 7 table rows, got {tr_count}");
@@ -4374,14 +4087,14 @@ fn issue_table_multipage_borders() {
 
 #[test]
 fn issue_text_tracking_spacing() {
-    let xml = issue_doc_xml("issue_text_tracking_spacing");
+    let xml = fixture_doc_xml("issue_text_tracking_spacing");
     assert!(xml.contains("Wide tracked text"), "tracked text present");
     assert!(xml.contains("Tight tracked text"), "tight tracked text present");
 }
 
 #[test]
 fn issue_table_cell_valign() {
-    let xml = issue_doc_xml("issue_table_cell_valign");
+    let xml = fixture_doc_xml("issue_table_cell_valign");
     assert!(xml.contains("Middle"), "middle-aligned cell text present");
     assert!(xml.contains("Bottom"), "bottom-aligned cell text present");
     assert!(xml.contains("<w:tbl>"), "should contain a table");
@@ -4389,7 +4102,7 @@ fn issue_table_cell_valign() {
 
 #[test]
 fn issue_table_cell_shading() {
-    let xml = issue_doc_xml("issue_table_cell_shading");
+    let xml = fixture_doc_xml("issue_table_cell_shading");
     assert!(xml.contains("Yellow cell"), "yellow cell text present");
     assert!(xml.contains("Green cell"), "green cell text present");
     assert!(xml.contains("<w:tbl>"), "should contain a table");
@@ -4399,7 +4112,7 @@ fn issue_table_cell_shading() {
 
 #[test]
 fn issue_table_dashed_borders() {
-    let xml = issue_doc_xml("issue_table_dashed_borders");
+    let xml = fixture_doc_xml("issue_table_dashed_borders");
     let tbl_count = xml.matches("<w:tbl>").count();
     assert!(tbl_count >= 2, "should have two tables, got {tbl_count}");
     assert!(xml.contains("A"), "first table content present");
@@ -4408,14 +4121,14 @@ fn issue_table_dashed_borders() {
 
 #[test]
 fn issue_place_absolute() {
-    let xml = issue_doc_xml("issue_place_absolute");
+    let xml = fixture_doc_xml("issue_place_absolute");
     assert!(xml.contains("body text"), "body text present");
     assert!(xml.contains("Final paragraph"), "final paragraph present");
 }
 
 #[test]
 fn issue_inline_box_fill() {
-    let xml = issue_doc_xml("issue_inline_box_fill");
+    let xml = fixture_doc_xml("issue_inline_box_fill");
     assert!(xml.contains("highlighted box"), "box content present");
     assert!(xml.contains("yellow inline"), "yellow box content present");
     assert!(xml.contains("native highlight"), "native highlight present");
@@ -4424,7 +4137,7 @@ fn issue_inline_box_fill() {
 
 #[test]
 fn issue_footnote_tab_format() {
-    let xml = issue_doc_xml("issue_footnote_tab_format");
+    let xml = fixture_doc_xml("issue_footnote_tab_format");
     assert!(xml.contains("footnote"), "footnote reference should be in document");
 }
 
@@ -4432,7 +4145,7 @@ fn issue_footnote_tab_format() {
 
 #[test]
 fn issue_cjk_super_sub_metrics() {
-    let xml = issue_doc_xml("issue_cjk_super_sub_metrics");
+    let xml = fixture_doc_xml("issue_cjk_super_sub_metrics");
     let valign_count = xml.matches("vertAlign").count();
     assert!(valign_count >= 2, "should have vertAlign for super/sub, got {valign_count}");
     assert!(
@@ -4443,7 +4156,7 @@ fn issue_cjk_super_sub_metrics() {
 
 #[test]
 fn issue_link_show_rule_ref() {
-    let xml = issue_doc_xml("issue_link_show_rule_ref");
+    let xml = fixture_doc_xml("issue_link_show_rule_ref");
     assert!(xml.contains("bookmarkStart"), "should have bookmark for heading label");
     assert!(xml.contains("HYPERLINK"), "should have hyperlink field");
     assert!(xml.contains("Introduction"), "heading text present");
@@ -4451,7 +4164,7 @@ fn issue_link_show_rule_ref() {
 
 #[test]
 fn issue_smallcaps_text() {
-    let xml = issue_doc_xml("issue_smallcaps_text");
+    let xml = fixture_doc_xml("issue_smallcaps_text");
     let sc_count = xml.matches("smallCaps").count();
     assert!(sc_count >= 2, "should have w:smallCaps for smallcaps text, got {sc_count}");
     assert!(xml.contains("Small Caps"), "smallcaps text content present");
@@ -4459,7 +4172,7 @@ fn issue_smallcaps_text() {
 
 #[test]
 fn issue_footnote_in_heading_toc() {
-    let xml = issue_doc_xml("issue_footnote_in_heading_toc");
+    let xml = fixture_doc_xml("issue_footnote_in_heading_toc");
     let heading_count = xml.matches("Heading1").count();
     assert!(heading_count >= 3, "should have 3 Heading1 styles, got {heading_count}");
     assert!(xml.contains("TOC"), "should have TOC field");
@@ -4469,7 +4182,7 @@ fn issue_footnote_in_heading_toc() {
 
 #[test]
 fn issue_column_break() {
-    let xml = issue_doc_xml("issue_column_break");
+    let xml = fixture_doc_xml("issue_column_break");
     assert!(xml.contains("First column"), "first column content present");
     assert!(xml.contains("Second column"), "second column content present");
     assert!(xml.contains("column"), "should reference column layout");
@@ -4477,7 +4190,7 @@ fn issue_column_break() {
 
 #[test]
 fn issue_metadata_case_dedup() {
-    let xml = issue_doc_xml("issue_metadata_case_dedup");
+    let xml = fixture_doc_xml("issue_metadata_case_dedup");
     assert!(xml.contains("test document"), "document body text present");
 }
 
@@ -4485,7 +4198,7 @@ fn issue_metadata_case_dedup() {
 
 #[test]
 fn issue_highlight_space_preserved() {
-    let xml = issue_doc_xml("issue_highlight_space");
+    let xml = fixture_doc_xml("issue_highlight_space");
     assert!(xml.contains("Hello"), "highlight text present");
     assert!(xml.contains("World"), "adjacent text present");
     assert!(xml.contains("bold"), "bold text present");
@@ -4493,8 +4206,51 @@ fn issue_highlight_space_preserved() {
 
 #[test]
 fn issue_show_rule_heading_replace_recovery() {
-    let xml = issue_doc_xml("issue_show_rule_heading_replace");
+    let xml = fixture_doc_xml("issue_show_rule_heading_replace");
     assert!(xml.contains("First Heading"), "first heading text present");
     assert!(xml.contains("Second Heading"), "second heading text present");
     assert!(xml.contains("Body text"), "body text present");
 }
+
+// ── Smoke tests: style / general / edge fixtures convert without panic ──
+
+macro_rules! smoke_test {
+    ($name:ident, $fixture:expr) => {
+        #[test]
+        fn $name() {
+            let path = format!("../../tests/fixtures/{}.typ", $fixture);
+            let world = typort_core::TyportWorld::new(std::path::Path::new(&path)).unwrap();
+            let doc = typort_core::convert::convert(&world).unwrap();
+            let mut buf = Vec::new();
+            typort_ooxml::write_docx(&doc, std::io::Cursor::new(&mut buf)).unwrap();
+            assert!(buf.len() > 100, "docx output should be non-trivial");
+        }
+    };
+}
+
+smoke_test!(smoke_style_default, "style_default");
+smoke_test!(smoke_style_indent, "style_indent");
+smoke_test!(smoke_style_justify, "style_justify");
+smoke_test!(smoke_style_large_font, "style_large_font");
+smoke_test!(smoke_style_small_font, "style_small_font");
+smoke_test!(smoke_style_custom_font, "style_custom_font");
+smoke_test!(smoke_style_custom_page, "style_custom_page");
+smoke_test!(smoke_style_custom_spacing, "style_custom_spacing");
+smoke_test!(smoke_style_custom_leading, "style_custom_leading");
+smoke_test!(smoke_style_wide_leading, "style_wide_leading");
+smoke_test!(smoke_style_no_spacing, "style_no_spacing");
+smoke_test!(smoke_style_heading_custom, "style_heading_custom");
+smoke_test!(smoke_style_footnotes, "style_footnotes");
+smoke_test!(smoke_style_code_blocks, "style_code_blocks");
+smoke_test!(smoke_style_columns, "style_columns");
+smoke_test!(smoke_style_links, "style_links");
+smoke_test!(smoke_style_links_colored, "style_links_colored");
+smoke_test!(smoke_style_mixed_content, "style_mixed_content");
+smoke_test!(smoke_style_asymmetric_margins, "style_asymmetric_margins");
+smoke_test!(smoke_style_cjk_zh, "style_cjk_zh");
+smoke_test!(smoke_style_cjk_ja, "style_cjk_ja");
+smoke_test!(smoke_general_elements, "general_elements");
+smoke_test!(smoke_business_report, "business_report");
+smoke_test!(smoke_memo, "memo");
+smoke_test!(smoke_tech_doc, "tech_doc");
+smoke_test!(smoke_edge_text_deco_across_math, "edge_text_deco_across_math");
