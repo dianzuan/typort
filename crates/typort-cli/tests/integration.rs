@@ -4369,3 +4369,61 @@ fn issue_table_multipage_borders() {
     assert!(xml.contains("Header A"), "header row present");
     assert!(xml.contains("Row 6"), "last data row present");
 }
+
+// ── Round 9: competitor issues ──────────────────────────────────────────
+
+#[test]
+fn issue_text_tracking_spacing() {
+    let xml = issue_doc_xml("issue_text_tracking_spacing");
+    assert!(xml.contains("Wide tracked text"), "tracked text present");
+    assert!(xml.contains("Tight tracked text"), "tight tracked text present");
+}
+
+#[test]
+fn issue_table_cell_valign() {
+    let xml = issue_doc_xml("issue_table_cell_valign");
+    assert!(xml.contains("Middle"), "middle-aligned cell text present");
+    assert!(xml.contains("Bottom"), "bottom-aligned cell text present");
+    assert!(xml.contains("<w:tbl>"), "should contain a table");
+}
+
+#[test]
+fn issue_table_cell_shading() {
+    let xml = issue_doc_xml("issue_table_cell_shading");
+    assert!(xml.contains("Yellow cell"), "yellow cell text present");
+    assert!(xml.contains("Green cell"), "green cell text present");
+    assert!(xml.contains("<w:tbl>"), "should contain a table");
+    let tc_count = xml.matches("<w:tc>").count();
+    assert!(tc_count >= 6, "should have at least 6 table cells, got {tc_count}");
+}
+
+#[test]
+fn issue_table_dashed_borders() {
+    let xml = issue_doc_xml("issue_table_dashed_borders");
+    let tbl_count = xml.matches("<w:tbl>").count();
+    assert!(tbl_count >= 2, "should have two tables, got {tbl_count}");
+    assert!(xml.contains("A"), "first table content present");
+    assert!(xml.contains("H"), "second table content present");
+}
+
+#[test]
+fn issue_place_absolute() {
+    let xml = issue_doc_xml("issue_place_absolute");
+    assert!(xml.contains("body text"), "body text present");
+    assert!(xml.contains("Final paragraph"), "final paragraph present");
+}
+
+#[test]
+fn issue_inline_box_fill() {
+    let xml = issue_doc_xml("issue_inline_box_fill");
+    assert!(xml.contains("highlighted box"), "box content present");
+    assert!(xml.contains("yellow inline"), "yellow box content present");
+    assert!(xml.contains("native highlight"), "native highlight present");
+    assert!(xml.contains("w:highlight"), "native highlight produces w:highlight");
+}
+
+#[test]
+fn issue_footnote_tab_format() {
+    let xml = issue_doc_xml("issue_footnote_tab_format");
+    assert!(xml.contains("footnote"), "footnote reference should be in document");
+}
