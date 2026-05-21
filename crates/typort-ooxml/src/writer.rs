@@ -6,8 +6,8 @@ use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
 use crate::document::{
-    Alignment, BlockElement, Document, ImageData, ImageFormat, InlineElement, PageNumberFormat,
-    ParagraphStyle, SectionBreak, SectionBreakType, Table,
+    Alignment, BlockElement, Document, FootnoteFormat, ImageData, ImageFormat, InlineElement,
+    PageNumberFormat, ParagraphStyle, SectionBreak, SectionBreakType, Table,
 };
 use crate::styles;
 
@@ -77,7 +77,7 @@ pub fn write_docx<W: Write + Seek>(
 
     if parts.numbering {
         zip.start_file("word/numbering.xml", options)?;
-        zip.write_all(&xml_part(generate_numbering_xml)?)?;
+        zip.write_all(&xml_part(|w| generate_numbering_xml(w, doc))?)?;
     }
 
     // Write header XML
@@ -116,10 +116,10 @@ pub fn write_docx<W: Write + Seek>(
     Ok(())
 }
 
-/// Check if the document contains any list items (paragraphs with `list_id` set).
+/// Check if the document contains any list items (paragraphs with `list_info` set).
 fn doc_has_lists(doc: &Document) -> bool {
     doc.body.elements.iter().any(|el| match el {
-        BlockElement::Paragraph(p) => p.list_id.is_some(),
+        BlockElement::Paragraph(p) => p.list_info.is_some(),
         BlockElement::Table(_) => false,
     })
 }
@@ -459,17 +459,7 @@ fn generate_settings(
             "http://schemas.openxmlformats.org/officeDocument/2006/math",
         ))
         .write_inner_content(|w| {
-            w.create_element("w:footnotePr").write_inner_content(|fp| {
-                if style.footnote_format == crate::document::FootnoteFormat::CircledNumber {
-                    fp.create_element("w:numFmt")
-                        .with_attribute(("w:val", "decimalEnclosedCircle"))
-                        .write_empty()?;
-                }
-                fp.create_element("w:numRestart")
-                    .with_attribute(("w:val", "eachPage"))
-                    .write_empty()?;
-                Ok(())
-            })?;
+            write_footnote_pr(w, &style.footnote_format)?;
             w.create_element("w:compat").write_inner_content(|c| {
                 c.create_element("w:useFELayout").write_empty()?;
                 c.create_element("w:compatSetting")
@@ -658,17 +648,7 @@ fn write_section_properties<W: Write>(
                 .with_attribute(("r:id", rid.as_str()))
                 .write_empty()?;
         }
-        w.create_element("w:footnotePr").write_inner_content(|fp| {
-            if style.footnote_format == crate::document::FootnoteFormat::CircledNumber {
-                fp.create_element("w:numFmt")
-                    .with_attribute(("w:val", "decimalEnclosedCircle"))
-                    .write_empty()?;
-            }
-            fp.create_element("w:numRestart")
-                .with_attribute(("w:val", "eachPage"))
-                .write_empty()?;
-            Ok(())
-        })?;
+        write_footnote_pr(w, &style.footnote_format)?;
         // Page number format (w:pgNumType)
         if let Some(fmt) = page_numbering {
             let fmt_val = page_number_format_val(fmt);
@@ -679,6 +659,27 @@ fn write_section_properties<W: Write>(
         write_section_page_settings(w, settings, style)?;
         Ok(())
     })?;
+    Ok(())
+}
+
+/// Write `w:footnotePr` element with optional circled-number format and per-page restart.
+fn write_footnote_pr<W: Write>(
+    writer: &mut Writer<W>,
+    format: &FootnoteFormat,
+) -> io::Result<()> {
+    writer
+        .create_element("w:footnotePr")
+        .write_inner_content(|fp| {
+            if *format == FootnoteFormat::CircledNumber {
+                fp.create_element("w:numFmt")
+                    .with_attribute(("w:val", "decimalEnclosedCircle"))
+                    .write_empty()?;
+            }
+            fp.create_element("w:numRestart")
+                .with_attribute(("w:val", "eachPage"))
+                .write_empty()?;
+            Ok(())
+        })?;
     Ok(())
 }
 
@@ -728,7 +729,7 @@ fn write_paragraph<W: Write>(
 ) -> io::Result<()> {
     writer.create_element("w:p").write_inner_content(|w| {
         let has_style = para.style.is_some();
-        let has_list = para.list_id.is_some();
+        let has_list = para.list_info.is_some();
         let has_alignment = para.alignment.is_some();
         let has_left_indent = para.left_indent.is_some();
         let has_code_block = para.code_block;
@@ -790,9 +791,9 @@ fn write_paragraph<W: Write>(
                         .with_attribute(("w:val", style_id.as_str()))
                         .write_empty()?;
                 }
-                if let (Some(list_id), Some(list_level)) = (para.list_id, para.list_level) {
-                    let id_str = list_id.to_string();
-                    let lvl_str = list_level.to_string();
+                if let Some(li) = &para.list_info {
+                    let id_str = li.id.to_string();
+                    let lvl_str = li.level.to_string();
                     ppr.create_element("w:numPr").write_inner_content(|num| {
                         num.create_element("w:ilvl")
                             .with_attribute(("w:val", lvl_str.as_str()))
@@ -868,14 +869,8 @@ fn write_paragraph<W: Write>(
                 }
                 // Emit alignment
                 if let Some(alignment) = &para.alignment {
-                    let val = match alignment {
-                        Alignment::Left => "left",
-                        Alignment::Center => "center",
-                        Alignment::Right => "right",
-                        Alignment::Justify => "both",
-                    };
                     ppr.create_element("w:jc")
-                        .with_attribute(("w:val", val))
+                        .with_attribute(("w:val", alignment.as_ooxml_str()))
                         .write_empty()?;
                 }
                 // Emit section break (w:sectPr inside w:pPr)
@@ -935,6 +930,21 @@ fn write_paragraph<W: Write>(
     Ok(())
 }
 
+fn write_inline<W: Write>(
+    writer: &mut Writer<W>,
+    inline: &InlineElement,
+    doc: &Document,
+) -> io::Result<()> {
+    match inline {
+        InlineElement::Text(run) => write_run(writer, run, &doc.style),
+        InlineElement::Math {
+            omml_xml,
+            equation_number: _,
+        } => write_math_inline(writer, omml_xml),
+        _ => Ok(()),
+    }
+}
+
 /// Write a tab character element (`<w:r><w:tab/></w:r>`).
 fn write_tab<W: Write>(writer: &mut Writer<W>) -> io::Result<()> {
     writer.create_element("w:r").write_inner_content(|w| {
@@ -958,7 +968,7 @@ fn write_run<W: Write>(
             || run.monospace
             || run.underline
             || run.strikethrough
-            || run.highlight
+            || run.highlight_color.is_some()
             || run.smallcaps
             || run.color.is_some()
             || has_font_override
@@ -1017,13 +1027,9 @@ fn write_run<W: Write>(
                         .with_attribute(("w:val", "single"))
                         .write_empty()?;
                 }
-                if run.highlight {
-                    let hl_color = run
-                        .highlight_color
-                        .as_deref()
-                        .unwrap_or("yellow");
+                if let Some(hl_color) = &run.highlight_color {
                     rpr.create_element("w:highlight")
-                        .with_attribute(("w:val", hl_color))
+                        .with_attribute(("w:val", hl_color.as_str()))
                         .write_empty()?;
                 }
                 if run.superscript {
@@ -1191,7 +1197,7 @@ fn write_table<W: Write>(
 }
 
 #[allow(clippy::too_many_lines)]
-fn generate_numbering_xml(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<()> {
+fn generate_numbering_xml(writer: &mut Writer<&mut Vec<u8>>, doc: &Document) -> io::Result<()> {
     writer
         .create_element("w:numbering")
         .with_attribute((
@@ -1310,6 +1316,19 @@ fn generate_numbering_xml(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<()> {
                         .write_empty()?;
                     Ok(())
                 })?;
+            // Dynamic numbering instances for each top-level list
+            for &(num_id, abstract_num_id) in &doc.list_num_instances {
+                let num_id_str = num_id.to_string();
+                let abs_id_str = abstract_num_id.to_string();
+                w.create_element("w:num")
+                    .with_attribute(("w:numId", num_id_str.as_str()))
+                    .write_inner_content(|num| {
+                        num.create_element("w:abstractNumId")
+                            .with_attribute(("w:val", abs_id_str.as_str()))
+                            .write_empty()?;
+                        Ok(())
+                    })?;
+            }
             Ok(())
         })?;
     Ok(())
@@ -1744,9 +1763,9 @@ fn generate_footnotes_xml(writer: &mut Writer<&mut Vec<u8>>, doc: &Document) -> 
                                     .write_text_content(BytesText::new(" "))?;
                                 Ok(())
                             })?;
-                            // Content runs
-                            for run in &footnote.content {
-                                write_run(p_w, run, &doc.style)?;
+                            // Content inlines
+                            for inline in &footnote.content {
+                                write_inline(p_w, inline, doc)?;
                             }
                             Ok(())
                         })?;
@@ -1916,14 +1935,8 @@ fn write_header_footer_paragraph<W: Write>(
         if has_alignment {
             w.create_element("w:pPr").write_inner_content(|ppr| {
                 if let Some(alignment) = &para.alignment {
-                    let val = match alignment {
-                        Alignment::Left => "left",
-                        Alignment::Center => "center",
-                        Alignment::Right => "right",
-                        Alignment::Justify => "both",
-                    };
                     ppr.create_element("w:jc")
-                        .with_attribute(("w:val", val))
+                        .with_attribute(("w:val", alignment.as_ooxml_str()))
                         .write_empty()?;
                 }
                 Ok(())

@@ -7,7 +7,7 @@ use typort_ooxml::document::Run;
 use typst::foundations::Content;
 use typst_library::foundations::{SequenceElem, SymbolElem};
 use typst_library::model::{EmphElem, ParElem, StrongElem};
-use typst_library::text::{SmallcapsElem, SpaceElem, TextElem};
+use typst_library::text::{SmallcapsElem, SpaceElem, SubElem, SuperElem, TextElem};
 
 /// Formatting state accumulated while walking the Content tree.
 #[derive(Clone, Default)]
@@ -15,6 +15,8 @@ struct InlineCtx {
     bold: bool,
     italic: bool,
     smallcaps: bool,
+    superscript: bool,
+    subscript: bool,
 }
 
 /// Extract a flat list of [`Run`] from a `Content` body.
@@ -46,6 +48,14 @@ fn walk_content(content: &Content, ctx: &InlineCtx, runs: &mut Vec<Run>) {
         let mut inner = ctx.clone();
         inner.smallcaps = true;
         walk_content(&sc.body, &inner, runs);
+    } else if let Some(sup) = content.to_packed::<SuperElem>() {
+        let mut inner = ctx.clone();
+        inner.superscript = true;
+        walk_content(&sup.body, &inner, runs);
+    } else if let Some(sub) = content.to_packed::<SubElem>() {
+        let mut inner = ctx.clone();
+        inner.subscript = true;
+        walk_content(&sub.body, &inner, runs);
     } else if let Some(par) = content.to_packed::<ParElem>() {
         walk_content(&par.body, ctx, runs);
     } else if let Some(text) = content.to_packed::<TextElem>() {
@@ -53,6 +63,8 @@ fn walk_content(content: &Content, ctx: &InlineCtx, runs: &mut Vec<Run>) {
         run.bold = ctx.bold;
         run.italic = ctx.italic;
         run.smallcaps = ctx.smallcaps;
+        run.superscript = ctx.superscript;
+        run.subscript = ctx.subscript;
         let sp = content.span();
         if !sp.is_detached() {
             run.span = Some(sp);
@@ -63,6 +75,8 @@ fn walk_content(content: &Content, ctx: &InlineCtx, runs: &mut Vec<Run>) {
         run.bold = ctx.bold;
         run.italic = ctx.italic;
         run.smallcaps = ctx.smallcaps;
+        run.superscript = ctx.superscript;
+        run.subscript = ctx.subscript;
         let sp = content.span();
         if !sp.is_detached() {
             run.span = Some(sp);

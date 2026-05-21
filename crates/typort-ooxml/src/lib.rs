@@ -314,8 +314,7 @@ mod tests {
     fn list_item_produces_num_pr_with_ilvl_and_num_id() {
         let mut doc = Document::new();
         let mut para = document::Paragraph::new();
-        para.list_id = Some(1);
-        para.list_level = Some(0);
+        para.list_info = Some(document::ListInfo { id: 1, level: 0 });
         para.add_run("list item");
         doc.add_paragraph(para);
 
@@ -337,7 +336,7 @@ mod tests {
     #[test]
     fn footnote_ref_decimal_emits_footnote_reference() {
         let mut doc = Document::new();
-        let fn_id = doc.add_footnote(vec![document::Run::new("note text")]);
+        let fn_id = doc.add_footnote(vec![document::InlineElement::Text(document::Run::new("note text"))]);
         let mut para = document::Paragraph::new();
         para.add_run("See");
         para.add_footnote_ref(fn_id);
@@ -360,7 +359,7 @@ mod tests {
     fn footnote_ref_circled_emits_custom_mark_follows() {
         let mut doc = Document::new();
         doc.style.footnote_format = FootnoteFormat::CircledNumber;
-        let fn_id = doc.add_footnote(vec![document::Run::new("circled note")]);
+        let fn_id = doc.add_footnote(vec![document::InlineElement::Text(document::Run::new("circled note"))]);
         let mut para = document::Paragraph::new();
         para.add_footnote_ref(fn_id);
         doc.add_paragraph(para);
@@ -383,7 +382,7 @@ mod tests {
     #[test]
     fn footnotes_xml_contains_footnote_text_and_ref() {
         let mut doc = Document::new();
-        doc.add_footnote(vec![document::Run::new("This is a footnote.")]);
+        doc.add_footnote(vec![document::InlineElement::Text(document::Run::new("This is a footnote."))]);
         // Need at least one paragraph referencing it so the doc is valid,
         // but footnotes.xml is generated from doc.footnotes regardless.
         let mut para = document::Paragraph::new();
@@ -510,7 +509,7 @@ mod tests {
     #[test]
     fn styles_xml_has_footnote_styles_when_footnotes_present() {
         let mut doc = Document::new();
-        doc.add_footnote(vec![document::Run::new("fn")]);
+        doc.add_footnote(vec![document::InlineElement::Text(document::Run::new("fn"))]);
         let mut para = document::Paragraph::new();
         para.add_footnote_ref(2);
         doc.add_paragraph(para);
@@ -1021,7 +1020,7 @@ mod tests {
         let mut doc = Document::new();
         let mut para = document::Paragraph::new();
         let mut run = document::Run::new("highlighted");
-        run.highlight = true;
+        run.highlight_color = Some("yellow".into());
         para.push_run(run);
         doc.add_paragraph(para);
 
