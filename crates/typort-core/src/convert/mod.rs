@@ -197,12 +197,17 @@ fn apply_source_overrides(
         doc.page_settings.columns = Some(cols);
     }
 
-    // Body text font
-    if let Some(fonts) = &ovr.text_font
-        && let Some(f) = fonts.first()
-    {
-        doc.style.body_font_ascii.clone_from(f);
-        doc.style.body_font_east_asia.clone_from(f);
+    // Body text font — split into ASCII and East-Asian defaults.
+    // Convention: `font: ("Times New Roman", "SimSun")` means the first entry
+    // is the Latin font and the second is the CJK font.
+    if let Some(fonts) = &ovr.text_font {
+        if fonts.len() >= 2 {
+            doc.style.body_font_ascii.clone_from(&fonts[0]);
+            doc.style.body_font_east_asia.clone_from(&fonts[1]);
+        } else if let Some(f) = fonts.first() {
+            doc.style.body_font_ascii.clone_from(f);
+            doc.style.body_font_east_asia.clone_from(f);
+        }
     }
 
     // Body text size
