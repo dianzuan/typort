@@ -1255,4 +1255,49 @@ mod tests {
             "ZIP should NOT contain footer1.xml when no page numbering and no footer"
         );
     }
+
+    // ── 43. Citation source on document ────────────────────────────────
+
+    #[test]
+    fn citation_source_on_document() {
+        use document::{CitationSource, PersonName, SourceType};
+        let mut doc = Document::new();
+        doc.citation_sources.push(CitationSource {
+            tag: "Smi20".into(),
+            source_type: SourceType::JournalArticle,
+            authors: vec![PersonName {
+                last: "Smith".into(),
+                first: Some("John".into()),
+                middle: Some("A.".into()),
+            }],
+            title: Some("Example Article".into()),
+            year: Some("2020".into()),
+            journal_name: Some("Journal of Examples".into()),
+            volume: Some("42".into()),
+            issue: Some("3".into()),
+            pages: Some("100-115".into()),
+            doi: Some("10.1234/example".into()),
+            url: None,
+            publisher: None,
+            city: None,
+            edition: None,
+            book_title: None,
+        });
+        assert_eq!(doc.citation_sources.len(), 1);
+        assert_eq!(doc.citation_sources[0].source_type.as_ooxml_str(), "JournalArticle");
+    }
+
+    // ── 44. Paragraph add citation ─────────────────────────────────────
+
+    #[test]
+    fn paragraph_add_citation() {
+        let mut para = document::Paragraph::new();
+        para.add_citation(vec!["Smi20".into()], "(Smith, 2020)".into());
+        assert_eq!(para.inlines.len(), 1);
+        assert!(matches!(
+            &para.inlines[0],
+            document::InlineElement::Citation { keys, display_text }
+                if keys == &["Smi20"] && display_text == "(Smith, 2020)"
+        ));
+    }
 }

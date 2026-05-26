@@ -51,6 +51,65 @@ pub struct ListInfo {
     pub id: u32,
 }
 
+/// Word bibliography source type (ST_SourceType).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SourceType {
+    JournalArticle,
+    Book,
+    BookSection,
+    ConferenceProceedings,
+    Report,
+    Thesis,
+    InternetSite,
+    DocumentFromInternetSite,
+    Misc,
+}
+
+impl SourceType {
+    #[must_use]
+    pub fn as_ooxml_str(&self) -> &'static str {
+        match self {
+            Self::JournalArticle => "JournalArticle",
+            Self::Book => "Book",
+            Self::BookSection => "BookSection",
+            Self::ConferenceProceedings => "ConferenceProceedings",
+            Self::Report => "Report",
+            Self::Thesis => "Thesis",
+            Self::InternetSite => "InternetSite",
+            Self::DocumentFromInternetSite => "DocumentFromInternetSite",
+            Self::Misc => "Misc",
+        }
+    }
+}
+
+/// A person's name for Word bibliography author fields.
+#[derive(Debug, Clone)]
+pub struct PersonName {
+    pub last: String,
+    pub first: Option<String>,
+    pub middle: Option<String>,
+}
+
+/// A citation source entry for Word's bibliography data store (`customXml/item1.xml`).
+#[derive(Debug, Clone)]
+pub struct CitationSource {
+    pub tag: String,
+    pub source_type: SourceType,
+    pub authors: Vec<PersonName>,
+    pub title: Option<String>,
+    pub year: Option<String>,
+    pub journal_name: Option<String>,
+    pub volume: Option<String>,
+    pub issue: Option<String>,
+    pub pages: Option<String>,
+    pub doi: Option<String>,
+    pub url: Option<String>,
+    pub publisher: Option<String>,
+    pub city: Option<String>,
+    pub edition: Option<String>,
+    pub book_title: Option<String>,
+}
+
 /// A single inline element within a paragraph.
 #[derive(Debug, Clone)]
 pub enum InlineElement {
@@ -87,6 +146,13 @@ pub enum InlineElement {
     },
     /// A tab character (`w:r` containing `w:tab`).
     Tab,
+    /// A Word citation wrapped in a Structured Document Tag (SDT).
+    Citation {
+        /// Citation keys (multiple for merged citations like "[1, 3]").
+        keys: Vec<String>,
+        /// Rendered display text (e.g., "[1]" or "(Author, 2020)").
+        display_text: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -231,7 +297,8 @@ impl Paragraph {
                         text.push_str(&run.text);
                     }
                 }
-                InlineElement::FieldRef { display_text, .. } => {
+                InlineElement::FieldRef { display_text, .. }
+                | InlineElement::Citation { display_text, .. } => {
                     text.push_str(display_text);
                 }
                 _ => {}
@@ -320,6 +387,11 @@ impl Paragraph {
     /// Add a tab character.
     pub fn add_tab(&mut self) {
         self.inlines.push(InlineElement::Tab);
+    }
+
+    /// Add a citation field (SDT-wrapped CITATION field code).
+    pub fn add_citation(&mut self, keys: Vec<String>, display_text: String) {
+        self.inlines.push(InlineElement::Citation { keys, display_text });
     }
 }
 
@@ -576,6 +648,8 @@ pub struct Document {
     /// Mapping of dynamically allocated list IDs to their abstract numbering
     /// definition (1=ordered, 2=unordered). Used to generate `w:num` entries.
     pub list_num_instances: Vec<(u32, u32)>,
+    /// Bibliography sources for Word's citation data store (customXml/item1.xml).
+    pub citation_sources: Vec<CitationSource>,
 }
 
 impl Default for Document {
@@ -592,6 +666,7 @@ impl Default for Document {
             page_numbering: None,
             next_list_id: 4,
             list_num_instances: Vec::new(),
+            citation_sources: Vec::new(),
         }
     }
 }

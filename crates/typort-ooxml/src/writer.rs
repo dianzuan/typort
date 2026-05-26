@@ -923,6 +923,9 @@ fn write_paragraph<W: Write>(
                 InlineElement::Tab => {
                     write_tab(w)?;
                 }
+                InlineElement::Citation { .. } => {
+                    // SDT-wrapped citation writing will be added in a later task.
+                }
             }
         }
         Ok(())
