@@ -330,7 +330,29 @@ fn insert_missing_at_position(
         let mut para = Paragraph::new();
         para.suppress_indent = true;
 
+        let has_large_gap = if line.x_clusters.len() >= 2 {
+            // Estimate the font size for this line to determine gap threshold
+            let max_font_size_pt = line
+                .runs
+                .iter()
+                .map(|r| r.size_half_pt.unwrap_or(21) as f64 / 2.0)
+                .fold(0.0_f64, f64::max);
+            // A "real grid" gap should be at least 3em wide; h(0.5em) gaps are much smaller
+            let small_gap_threshold = max_font_size_pt * 3.0;
+            line.x_clusters.windows(2).any(|pair| {
+                // Estimate end of left cluster from x position + char count * average char width
+                let left_char_count: usize =
+                    pair[0].runs.iter().map(|r| r.text.chars().count()).sum();
+                let left_end =
+                    pair[0].x_pt + left_char_count as f64 * max_font_size_pt;
+                let gap = pair[1].x_pt - left_end;
+                gap > small_gap_threshold
+            })
+        } else {
+            false
+        };
         let is_real_grid = line.x_clusters.len() >= 2
+            && has_large_gap
             && line
                 .x_clusters
                 .iter()
@@ -343,6 +365,23 @@ fn insert_missing_at_position(
             for (idx, cluster) in line.x_clusters.iter().enumerate() {
                 if idx > 0 {
                     para.add_tab();
+                }
+                for run in &cluster.runs {
+                    para.push_run(run.clone());
+                }
+            }
+        } else if line.x_clusters.len() >= 2 {
+            // Multiple clusters with small gaps — join with spaces, not tabs
+            para.alignment = Some(Alignment::Center);
+            for (idx, cluster) in line.x_clusters.iter().enumerate() {
+                if idx > 0 {
+                    let mut space_run = Run::new("\u{00a0}");
+                    if let Some(first_run) = cluster.runs.first() {
+                        space_run.size_half_pt = first_run.size_half_pt;
+                        space_run.font_ascii = first_run.font_ascii.clone();
+                        space_run.font_east_asia = first_run.font_east_asia.clone();
+                    }
+                    para.push_run(space_run);
                 }
                 for run in &cluster.runs {
                     para.push_run(run.clone());
