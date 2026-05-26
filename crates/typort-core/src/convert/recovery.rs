@@ -675,3 +675,104 @@ fn collect_horizontal_lines(frame: &Frame, offset: Point, min_width: f64, lines:
         }
     }
 }
+
+/// Merge consecutive paragraphs whose text appears on the same visual line in
+/// the paged output.  This fixes cases where Typst's HTML export splits inline
+/// content (e.g. `super()` calls interleaved with author names in a `#for` loop)
+/// into separate block-level elements that become separate Word paragraphs.
+pub(super) fn merge_same_line_paragraphs(doc: &mut Document, paged: &PagedDocument) {
+    let all_lines = extract_lines_from_all_pages(paged);
+    if all_lines.is_empty() {
+        return;
+    }
+
+    // Build text → y-position map from paged output
+    let mut text_y_map: HashMap<String, f64> = HashMap::new();
+    for line in &all_lines {
+        for run in &line.runs {
+            if !run.text.trim().is_empty() {
+                text_y_map.insert(run.text.clone(), line.y_pt);
+            }
+        }
+        text_y_map.insert(line.text.clone(), line.y_pt);
+    }
+
+    let mut i = 0;
+    while i + 1 < doc.body.elements.len() {
+        let should_merge = {
+            let (left, right) = doc.body.elements.split_at(i + 1);
+            let Some(BlockElement::Paragraph(p1)) = left.last() else {
+                i += 1;
+                continue;
+            };
+            let Some(BlockElement::Paragraph(p2)) = right.first() else {
+                i += 1;
+                continue;
+            };
+
+            // Both must be non-heading, non-list paragraphs
+            if p1.style.is_some()
+                || p2.style.is_some()
+                || p1.list_info.is_some()
+                || p2.list_info.is_some()
+            {
+                false
+            } else {
+                let text1 = p1.text_content();
+                let text2 = p2.text_content();
+                if text1.is_empty() || text2.is_empty() {
+                    false
+                } else {
+                    let y1 = find_y_for_text(&text1, &text_y_map, &all_lines);
+                    let y2 = find_y_for_text(&text2, &text_y_map, &all_lines);
+                    match (y1, y2) {
+                        (Some(y1), Some(y2)) => (y1 - y2).abs() < 5.0,
+                        _ => false,
+                    }
+                }
+            }
+        };
+
+        if should_merge {
+            let BlockElement::Paragraph(p2) =
+                doc.body.elements.remove(i + 1)
+            else {
+                unreachable!()
+            };
+            let BlockElement::Paragraph(p1) =
+                &mut doc.body.elements[i]
+            else {
+                unreachable!()
+            };
+            p1.inlines.extend(p2.inlines);
+        } else {
+            i += 1;
+        }
+    }
+}
+
+fn find_y_for_text(
+    text: &str,
+    text_y_map: &HashMap<String, f64>,
+    all_lines: &[FrameLine],
+) -> Option<f64> {
+    // Direct lookup
+    if let Some(&y) = text_y_map.get(text) {
+        return Some(y);
+    }
+    // Substring match: find the first line whose text contains this text
+    let trimmed = text.trim();
+    if !trimmed.is_empty() {
+        for line in all_lines {
+            if line.text.contains(trimmed) || trimmed.contains(&line.text) {
+                return Some(line.y_pt);
+            }
+            for run in &line.runs {
+                if run.text.contains(trimmed) || trimmed.contains(run.text.as_str()) {
+                    return Some(line.y_pt);
+                }
+            }
+        }
+    }
+    None
+}

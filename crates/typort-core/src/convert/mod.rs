@@ -188,6 +188,11 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
         recovery::insert_horizontal_rules_from_paged(paged, &mut doc, &element_page_map);
     }
 
+    // 15. Merge consecutive paragraphs that belong to the same visual line
+    if let Some(paged) = &paged_doc {
+        recovery::merge_same_line_paragraphs(&mut doc, paged);
+    }
+
     Ok(doc)
 }
 
