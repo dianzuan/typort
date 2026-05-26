@@ -453,6 +453,8 @@ pub struct Table {
 pub enum BlockElement {
     Paragraph(Paragraph),
     Table(Table),
+    /// Bibliography section wrapped in SDT with BIBLIOGRAPHY field code.
+    BibliographyBlock { paragraphs: Vec<Paragraph> },
 }
 
 #[derive(Debug, Clone, Default)]

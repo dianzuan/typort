@@ -287,6 +287,11 @@ pub(super) fn extract_doc_text(doc: &Document) -> String {
                     }
                 }
             }
+            BlockElement::BibliographyBlock { paragraphs } => {
+                for p in paragraphs {
+                    text.push_str(&p.full_text_content());
+                }
+            }
         }
     }
     text
@@ -394,7 +399,7 @@ fn find_element_by_text(doc: &Document, text: &str) -> Option<usize> {
     for (i, elem) in doc.body.elements.iter().enumerate() {
         let elem_text = match elem {
             BlockElement::Paragraph(p) => p.text_content(),
-            BlockElement::Table(_) => continue,
+            BlockElement::Table(_) | BlockElement::BibliographyBlock { .. } => continue,
         };
         if elem_text.contains(&search_prefix) {
             return Some(i);

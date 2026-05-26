@@ -135,6 +135,9 @@ fn doc_has_lists(doc: &Document) -> bool {
     doc.body.elements.iter().any(|el| match el {
         BlockElement::Paragraph(p) => p.list_info.is_some(),
         BlockElement::Table(_) => false,
+        BlockElement::BibliographyBlock { paragraphs } => {
+            paragraphs.iter().any(|p| p.list_info.is_some())
+        }
     })
 }
 
@@ -147,6 +150,11 @@ fn collect_images(doc: &Document) -> Vec<&ImageData> {
             BlockElement::Paragraph(p) => collect_images_from_para(p, &mut images),
             BlockElement::Table(t) => {
                 collect_images_from_table(t, &mut images);
+            }
+            BlockElement::BibliographyBlock { paragraphs } => {
+                for p in paragraphs {
+                    collect_images_from_para(p, &mut images);
+                }
             }
         }
     }
@@ -639,6 +647,17 @@ fn generate_document_xml(
                         write_table(
                             body_w,
                             table,
+                            &doc.style.footnote_format,
+                            &doc.style,
+                            parts,
+                            &image_counter,
+                            &citation_id_counter,
+                        )?;
+                    }
+                    BlockElement::BibliographyBlock { paragraphs } => {
+                        write_bibliography_sdt(
+                            body_w,
+                            paragraphs,
                             &doc.style.footnote_format,
                             &doc.style,
                             parts,
@@ -1693,6 +1712,110 @@ fn write_citation_sdt<W: Write>(
                         w.create_element("w:fldChar")
                             .with_attribute(("w:fldCharType", "end"))
                             .write_empty()?;
+                        Ok(())
+                    })?;
+                    Ok(())
+                })?;
+            Ok(())
+        })?;
+    Ok(())
+}
+
+/// Write a block-level bibliography SDT wrapping bibliography paragraphs with a BIBLIOGRAPHY
+/// field code.
+///
+/// Produces:
+/// ```xml
+/// <w:sdt>
+///   <w:sdtPr><w:id w:val="..."/><w:bibliography/></w:sdtPr>
+///   <w:sdtContent>
+///     <w:p>
+///       <w:pPr><w:pStyle w:val="Bibliography"/></w:pPr>
+///       <w:r><w:fldChar w:fldCharType="begin"/></w:r>
+///       <w:r><w:instrText xml:space="preserve"> BIBLIOGRAPHY </w:instrText></w:r>
+///       <w:r><w:fldChar w:fldCharType="separate"/></w:r>
+///     </w:p>
+///     <!-- cached bibliography paragraphs -->
+///     <w:p>
+///       <w:r><w:fldChar w:fldCharType="end"/></w:r>
+///     </w:p>
+///   </w:sdtContent>
+/// </w:sdt>
+/// ```
+fn write_bibliography_sdt<W: Write>(
+    writer: &mut Writer<W>,
+    paragraphs: &[crate::document::Paragraph],
+    fn_format: &FootnoteFormat,
+    doc_style: &crate::document::DocumentStyle,
+    parts: DocParts,
+    image_counter: &std::cell::Cell<usize>,
+    citation_id_counter: &std::cell::Cell<u32>,
+) -> io::Result<()> {
+    writer
+        .create_element("w:sdt")
+        .write_inner_content(|sdt| {
+            // SDT properties with bibliography marker
+            sdt.create_element("w:sdtPr").write_inner_content(|pr| {
+                pr.create_element("w:id")
+                    .with_attribute(("w:val", "111145805"))
+                    .write_empty()?;
+                pr.create_element("w:bibliography").write_empty()?;
+                Ok(())
+            })?;
+            // SDT content
+            sdt.create_element("w:sdtContent")
+                .write_inner_content(|content| {
+                    // Opening paragraph with Bibliography style + field begin + instrText + field separate
+                    content.create_element("w:p").write_inner_content(|pw| {
+                        pw.create_element("w:pPr").write_inner_content(|ppr| {
+                            ppr.create_element("w:pStyle")
+                                .with_attribute(("w:val", "Bibliography"))
+                                .write_empty()?;
+                            Ok(())
+                        })?;
+                        // fldChar begin
+                        pw.create_element("w:r").write_inner_content(|w| {
+                            w.create_element("w:fldChar")
+                                .with_attribute(("w:fldCharType", "begin"))
+                                .write_empty()?;
+                            Ok(())
+                        })?;
+                        // instrText
+                        pw.create_element("w:r").write_inner_content(|w| {
+                            w.create_element("w:instrText")
+                                .with_attribute(("xml:space", "preserve"))
+                                .write_text_content(BytesText::new(" BIBLIOGRAPHY "))?;
+                            Ok(())
+                        })?;
+                        // fldChar separate
+                        pw.create_element("w:r").write_inner_content(|w| {
+                            w.create_element("w:fldChar")
+                                .with_attribute(("w:fldCharType", "separate"))
+                                .write_empty()?;
+                            Ok(())
+                        })?;
+                        Ok(())
+                    })?;
+                    // Cached bibliography paragraphs
+                    for para in paragraphs {
+                        write_paragraph(
+                            content,
+                            para,
+                            fn_format,
+                            doc_style,
+                            parts,
+                            image_counter,
+                            citation_id_counter,
+                        )?;
+                    }
+                    // Closing paragraph with field end
+                    content.create_element("w:p").write_inner_content(|pw| {
+                        pw.create_element("w:r").write_inner_content(|w| {
+                            w.create_element("w:fldChar")
+                                .with_attribute(("w:fldCharType", "end"))
+                                .write_empty()?;
+                            Ok(())
+                        })?;
                         Ok(())
                     })?;
                     Ok(())

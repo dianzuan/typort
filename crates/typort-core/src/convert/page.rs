@@ -1816,6 +1816,11 @@ fn apply_overrides_to_elements(
                     }
                 }
             }
+            typort_ooxml::document::BlockElement::BibliographyBlock { paragraphs } => {
+                for p in paragraphs {
+                    apply_overrides_to_paragraph(p, span_overrides, text_overrides);
+                }
+            }
         }
     }
 }

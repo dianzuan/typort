@@ -1422,4 +1422,23 @@ mod tests {
         let buf = build_docx(&doc);
         assert!(!zip_has_entry(&buf, "customXml/item1.xml"));
     }
+
+    // ── 49. Bibliography block SDT ────────────────────────────────────
+
+    #[test]
+    fn bibliography_block_produces_sdt_with_field() {
+        let mut doc = Document::new();
+        let mut bib_para = document::Paragraph::new();
+        bib_para.add_run("Smith, J. (2020). Example. Journal, 42(3), 100-115.");
+        bib_para.hanging_indent = true;
+        doc.body.elements.push(document::BlockElement::BibliographyBlock {
+            paragraphs: vec![bib_para],
+        });
+
+        let buf = build_docx(&doc);
+        let xml = read_zip_entry(&buf, "word/document.xml");
+        assert!(xml.contains("w:bibliography"), "expected w:bibliography SDT marker: {xml}");
+        assert!(xml.contains("BIBLIOGRAPHY"), "expected BIBLIOGRAPHY field code: {xml}");
+        assert!(xml.contains("Smith, J."), "expected cached bibliography text: {xml}");
+    }
 }
