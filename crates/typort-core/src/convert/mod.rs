@@ -142,6 +142,9 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
     // 11. Extract title/author from document metadata, falling back to first heading
     extract_document_metadata(&html_doc, &mut doc);
 
+    // 11b. Extract bibliography sources for Word citation data store
+    doc.citation_sources = bibliography::extract_bibliography_sources(&html_doc);
+
     // 12. Post-processing: suppress indent after headings, bibliography hanging indent
     apply_paragraph_formatting(&mut doc);
 
@@ -558,6 +561,42 @@ fn handle_html_element(
         "section" => {
             // Skip doc-endnotes section
             if has_attr_value(elem, "role", "doc-endnotes") {
+                return;
+            }
+            if has_attr_value(elem, "role", "doc-bibliography") {
+                let start_idx = doc.body.elements.len();
+                walk_tags(
+                    &elem.children,
+                    html_doc,
+                    doc,
+                    eq_state,
+                    image_queue,
+                    bookmarks,
+                    page_breaks,
+                );
+                let bib_elements: Vec<_> = doc.body.elements.drain(start_idx..).collect();
+                let mut bib_paragraphs = Vec::new();
+                for element in bib_elements {
+                    match element {
+                        BlockElement::Paragraph(p) => {
+                            if matches!(p.style, Some(ParagraphStyle::Heading(_))) {
+                                doc.add_paragraph(p);
+                            } else {
+                                let mut bp = p;
+                                bp.hanging_indent = true;
+                                bib_paragraphs.push(bp);
+                            }
+                        }
+                        other => {
+                            doc.body.elements.push(other);
+                        }
+                    }
+                }
+                if !bib_paragraphs.is_empty() {
+                    doc.body.elements.push(BlockElement::BibliographyBlock {
+                        paragraphs: bib_paragraphs,
+                    });
+                }
                 return;
             }
             walk_tags(
