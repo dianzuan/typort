@@ -3979,14 +3979,25 @@ fn issue_nested_table_alignment() {
 
 #[test]
 fn issue_cjk_font_east_asia() {
-    let xml = fixture_doc_xml("issue_cjk_font_east_asia");
-    assert!(xml.contains("eastAsia"), "should set w:rFonts eastAsia attribute for CJK");
+    let path = "../../tests/fixtures/issue_cjk_font_east_asia.typ";
+    let world = typort_core::TyportWorld::new(std::path::Path::new(path)).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, std::io::Cursor::new(&mut buf)).unwrap();
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(archive.by_name("word/document.xml").unwrap()).unwrap();
+    let styles_xml =
+        std::io::read_to_string(archive.by_name("word/styles.xml").unwrap()).unwrap();
     assert!(
-        xml.contains("\u{65E5}\u{672C}\u{8A9E}"),
+        doc_xml.contains("eastAsia") || styles_xml.contains("eastAsia"),
+        "should set w:rFonts eastAsia attribute for CJK (in document or styles)"
+    );
+    assert!(
+        doc_xml.contains("\u{65E5}\u{672C}\u{8A9E}"),
         "Japanese text should be present"
     );
     assert!(
-        xml.contains("\u{4E2D}\u{6587}"),
+        doc_xml.contains("\u{4E2D}\u{6587}"),
         "Chinese text should be present"
     );
 }

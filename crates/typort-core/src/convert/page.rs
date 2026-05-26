@@ -4,7 +4,7 @@
 //! and computes page dimensions + margins from the first page.
 //! Also detects section breaks, headers/footers, and column layouts.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use typort_ooxml::document::{
     Alignment, DocumentStyle, FootnoteFormat, HeaderFooter, InlineElement, PageNumberFormat,
@@ -1721,14 +1721,27 @@ pub fn apply_styles_from_paged(
         return;
     }
 
-    // Detect rendered body font/size from the paged output itself (most common),
-    // split by script so Latin numerals inside CJK text keep their correct size
-    // and CJK runs don't pick up spurious font overrides.
-    let (rendered_body_font_ascii, rendered_body_font_cjk, rendered_body_size_half_pt) =
+    let (rendered_ascii, rendered_cjk, rendered_body_size_half_pt) =
         detect_rendered_body_style(&paged_styles);
-    let body_font_ascii = &rendered_body_font_ascii;
-    let body_font_east_asia = &rendered_body_font_cjk;
     let body_size_half_pt = rendered_body_size_half_pt;
+
+    // When the user declares a CJK font (e.g. `font: ("Times New Roman", "SimSun")`),
+    // build a set of body-level CJK fonts — any CJK font that appears at body
+    // text size. These are system fallbacks for the declared font and should NOT
+    // produce per-run overrides. Only activate this suppression when there IS
+    // a dual-font declaration; otherwise keep all rendered font overrides.
+    let has_declared_cjk_font = doc.style.body_font_ascii != doc.style.body_font_east_asia;
+    let mut body_cjk_fonts: HashSet<&str> = HashSet::new();
+    if has_declared_cjk_font {
+        body_cjk_fonts.insert(&doc.style.body_font_east_asia);
+        for item in &paged_styles {
+            let size_half = (item.size_pt * 2.0).round() as u32;
+            if size_half == body_size_half_pt && item.text.chars().any(is_cjk_char) {
+                body_cjk_fonts.insert(&item.font_family);
+            }
+        }
+    }
+    let declared_ascii = &doc.style.body_font_ascii;
 
     // Build Span → style override lookup (Vec to handle multiple paged items per span)
     let mut span_overrides: HashMap<typst_syntax::Span, Vec<(String, RunStyleOverride)>> = HashMap::new();
@@ -1740,15 +1753,22 @@ pub fn apply_styles_from_paged(
 
         let color = item.color_hex.clone();
 
-        // Only set font override if different from document defaults
+        // Only set font override if different from BOTH the rendered baseline
+        // AND the declared baseline. This suppresses system fallback fonts
+        // (like Noto Serif SC when SimSun was declared but doesn't cover a glyph).
         let font_is_cjk = item.text.chars().any(is_cjk_char);
-        let font_differs = if font_is_cjk {
-            item.font_family != *body_font_east_asia
+        let is_baseline_font = if font_is_cjk {
+            if body_cjk_fonts.is_empty() {
+                // No dual-font declaration — use rendered CJK baseline
+                item.font_family == rendered_cjk
+            } else {
+                body_cjk_fonts.contains(item.font_family.as_str())
+            }
         } else {
-            item.font_family != *body_font_ascii
+            item.font_family == rendered_ascii || item.font_family == *declared_ascii
         };
 
-        let (font_ascii, font_east_asia) = if font_differs {
+        let (font_ascii, font_east_asia) = if !is_baseline_font {
             if font_is_cjk {
                 (None, Some(item.font_family.clone()))
             } else {
