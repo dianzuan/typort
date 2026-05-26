@@ -718,38 +718,40 @@ pub(super) fn merge_same_line_paragraphs(doc: &mut Document, paged: &PagedDocume
             {
                 false
             } else {
-                let text1 = p1.text_content();
-                let text2 = p2.text_content();
-                if text1.is_empty() || text2.is_empty() {
-                    false
-                } else {
-                    let y1 = find_y_for_text(&text1, &text_y_map, &all_lines);
-                    let y2 = find_y_for_text(&text2, &text_y_map, &all_lines);
-                    match (y1, y2) {
-                        (Some(y1), Some(y2)) => (y1 - y2).abs() < 5.0,
-                        _ => false,
-                    }
-                }
+                // Merge when p1 is all-superscript runs (split inline super() calls)
+                // into p2 (the text paragraph that follows). This handles the
+                // pattern where #for loop generates super() before author names.
+                let p1_all_super = !p1.inlines.is_empty()
+                    && p1.inlines.iter().all(|inl| matches!(
+                        inl,
+                        InlineElement::Text(r) if r.superscript || r.text.trim().is_empty()
+                    ));
+                p1_all_super
             }
         };
 
         if should_merge {
-            let BlockElement::Paragraph(p2) =
-                doc.body.elements.remove(i + 1)
+            // Remove the all-super p1 and prepend its inlines into p2
+            let BlockElement::Paragraph(p1) =
+                doc.body.elements.remove(i)
             else {
                 unreachable!()
             };
-            let BlockElement::Paragraph(p1) =
+            let BlockElement::Paragraph(p2) =
                 &mut doc.body.elements[i]
             else {
                 unreachable!()
             };
-            p1.inlines.extend(p2.inlines);
+            let mut merged = p1.inlines;
+            merged.extend(std::mem::take(&mut p2.inlines));
+            p2.inlines = merged;
+            // Don't increment i — check the merged paragraph against the next
         } else {
             i += 1;
         }
     }
 }
+
 
 fn find_y_for_text(
     text: &str,
