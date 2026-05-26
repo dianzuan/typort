@@ -24,7 +24,7 @@ use typst::layout::PagedDocument;
 use typst::model::Numbering;
 use typst_html::{HtmlDocument, HtmlElement, HtmlNode};
 use typst_library::math::EquationElem;
-use typst_library::model::{HeadingElem, OutlineElem, RefElem};
+use typst_library::model::{CiteGroup, HeadingElem, OutlineElem, RefElem};
 
 /// Tracks equation numbering state across the document.
 #[derive(Default)]
@@ -1104,6 +1104,26 @@ fn handle_inline_tag(
                 let mut run = Run::new(&text);
                 apply_inline_format(elem_name, &mut run);
                 para.push_run(run);
+            }
+            end
+        }
+        "cite-group" => {
+            let end = find_tag_end(children, i, tag.location());
+            let loc = tag.location();
+            if let Some(c) = html_doc
+                .introspector
+                .query_first(&typst::foundations::Selector::Location(loc))
+                && let Some(cite_group) = c.to_packed::<CiteGroup>()
+            {
+                let keys: Vec<String> = cite_group
+                    .children
+                    .iter()
+                    .map(|cite| cite.key.resolve().to_string())
+                    .collect();
+                let display = collect_flat_text(&children[i + 1..end]);
+                if !keys.is_empty() && !display.is_empty() {
+                    para.add_citation(keys, display);
+                }
             }
             end
         }
