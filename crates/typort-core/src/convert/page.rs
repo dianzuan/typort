@@ -1590,30 +1590,46 @@ fn collect_styles_from_frame(
     }
 }
 
-/// Detect the most common font family and size from rendered text items.
-/// Used as the baseline for per-run override comparison, independent of
-/// source-AST overrides which may reference fonts not available at render time.
+/// Detect the most common font families (split by script) and size from
+/// rendered text items.  Returns `(ascii_font, cjk_font, body_size_half_pt)`.
+///
+/// Splitting by script prevents a CJK-dominated document from picking a CJK
+/// fallback font as the ASCII baseline (which would cause every Latin run to
+/// get a spurious font override) and vice-versa.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn detect_rendered_body_style(styles: &[PagedRunStyle]) -> (String, u32) {
-    let mut font_counts: HashMap<&str, usize> = HashMap::new();
+fn detect_rendered_body_style(styles: &[PagedRunStyle]) -> (String, String, u32) {
+    let mut ascii_font_counts: HashMap<&str, usize> = HashMap::new();
+    let mut cjk_font_counts: HashMap<&str, usize> = HashMap::new();
     let mut size_counts: HashMap<u32, usize> = HashMap::new();
 
     for item in styles {
-        *font_counts.entry(&item.font_family).or_insert(0) += item.text.len();
         let half_pt = (item.size_pt * 2.0).round() as u32;
         *size_counts.entry(half_pt).or_insert(0) += item.text.len();
+
+        let has_cjk = item.text.chars().any(is_cjk_char);
+        let has_ascii = item.text.chars().any(|c| c.is_ascii_alphabetic() || c.is_ascii_digit());
+        if has_cjk {
+            *cjk_font_counts.entry(&item.font_family).or_insert(0) += item.text.len();
+        }
+        if has_ascii || !has_cjk {
+            *ascii_font_counts.entry(&item.font_family).or_insert(0) += item.text.len();
+        }
     }
 
-    let body_font = font_counts
+    let body_font_ascii = ascii_font_counts
         .into_iter()
         .max_by_key(|(_, c)| *c)
         .map_or_else(|| "Times New Roman".to_string(), |(f, _)| f.to_string());
+    let body_font_cjk = cjk_font_counts
+        .into_iter()
+        .max_by_key(|(_, c)| *c)
+        .map_or_else(|| body_font_ascii.clone(), |(f, _)| f.to_string());
     let body_size = size_counts
         .into_iter()
         .max_by_key(|(_, c)| *c)
         .map_or(21, |(s, _)| s);
 
-    (body_font, body_size)
+    (body_font_ascii, body_font_cjk, body_size)
 }
 
 fn extract_non_black_color(paint: &typst_library::visualize::Paint) -> Option<String> {
@@ -1653,18 +1669,18 @@ pub fn apply_styles_from_paged(
     }
 
     // Detect rendered body font/size from the paged output itself (most common),
-    // NOT from doc.style which may have been overridden by source AST with a
-    // font name that differs from the actual rendered fallback font.
-    let (rendered_body_font, rendered_body_size_half_pt) =
+    // split by script so Latin numerals inside CJK text keep their correct size
+    // and CJK runs don't pick up spurious font overrides.
+    let (rendered_body_font_ascii, rendered_body_font_cjk, rendered_body_size_half_pt) =
         detect_rendered_body_style(&paged_styles);
-    let body_font_ascii = &rendered_body_font;
-    let body_font_east_asia = &rendered_body_font;
+    let body_font_ascii = &rendered_body_font_ascii;
+    let body_font_east_asia = &rendered_body_font_cjk;
     let body_size_half_pt = rendered_body_size_half_pt;
 
-    // Build Span → style override lookup
-    let mut span_overrides: HashMap<typst_syntax::Span, RunStyleOverride> = HashMap::new();
-    // Text-based fallback for runs without spans
-    let mut text_overrides: HashMap<String, RunStyleOverride> = HashMap::new();
+    // Build Span → style override lookup (Vec to handle multiple paged items per span)
+    let mut span_overrides: HashMap<typst_syntax::Span, Vec<(String, RunStyleOverride)>> = HashMap::new();
+    // Text-based fallback for runs without spans (Vec to handle multiple sizes per text)
+    let mut text_overrides: HashMap<String, Vec<RunStyleOverride>> = HashMap::new();
 
     for item in &paged_styles {
         let size_half = (item.size_pt * 2.0).round() as u32;
@@ -1717,17 +1733,20 @@ pub fn apply_styles_from_paged(
 
         for &span in &item.spans {
             if !span.is_detached() {
-                span_overrides.insert(span, RunStyleOverride {
-                    color: ovr.color.clone(),
-                    font_ascii: ovr.font_ascii.clone(),
-                    font_east_asia: ovr.font_east_asia.clone(),
-                    size_half_pt: ovr.size_half_pt,
-                    force_bold: ovr.force_bold,
-                    force_italic: ovr.force_italic,
-                });
+                span_overrides.entry(span).or_default().push((
+                    item.text.clone(),
+                    RunStyleOverride {
+                        color: ovr.color.clone(),
+                        font_ascii: ovr.font_ascii.clone(),
+                        font_east_asia: ovr.font_east_asia.clone(),
+                        size_half_pt: ovr.size_half_pt,
+                        force_bold: ovr.force_bold,
+                        force_italic: ovr.force_italic,
+                    },
+                ));
             }
         }
-        text_overrides.insert(item.text.clone(), RunStyleOverride {
+        text_overrides.entry(item.text.clone()).or_default().push(RunStyleOverride {
             color: ovr.color,
             font_ascii: ovr.font_ascii,
             font_east_asia: ovr.font_east_asia,
@@ -1748,7 +1767,7 @@ pub fn apply_styles_from_paged(
     for footnote in &mut doc.footnotes {
         for inline in &mut footnote.content {
             if let InlineElement::Text(run) = inline {
-                apply_override_to_run(run, &span_overrides, &text_overrides);
+                apply_override_to_run(run, &span_overrides, &text_overrides, None);
             }
         }
     }
@@ -1759,13 +1778,49 @@ pub fn apply_styles_from_paged(
 
 fn apply_override_to_run(
     run: &mut Run,
-    span_overrides: &HashMap<typst_syntax::Span, RunStyleOverride>,
-    text_overrides: &HashMap<String, RunStyleOverride>,
+    span_overrides: &HashMap<typst_syntax::Span, Vec<(String, RunStyleOverride)>>,
+    text_overrides: &HashMap<String, Vec<RunStyleOverride>>,
+    sibling_size_hint: Option<u32>,
 ) {
     let ovr = run
         .span
         .and_then(|s| span_overrides.get(&s))
-        .or_else(|| text_overrides.get(&run.text));
+        .and_then(|entries| {
+            // Prefer exact text match, then substring match, then first entry
+            entries
+                .iter()
+                .find(|(text, _)| text == &run.text)
+                .or_else(|| {
+                    entries.iter().find(|(text, _)| {
+                        run.text.contains(text.as_str()) || text.contains(run.text.as_str())
+                    })
+                })
+                .or_else(|| entries.first())
+                .map(|(_, ovr)| ovr)
+        })
+        .or_else(|| {
+            text_overrides.get(&run.text).and_then(|entries| {
+                if entries.len() == 1 {
+                    return entries.first();
+                }
+                // Multiple entries exist for the same text (e.g., "294"
+                // appears at 22pt in the title and 9pt in the abstract).
+                // Use sibling run sizes to pick the closest match.
+                if let Some(hint) = sibling_size_hint {
+                    entries
+                        .iter()
+                        .filter(|o| o.size_half_pt.is_some())
+                        .min_by_key(|o| {
+                            let s = o.size_half_pt.unwrap_or(0);
+                            (s as i64 - hint as i64).unsigned_abs()
+                        })
+                        .or_else(|| entries.first())
+                } else {
+                    // No hint available — pick the first entry
+                    entries.first()
+                }
+            })
+        });
     let Some(ovr) = ovr else { return };
 
     if let Some(color) = &ovr.color {
@@ -1795,8 +1850,8 @@ fn apply_override_to_run(
 
 fn apply_overrides_to_elements(
     elements: &mut [typort_ooxml::document::BlockElement],
-    span_overrides: &HashMap<typst_syntax::Span, RunStyleOverride>,
-    text_overrides: &HashMap<String, RunStyleOverride>,
+    span_overrides: &HashMap<typst_syntax::Span, Vec<(String, RunStyleOverride)>>,
+    text_overrides: &HashMap<String, Vec<RunStyleOverride>>,
 ) {
     for element in elements.iter_mut() {
         match element {
@@ -1827,20 +1882,63 @@ fn apply_overrides_to_elements(
 
 fn apply_overrides_to_paragraph(
     para: &mut Paragraph,
-    span_overrides: &HashMap<typst_syntax::Span, RunStyleOverride>,
-    text_overrides: &HashMap<String, RunStyleOverride>,
+    span_overrides: &HashMap<typst_syntax::Span, Vec<(String, RunStyleOverride)>>,
+    text_overrides: &HashMap<String, Vec<RunStyleOverride>>,
 ) {
+    // First pass: apply overrides to runs that have span-based matches or
+    // unambiguous text matches.
+    let mut has_ambiguous = false;
     for inline in &mut para.inlines {
         match inline {
             typort_ooxml::document::InlineElement::Text(run) => {
-                apply_override_to_run(run, span_overrides, text_overrides);
+                let is_ambiguous = run.span.is_none()
+                    && text_overrides
+                        .get(&run.text)
+                        .is_some_and(|e| e.len() > 1);
+                if is_ambiguous {
+                    has_ambiguous = true;
+                } else {
+                    apply_override_to_run(run, span_overrides, text_overrides, None);
+                }
             }
             typort_ooxml::document::InlineElement::Hyperlink { runs, .. } => {
                 for run in runs {
-                    apply_override_to_run(run, span_overrides, text_overrides);
+                    apply_override_to_run(run, span_overrides, text_overrides, None);
                 }
             }
             _ => {}
+        }
+    }
+    // Second pass: for runs with ambiguous text overrides, use sibling sizes
+    // to pick the closest match.
+    if has_ambiguous {
+        // Collect the max size from sibling runs that already have overrides
+        let sibling_size: Option<u32> = para
+            .inlines
+            .iter()
+            .filter_map(|inl| {
+                if let typort_ooxml::document::InlineElement::Text(r) = inl {
+                    r.size_half_pt
+                } else {
+                    None
+                }
+            })
+            .max();
+        for inline in &mut para.inlines {
+            if let typort_ooxml::document::InlineElement::Text(run) = inline {
+                let is_ambiguous = run.span.is_none()
+                    && text_overrides
+                        .get(&run.text)
+                        .is_some_and(|e| e.len() > 1);
+                if is_ambiguous {
+                    apply_override_to_run(
+                        run,
+                        span_overrides,
+                        text_overrides,
+                        sibling_size,
+                    );
+                }
+            }
         }
     }
 }
