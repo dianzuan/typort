@@ -143,7 +143,7 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
     extract_document_metadata(&html_doc, &mut doc);
 
     // 11b. Extract bibliography sources for Word citation data store
-    doc.citation_sources = bibliography::extract_bibliography_sources(&html_doc);
+    doc.citation_sources = bibliography::extract_bibliography_sources(&html_doc, world);
 
     // 12. Post-processing: suppress indent after headings, bibliography hanging indent
     apply_paragraph_formatting(&mut doc);

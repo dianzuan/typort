@@ -56,6 +56,10 @@ impl TyportWorld {
         &self.source
     }
 
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
     fn resolve_path(&self, id: FileId) -> FileResult<PathBuf> {
         if let Some(spec) = id.package() {
             let package_dir = self
