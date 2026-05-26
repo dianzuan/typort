@@ -1300,4 +1300,40 @@ mod tests {
                 if keys == &["Smi20"] && display_text == "(Smith, 2020)"
         ));
     }
+
+    // ── 45. Citation SDT with field code ──────────────────────────────
+
+    #[test]
+    fn citation_produces_sdt_with_field_code() {
+        let mut doc = Document::new();
+        let mut para = document::Paragraph::new();
+        para.add_run("See ");
+        para.add_citation(vec!["Smi20".into()], "(Smith, 2020)".into());
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        let xml = read_zip_entry(&buf, "word/document.xml");
+        assert!(xml.contains("w:sdt"), "expected SDT wrapper in: {xml}");
+        assert!(xml.contains("w:citation"), "expected w:citation marker in: {xml}");
+        assert!(xml.contains("CITATION Smi20"), "expected CITATION field code in: {xml}");
+        assert!(xml.contains("(Smith, 2020)"), "expected display text in: {xml}");
+    }
+
+    #[test]
+    fn merged_citation_uses_backslash_m() {
+        let mut doc = Document::new();
+        let mut para = document::Paragraph::new();
+        para.add_citation(
+            vec!["Smi20".into(), "Jon21".into()],
+            "(Smith, 2020; Jones, 2021)".into(),
+        );
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        let xml = read_zip_entry(&buf, "word/document.xml");
+        assert!(
+            xml.contains(r"CITATION Smi20 \l 1033 \m Jon21"),
+            "expected merged citation field in: {xml}"
+        );
+    }
 }

@@ -574,6 +574,7 @@ fn generate_document_xml(
     // We need to track image index state across paragraphs for the writer.
     // Use a Cell to allow mutation inside the closure.
     let image_counter = std::cell::Cell::new(0_usize);
+    let citation_id_counter = std::cell::Cell::new(1_000_000_u32);
     let ps = &doc.page_settings;
     let parts = DocParts {
         footnotes: !doc.footnotes.is_empty(),
@@ -596,6 +597,7 @@ fn generate_document_xml(
                             &doc.style,
                             parts,
                             &image_counter,
+                            &citation_id_counter,
                         )?;
                     }
                     BlockElement::Table(table) => {
@@ -606,6 +608,7 @@ fn generate_document_xml(
                             &doc.style,
                             parts,
                             &image_counter,
+                            &citation_id_counter,
                         )?;
                     }
                 }
@@ -726,6 +729,7 @@ fn write_paragraph<W: Write>(
     doc_style: &crate::document::DocumentStyle,
     parts: DocParts,
     image_counter: &std::cell::Cell<usize>,
+    citation_id_counter: &std::cell::Cell<u32>,
 ) -> io::Result<()> {
     writer.create_element("w:p").write_inner_content(|w| {
         let has_style = para.style.is_some();
@@ -923,8 +927,10 @@ fn write_paragraph<W: Write>(
                 InlineElement::Tab => {
                     write_tab(w)?;
                 }
-                InlineElement::Citation { .. } => {
-                    // SDT-wrapped citation writing will be added in a later task.
+                InlineElement::Citation { keys, display_text } => {
+                    let sdt_id = citation_id_counter.get();
+                    citation_id_counter.set(sdt_id + 1);
+                    write_citation_sdt(w, keys, display_text, sdt_id)?;
                 }
             }
         }
@@ -1064,6 +1070,7 @@ fn write_table<W: Write>(
     doc_style: &crate::document::DocumentStyle,
     parts: DocParts,
     image_counter: &std::cell::Cell<usize>,
+    citation_id_counter: &std::cell::Cell<u32>,
 ) -> io::Result<()> {
     // Determine number of columns from the first row for equal-width distribution
     let num_cols = table
@@ -1153,6 +1160,7 @@ fn write_table<W: Write>(
                                             doc_style,
                                             parts,
                                             image_counter,
+                                            citation_id_counter,
                                         )?;
                                         has_trailing_para = true;
                                     }
@@ -1164,6 +1172,7 @@ fn write_table<W: Write>(
                                             doc_style,
                                             parts,
                                             image_counter,
+                                            citation_id_counter,
                                         )?;
                                         has_trailing_para = false;
                                     }
@@ -1185,6 +1194,7 @@ fn write_table<W: Write>(
                                     doc_style,
                                     parts,
                                     image_counter,
+                                    citation_id_counter,
                                 )?;
                             }
                         }
@@ -1561,6 +1571,99 @@ fn write_field_ref<W: Write>(
             .write_empty()?;
         Ok(())
     })?;
+    Ok(())
+}
+
+/// Write a Word citation as a Structured Document Tag (SDT) with a CITATION field code.
+///
+/// Produces:
+/// ```xml
+/// <w:sdt>
+///   <w:sdtPr><w:id w:val="..."/><w:citation/></w:sdtPr>
+///   <w:sdtContent>
+///     <w:r><w:fldChar w:fldCharType="begin"/></w:r>
+///     <w:r><w:instrText xml:space="preserve"> CITATION key1 \l 1033 [\m key2 ...] </w:instrText></w:r>
+///     <w:r><w:fldChar w:fldCharType="separate"/></w:r>
+///     <w:r><w:rPr><w:noProof/></w:rPr><w:t xml:space="preserve">(display text)</w:t></w:r>
+///     <w:r><w:fldChar w:fldCharType="end"/></w:r>
+///   </w:sdtContent>
+/// </w:sdt>
+/// ```
+fn write_citation_sdt<W: Write>(
+    writer: &mut Writer<W>,
+    keys: &[String],
+    display_text: &str,
+    sdt_id: u32,
+) -> io::Result<()> {
+    writer
+        .create_element("w:sdt")
+        .write_inner_content(|sdt| {
+            // SDT properties
+            let id_str = sdt_id.to_string();
+            sdt.create_element("w:sdtPr").write_inner_content(|pr| {
+                pr.create_element("w:id")
+                    .with_attribute(("w:val", id_str.as_str()))
+                    .write_empty()?;
+                pr.create_element("w:citation").write_empty()?;
+                Ok(())
+            })?;
+            // SDT content: field code sequence
+            sdt.create_element("w:sdtContent")
+                .write_inner_content(|content| {
+                    // fldChar begin
+                    content.create_element("w:r").write_inner_content(|w| {
+                        w.create_element("w:fldChar")
+                            .with_attribute(("w:fldCharType", "begin"))
+                            .write_empty()?;
+                        Ok(())
+                    })?;
+                    // instrText: CITATION key1 \l 1033 [\m key2 \m key3 ...]
+                    let mut instr = String::new();
+                    instr.push_str(" CITATION ");
+                    if let Some(first) = keys.first() {
+                        instr.push_str(first);
+                    }
+                    instr.push_str(r" \l 1033");
+                    for key in keys.iter().skip(1) {
+                        instr.push_str(r" \m ");
+                        instr.push_str(key);
+                    }
+                    instr.push(' ');
+                    content.create_element("w:r").write_inner_content(|w| {
+                        w.create_element("w:instrText")
+                            .with_attribute(("xml:space", "preserve"))
+                            .write_text_content(BytesText::new(&instr))?;
+                        Ok(())
+                    })?;
+                    // fldChar separate
+                    content.create_element("w:r").write_inner_content(|w| {
+                        w.create_element("w:fldChar")
+                            .with_attribute(("w:fldCharType", "separate"))
+                            .write_empty()?;
+                        Ok(())
+                    })?;
+                    // Display text with noProof
+                    content.create_element("w:r").write_inner_content(|w| {
+                        w.create_element("w:rPr").write_inner_content(|rpr| {
+                            rpr.create_element("w:noProof").write_empty()?;
+                            Ok(())
+                        })?;
+                        w.create_element("w:t")
+                            .with_attribute(("xml:space", "preserve"))
+                            .write_text_content(BytesText::new(display_text))?;
+                        Ok(())
+                    })?;
+                    // fldChar end
+                    content.create_element("w:r").write_inner_content(|w| {
+                        w.create_element("w:fldChar")
+                            .with_attribute(("w:fldCharType", "end"))
+                            .write_empty()?;
+                        Ok(())
+                    })?;
+                    Ok(())
+                })?;
+            Ok(())
+        })?;
     Ok(())
 }
 
