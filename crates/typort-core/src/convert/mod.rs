@@ -75,8 +75,18 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
     }
 
     // 3b. Override with authoritative values from source AST
-    let source_overrides =
-        page::extract_source_style_overrides(world.main_source().text());
+    let main_text = world.main_source().text();
+    let mut source_overrides = page::extract_source_style_overrides(main_text);
+
+    // Also scan imported files for set rules (e.g., template libraries
+    // like lib.typ that contain `set text(font: ...)` inside functions).
+    for import_path in page::extract_import_paths(main_text) {
+        let abs_path = world.root().join(import_path.trim_start_matches('/'));
+        if let Ok(content) = std::fs::read_to_string(&abs_path) {
+            let import_overrides = page::extract_source_style_overrides(&content);
+            source_overrides.merge_from(&import_overrides);
+        }
+    }
     apply_source_overrides(&source_overrides, &mut doc);
 
     // 4. First pass: extract footnote content from <section role="doc-endnotes">

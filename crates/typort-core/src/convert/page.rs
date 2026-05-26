@@ -652,6 +652,34 @@ pub struct SourceStyleOverrides {
     pub justify: Option<bool>,
 }
 
+impl SourceStyleOverrides {
+    /// Fill any `None` fields from `other` (used to merge imported file overrides).
+    pub fn merge_from(&mut self, other: &SourceStyleOverrides) {
+        macro_rules! fill {
+            ($field:ident) => {
+                if self.$field.is_none() {
+                    self.$field = other.$field.clone();
+                }
+            };
+        }
+        fill!(margin_top);
+        fill!(margin_bottom);
+        fill!(margin_left);
+        fill!(margin_right);
+        fill!(columns);
+        fill!(page_numbering);
+        fill!(text_font);
+        fill!(text_size_half_pt);
+        fill!(first_line_indent_twips);
+        fill!(first_line_indent_em);
+        fill!(par_leading_twips);
+        fill!(par_leading_em);
+        fill!(par_spacing_twips);
+        fill!(par_spacing_em);
+        fill!(justify);
+    }
+}
+
 /// Extract style overrides from Typst source AST in a single walk.
 ///
 /// Reads `#set page(...)`, `#set text(...)`, `#set par(...)` rules.
@@ -662,6 +690,31 @@ pub fn extract_source_style_overrides(source: &str) -> SourceStyleOverrides {
     let mut ovr = SourceStyleOverrides::default();
     collect_set_rules(&root, &mut ovr);
     ovr
+}
+
+/// Extract file paths from `#import "path"` statements in Typst source.
+///
+/// Returns relative paths as written in the source (e.g. `"lib.typ"`).
+#[must_use]
+pub fn extract_import_paths(source: &str) -> Vec<String> {
+    let root = typst_syntax::parse(source);
+    let mut paths = Vec::new();
+    collect_import_paths(&root, &mut paths);
+    paths
+}
+
+fn collect_import_paths(node: &typst_syntax::SyntaxNode, paths: &mut Vec<String>) {
+    use typst_syntax::SyntaxKind;
+    if node.kind() == SyntaxKind::ModuleImport {
+        if let Some(import) = node.cast::<typst_syntax::ast::ModuleImport<'_>>() {
+            if let typst_syntax::ast::Expr::Str(s) = import.source() {
+                paths.push(s.get().to_string());
+            }
+        }
+    }
+    for child in node.children() {
+        collect_import_paths(child, paths);
+    }
 }
 
 fn collect_set_rules(
