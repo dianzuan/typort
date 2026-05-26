@@ -4254,3 +4254,151 @@ smoke_test!(smoke_business_report, "business_report");
 smoke_test!(smoke_memo, "memo");
 smoke_test!(smoke_tech_doc, "tech_doc");
 smoke_test!(smoke_edge_text_deco_across_math, "edge_text_deco_across_math");
+
+// ── Bibliography / Citation ────────────────────────────────────────────
+
+#[test]
+fn bibliography_produces_citation_field_refs() {
+    let xml = fixture_doc_xml("bibliography_basic");
+    // Inline citations produce REF field codes pointing at bibliography keys
+    assert!(
+        xml.contains("REF smith2020"),
+        "expected REF field code for smith2020"
+    );
+    assert!(
+        xml.contains("REF knuth1997"),
+        "expected REF field code for knuth1997"
+    );
+    assert!(
+        xml.contains("REF wang2023"),
+        "expected REF field code for wang2023"
+    );
+}
+
+#[test]
+fn bibliography_produces_bibliography_sdt() {
+    let xml = fixture_doc_xml("bibliography_basic");
+    assert!(
+        xml.contains("w:bibliography"),
+        "expected w:bibliography SDT marker"
+    );
+    assert!(
+        xml.contains("BIBLIOGRAPHY"),
+        "expected BIBLIOGRAPHY field code"
+    );
+}
+
+#[test]
+fn bibliography_has_custom_xml_sources() {
+    let path = "../../tests/fixtures/bibliography_basic.typ";
+    let world = typort_core::TyportWorld::new(std::path::Path::new(path)).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, std::io::Cursor::new(&mut buf)).unwrap();
+
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(&buf)).unwrap();
+    assert!(
+        archive.by_name("customXml/item1.xml").is_ok(),
+        "expected customXml/item1.xml in ZIP"
+    );
+    let xml = std::io::read_to_string(archive.by_name("customXml/item1.xml").unwrap()).unwrap();
+    assert!(xml.contains("b:Sources"), "expected b:Sources root");
+    assert!(xml.contains("smith2020"), "expected smith2020 tag");
+    assert!(xml.contains("knuth1997"), "expected knuth1997 tag");
+    assert!(xml.contains("wang2023"), "expected wang2023 tag");
+    assert!(
+        xml.contains("JournalArticle"),
+        "expected JournalArticle source type"
+    );
+    assert!(xml.contains("Book"), "expected Book source type for knuth1997");
+}
+
+#[test]
+fn bibliography_custom_xml_has_author_metadata() {
+    let path = "../../tests/fixtures/bibliography_basic.typ";
+    let world = typort_core::TyportWorld::new(std::path::Path::new(path)).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, std::io::Cursor::new(&mut buf)).unwrap();
+
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(&buf)).unwrap();
+    let xml = std::io::read_to_string(archive.by_name("customXml/item1.xml").unwrap()).unwrap();
+    assert!(
+        xml.contains("<b:Last>Smith</b:Last>"),
+        "expected Smith author"
+    );
+    assert!(
+        xml.contains("<b:Year>2020</b:Year>"),
+        "expected year 2020"
+    );
+    assert!(xml.contains("<b:Title>"), "expected title element");
+    assert!(
+        xml.contains("<b:Last>Knuth</b:Last>"),
+        "expected Knuth author"
+    );
+    assert!(
+        xml.contains("<b:Year>1997</b:Year>"),
+        "expected year 1997"
+    );
+}
+
+#[test]
+fn bibliography_citation_sources_count() {
+    let path = "../../tests/fixtures/bibliography_basic.typ";
+    let world = typort_core::TyportWorld::new(std::path::Path::new(path)).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+    assert_eq!(
+        doc.citation_sources.len(),
+        3,
+        "expected 3 citation sources, got {}",
+        doc.citation_sources.len()
+    );
+}
+
+#[test]
+fn bibliography_field_codes_have_begin_and_end() {
+    let xml = fixture_doc_xml("bibliography_basic");
+    // Both inline citations and bibliography block use field codes
+    assert!(
+        xml.contains("fldCharType=\"begin\""),
+        "expected fldChar begin in citation field"
+    );
+    assert!(
+        xml.contains("fldCharType=\"end\""),
+        "expected fldChar end in citation field"
+    );
+}
+
+#[test]
+fn bibliography_display_text_present() {
+    let xml = fixture_doc_xml("bibliography_basic");
+    // The display text for citations should appear (e.g., "[1]", "[2]", "[3]")
+    assert!(xml.contains("[1]"), "expected display text [1]");
+    assert!(xml.contains("[2]"), "expected display text [2]");
+    assert!(xml.contains("[3]"), "expected display text [3]");
+}
+
+#[test]
+fn bibliography_section_heading_present() {
+    let xml = fixture_doc_xml("bibliography_basic");
+    // The bibliography section heading should be present
+    assert!(
+        xml.contains("Bibliography"),
+        "expected Bibliography heading text"
+    );
+}
+
+#[test]
+fn bibliography_body_text_preserved() {
+    let xml = fixture_doc_xml("bibliography_basic");
+    // Body text around citations should be preserved
+    assert!(
+        xml.contains("Introduction"),
+        "expected Introduction heading"
+    );
+    assert!(xml.contains("Methods"), "expected Methods heading");
+    assert!(
+        xml.contains("methodology is sound"),
+        "expected body text near citation"
+    );
+}
