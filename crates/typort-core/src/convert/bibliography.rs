@@ -1,5 +1,44 @@
 use hayagriva::types::{EntryType, Person};
-use typort_ooxml::document::SourceType;
+use typst::comemo::Track;
+use typst_html::HtmlDocument;
+use typst_library::model::BibliographyElem;
+use typort_ooxml::document::{CitationSource, SourceType};
+
+/// Extract bibliography sources from the Typst introspector and map them to
+/// Word `CitationSource` entries for the custom XML data store.
+///
+/// The `Bibliography` type in `typst-library` keeps its entry data private, so
+/// we use `BibliographyElem::keys()` to obtain the citation keys and titles,
+/// and produce minimal `CitationSource` records.  Full metadata (authors,
+/// year, DOI, etc.) would require upstream API changes.
+pub fn extract_bibliography_sources(html_doc: &HtmlDocument) -> Vec<CitationSource> {
+    let tracked = html_doc.introspector.track();
+    let keys = BibliographyElem::keys(tracked);
+
+    keys.into_iter()
+        .map(|(label, title_eco)| {
+            let tag = label.resolve().to_string();
+            let title = title_eco.map(|t| t.to_string());
+            CitationSource {
+                tag,
+                source_type: SourceType::Misc,
+                authors: Vec::new(),
+                title,
+                year: None,
+                journal_name: None,
+                volume: None,
+                issue: None,
+                pages: None,
+                doi: None,
+                url: None,
+                publisher: None,
+                city: None,
+                edition: None,
+                book_title: None,
+            }
+        })
+        .collect()
+}
 
 /// Map a hayagriva `EntryType` to a Word `SourceType`.
 pub fn map_entry_type(entry_type: &EntryType) -> SourceType {
