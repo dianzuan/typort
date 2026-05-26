@@ -1336,4 +1336,90 @@ mod tests {
             "expected merged citation field in: {xml}"
         );
     }
+
+    // ── 47. Custom XML bibliography data source ───────────────────────
+
+    #[test]
+    fn custom_xml_sources_contains_bibliography_entry() {
+        use document::{CitationSource, PersonName, SourceType};
+        let mut doc = Document::new();
+        doc.citation_sources.push(CitationSource {
+            tag: "Smi20".into(),
+            source_type: SourceType::JournalArticle,
+            authors: vec![PersonName {
+                last: "Smith".into(),
+                first: Some("John".into()),
+                middle: Some("A.".into()),
+            }],
+            title: Some("Example Article".into()),
+            year: Some("2020".into()),
+            journal_name: Some("Journal of Examples".into()),
+            volume: Some("42".into()),
+            issue: Some("3".into()),
+            pages: Some("100-115".into()),
+            doi: Some("10.1234/example".into()),
+            url: None,
+            publisher: None,
+            city: None,
+            edition: None,
+            book_title: None,
+        });
+        let mut para = document::Paragraph::new();
+        para.add_citation(vec!["Smi20".into()], "[1]".into());
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        assert!(zip_has_entry(&buf, "customXml/item1.xml"), "expected customXml/item1.xml");
+        let xml = read_zip_entry(&buf, "customXml/item1.xml");
+        assert!(xml.contains("b:Sources"), "expected b:Sources root: {xml}");
+        assert!(xml.contains("<b:Tag>Smi20</b:Tag>"), "expected b:Tag: {xml}");
+        assert!(xml.contains("<b:SourceType>JournalArticle</b:SourceType>"), "expected source type: {xml}");
+        assert!(xml.contains("<b:Last>Smith</b:Last>"), "expected author last: {xml}");
+        assert!(xml.contains("<b:First>John</b:First>"), "expected author first: {xml}");
+        assert!(xml.contains("<b:Title>Example Article</b:Title>"), "expected title: {xml}");
+        assert!(xml.contains("<b:Year>2020</b:Year>"), "expected year: {xml}");
+        assert!(xml.contains("<b:JournalName>Journal of Examples</b:JournalName>"), "expected journal: {xml}");
+    }
+
+    #[test]
+    fn bibliography_zip_has_custom_xml_parts() {
+        use document::{CitationSource, SourceType};
+        let mut doc = Document::new();
+        doc.citation_sources.push(CitationSource {
+            tag: "Test1".into(),
+            source_type: SourceType::Misc,
+            authors: vec![],
+            title: Some("Test".into()),
+            year: None, journal_name: None, volume: None, issue: None,
+            pages: None, doi: None, url: None, publisher: None,
+            city: None, edition: None, book_title: None,
+        });
+        let mut para = document::Paragraph::new();
+        para.add_citation(vec!["Test1".into()], "[1]".into());
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        assert!(zip_has_entry(&buf, "customXml/item1.xml"));
+        assert!(zip_has_entry(&buf, "customXml/itemProps1.xml"));
+        assert!(zip_has_entry(&buf, "customXml/_rels/item1.xml.rels"));
+
+        let props = read_zip_entry(&buf, "customXml/itemProps1.xml");
+        assert!(props.contains("ds:datastoreItem"), "expected datastoreItem: {props}");
+
+        let rels = read_zip_entry(&buf, "customXml/_rels/item1.xml.rels");
+        assert!(rels.contains("customXmlProps"), "expected customXmlProps rel: {rels}");
+
+        let ct = read_zip_entry(&buf, "[Content_Types].xml");
+        assert!(ct.contains("customXmlProperties"), "expected content type override: {ct}");
+
+        let doc_rels = read_zip_entry(&buf, "word/_rels/document.xml.rels");
+        assert!(doc_rels.contains("customXml"), "expected customXml relationship: {doc_rels}");
+    }
+
+    #[test]
+    fn no_citations_means_no_custom_xml() {
+        let doc = Document::new();
+        let buf = build_docx(&doc);
+        assert!(!zip_has_entry(&buf, "customXml/item1.xml"));
+    }
 }

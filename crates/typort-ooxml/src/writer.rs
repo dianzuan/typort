@@ -20,6 +20,7 @@ struct DocParts {
     numbering: bool,
     header: bool,
     footer: bool,
+    bibliography: bool,
     content_width_twips: u32,
 }
 
@@ -37,6 +38,7 @@ pub fn write_docx<W: Write + Seek>(
         numbering: doc_has_lists(doc),
         header: doc.header.is_some(),
         footer: doc.footer.is_some() || doc.page_numbering.is_some(),
+        bibliography: !doc.citation_sources.is_empty(),
         content_width_twips: ps
             .width_twips
             .saturating_sub(ps.margin_left + ps.margin_right),
@@ -111,6 +113,18 @@ pub fn write_docx<W: Write + Seek>(
     // Always write docProps/core.xml with metadata
     zip.start_file("docProps/core.xml", options)?;
     zip.write_all(&xml_part(|w| generate_core_properties(w, doc))?)?;
+
+    // Custom XML bibliography data source
+    if parts.bibliography {
+        zip.start_file("customXml/item1.xml", options)?;
+        zip.write_all(&xml_part(|w| generate_custom_xml_sources(w, &doc.citation_sources))?)?;
+
+        zip.start_file("customXml/itemProps1.xml", options)?;
+        zip.write_all(&xml_part(generate_custom_xml_item_props)?)?;
+
+        zip.start_file("customXml/_rels/item1.xml.rels", options)?;
+        zip.write_all(&xml_part(generate_custom_xml_rels)?)?;
+    }
 
     zip.finish()?;
     Ok(())
@@ -194,6 +208,9 @@ fn image_rel_id(image_index: usize, parts: DocParts) -> String {
         base += 1;
     }
     if parts.footer {
+        base += 1;
+    }
+    if parts.bibliography {
         base += 1;
     }
     format!("rId{}", base + image_index)
@@ -290,6 +307,12 @@ fn generate_content_types(
                 .with_attribute(("PartName", "/docProps/core.xml"))
                 .with_attribute(("ContentType", "application/vnd.openxmlformats-package.core-properties+xml"))
                 .write_empty()?;
+            if parts.bibliography {
+                w.create_element("Override")
+                    .with_attribute(("PartName", "/customXml/itemProps1.xml"))
+                    .with_attribute(("ContentType", "application/vnd.openxmlformats-officedocument.customXmlProperties+xml"))
+                    .write_empty()?;
+            }
             Ok(())
         })?;
     Ok(())
@@ -419,6 +442,17 @@ fn generate_document_rels(
                         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer",
                     ))
                     .with_attribute(("Target", "footer1.xml"))
+                    .write_empty()?;
+            }
+
+            // Bibliography custom XML relationship
+            if parts.bibliography {
+                let rid = format!("rId{next_id}");
+                next_id += 1;
+                w.create_element("Relationship")
+                    .with_attribute(("Id", rid.as_str()))
+                    .with_attribute(("Type", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml"))
+                    .with_attribute(("Target", "../customXml/item1.xml"))
                     .write_empty()?;
             }
 
@@ -581,6 +615,7 @@ fn generate_document_xml(
         numbering: doc_has_lists(doc),
         header: doc.header.is_some(),
         footer: doc.footer.is_some() || doc.page_numbering.is_some(),
+        bibliography: !doc.citation_sources.is_empty(),
         content_width_twips: ps
             .width_twips
             .saturating_sub(ps.margin_left + ps.margin_right),
@@ -2068,6 +2103,188 @@ fn write_header_footer_paragraph<W: Write>(
         }
         Ok(())
     })?;
+    Ok(())
+}
+
+/// Generate the `customXml/item1.xml` bibliography data source.
+///
+/// Produces:
+/// ```xml
+/// <b:Sources xmlns:b="..." xmlns="..." SelectedStyle="..." StyleName="APA">
+///   <b:Source>
+///     <b:Tag>key</b:Tag>
+///     <b:SourceType>JournalArticle</b:SourceType>
+///     <b:Author><b:Author><b:NameList><b:Person>...</b:Person></b:NameList></b:Author></b:Author>
+///     <b:Title>...</b:Title>
+///     ...
+///   </b:Source>
+/// </b:Sources>
+/// ```
+fn generate_custom_xml_sources(
+    writer: &mut Writer<&mut Vec<u8>>,
+    sources: &[crate::document::CitationSource],
+) -> io::Result<()> {
+    writer
+        .create_element("b:Sources")
+        .with_attribute((
+            "xmlns:b",
+            "http://schemas.openxmlformats.org/officeDocument/2006/bibliography",
+        ))
+        .with_attribute((
+            "xmlns",
+            "http://schemas.openxmlformats.org/officeDocument/2006/bibliography",
+        ))
+        .with_attribute(("SelectedStyle", r"\APASixthEditionOfficeOnline.xsl"))
+        .with_attribute(("StyleName", "APA"))
+        .write_inner_content(|w| {
+            for src in sources {
+                w.create_element("b:Source").write_inner_content(|s| {
+                    s.create_element("b:Tag")
+                        .write_text_content(BytesText::new(&src.tag))?;
+                    s.create_element("b:SourceType")
+                        .write_text_content(BytesText::new(src.source_type.as_ooxml_str()))?;
+                    // Authors: b:Author > b:Author > b:NameList > b:Person
+                    if !src.authors.is_empty() {
+                        s.create_element("b:Author").write_inner_content(|a_outer| {
+                            a_outer.create_element("b:Author").write_inner_content(
+                                |a_inner| {
+                                    a_inner
+                                        .create_element("b:NameList")
+                                        .write_inner_content(|nl| {
+                                            for person in &src.authors {
+                                                nl.create_element("b:Person").write_inner_content(
+                                                    |p| {
+                                                        p.create_element("b:Last")
+                                                            .write_text_content(BytesText::new(
+                                                                &person.last,
+                                                            ))?;
+                                                        if let Some(first) = &person.first {
+                                                            p.create_element("b:First")
+                                                                .write_text_content(
+                                                                    BytesText::new(first),
+                                                                )?;
+                                                        }
+                                                        if let Some(middle) = &person.middle {
+                                                            p.create_element("b:Middle")
+                                                                .write_text_content(
+                                                                    BytesText::new(middle),
+                                                                )?;
+                                                        }
+                                                        Ok(())
+                                                    },
+                                                )?;
+                                            }
+                                            Ok(())
+                                        })?;
+                                    Ok(())
+                                },
+                            )?;
+                            Ok(())
+                        })?;
+                    }
+                    // Optional fields — only emit when Some
+                    if let Some(title) = &src.title {
+                        s.create_element("b:Title")
+                            .write_text_content(BytesText::new(title))?;
+                    }
+                    if let Some(year) = &src.year {
+                        s.create_element("b:Year")
+                            .write_text_content(BytesText::new(year))?;
+                    }
+                    if let Some(journal) = &src.journal_name {
+                        s.create_element("b:JournalName")
+                            .write_text_content(BytesText::new(journal))?;
+                    }
+                    if let Some(volume) = &src.volume {
+                        s.create_element("b:Volume")
+                            .write_text_content(BytesText::new(volume))?;
+                    }
+                    if let Some(issue) = &src.issue {
+                        s.create_element("b:Issue")
+                            .write_text_content(BytesText::new(issue))?;
+                    }
+                    if let Some(pages) = &src.pages {
+                        s.create_element("b:Pages")
+                            .write_text_content(BytesText::new(pages))?;
+                    }
+                    if let Some(doi) = &src.doi {
+                        s.create_element("b:DOI")
+                            .write_text_content(BytesText::new(doi))?;
+                    }
+                    if let Some(url) = &src.url {
+                        s.create_element("b:URL")
+                            .write_text_content(BytesText::new(url))?;
+                    }
+                    if let Some(publisher) = &src.publisher {
+                        s.create_element("b:Publisher")
+                            .write_text_content(BytesText::new(publisher))?;
+                    }
+                    if let Some(city) = &src.city {
+                        s.create_element("b:City")
+                            .write_text_content(BytesText::new(city))?;
+                    }
+                    if let Some(edition) = &src.edition {
+                        s.create_element("b:Edition")
+                            .write_text_content(BytesText::new(edition))?;
+                    }
+                    if let Some(book_title) = &src.book_title {
+                        s.create_element("b:BookTitle")
+                            .write_text_content(BytesText::new(book_title))?;
+                    }
+                    Ok(())
+                })?;
+            }
+            Ok(())
+        })?;
+    Ok(())
+}
+
+/// Generate the `customXml/itemProps1.xml` schema URI declaration.
+fn generate_custom_xml_item_props(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<()> {
+    writer
+        .create_element("ds:datastoreItem")
+        .with_attribute((
+            "ds:itemID",
+            "{C5A3B2D1-E4F5-6789-0123-456789ABCDEF}",
+        ))
+        .with_attribute((
+            "xmlns:ds",
+            "http://schemas.openxmlformats.org/officeDocument/2006/customXml",
+        ))
+        .write_inner_content(|w| {
+            w.create_element("ds:schemaRefs").write_inner_content(|sr| {
+                sr.create_element("ds:schemaRef")
+                    .with_attribute((
+                        "ds:uri",
+                        "http://schemas.openxmlformats.org/officeDocument/2006/bibliography",
+                    ))
+                    .write_empty()?;
+                Ok(())
+            })?;
+            Ok(())
+        })?;
+    Ok(())
+}
+
+/// Generate the `customXml/_rels/item1.xml.rels` relationship file.
+fn generate_custom_xml_rels(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<()> {
+    writer
+        .create_element("Relationships")
+        .with_attribute((
+            "xmlns",
+            "http://schemas.openxmlformats.org/package/2006/relationships",
+        ))
+        .write_inner_content(|w| {
+            w.create_element("Relationship")
+                .with_attribute(("Id", "rId1"))
+                .with_attribute((
+                    "Type",
+                    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps",
+                ))
+                .with_attribute(("Target", "itemProps1.xml"))
+                .write_empty()?;
+            Ok(())
+        })?;
     Ok(())
 }
 
