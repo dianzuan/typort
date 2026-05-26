@@ -2636,6 +2636,7 @@ dependencies = [
 name = "typort-core"
 version = "0.1.1"
 dependencies = [
+ "hayagriva",
  "resvg",
  "tiny-skia",
  "typort-math",

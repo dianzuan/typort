@@ -5,6 +5,7 @@
 //! that element, giving us direct access to `HeadingElem`, `EquationElem`,
 //! `FootnoteElem`, etc. without parsing HTML tags.
 
+mod bibliography;
 mod footnote;
 mod image;
 pub mod inline;
