@@ -74,7 +74,7 @@ impl SourceType {
             Self::BookSection => "BookSection",
             Self::ConferenceProceedings => "ConferenceProceedings",
             Self::Report => "Report",
-            Self::Thesis => "Thesis",
+            Self::Thesis => "Report",
             Self::InternetSite => "InternetSite",
             Self::DocumentFromInternetSite => "DocumentFromInternetSite",
             Self::Misc => "Misc",

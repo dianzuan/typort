@@ -120,7 +120,7 @@ pub fn write_docx<W: Write + Seek>(
         zip.write_all(&xml_part(|w| generate_custom_xml_sources(w, &doc.citation_sources))?)?;
 
         zip.start_file("customXml/itemProps1.xml", options)?;
-        zip.write_all(&xml_part(generate_custom_xml_item_props)?)?;
+        zip.write_all(&xml_part(|w| generate_custom_xml_item_props(w, &doc.citation_sources))?)?;
 
         zip.start_file("customXml/_rels/item1.xml.rels", options)?;
         zip.write_all(&xml_part(generate_custom_xml_rels)?)?;
@@ -1756,9 +1756,21 @@ fn write_bibliography_sdt<W: Write>(
         .write_inner_content(|sdt| {
             // SDT properties with bibliography marker
             sdt.create_element("w:sdtPr").write_inner_content(|pr| {
+                let sdt_id = citation_id_counter.get();
+                citation_id_counter.set(sdt_id + 1);
+                let id_str = sdt_id.to_string();
                 pr.create_element("w:id")
-                    .with_attribute(("w:val", "111145805"))
+                    .with_attribute(("w:val", id_str.as_str()))
                     .write_empty()?;
+                pr.create_element("w:docPartObj")
+                    .write_inner_content(|dpo| {
+                        dpo.create_element("w:docPartGallery")
+                            .with_attribute(("w:val", "Bibliographies"))
+                            .write_empty()?;
+                        dpo.create_element("w:docPartUnique")
+                            .write_empty()?;
+                        Ok(())
+                    })?;
                 pr.create_element("w:bibliography").write_empty()?;
                 Ok(())
             })?;
@@ -2229,6 +2241,21 @@ fn write_header_footer_paragraph<W: Write>(
     Ok(())
 }
 
+fn tag_to_guid(tag: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    tag.hash(&mut hasher);
+    let h = hasher.finish();
+    format!(
+        "{{{:08X}-{:04X}-{:04X}-{:04X}-{:012X}}}",
+        (h >> 32) as u32,
+        ((h >> 16) & 0xFFFF) as u16,
+        (h & 0xFFFF) as u16,
+        ((h >> 48) & 0xFFFF) as u16,
+        h & 0xFFFF_FFFF_FFFF
+    )
+}
+
 /// Generate the `customXml/item1.xml` bibliography data source.
 ///
 /// Produces:
@@ -2266,6 +2293,8 @@ fn generate_custom_xml_sources(
                         .write_text_content(BytesText::new(&src.tag))?;
                     s.create_element("b:SourceType")
                         .write_text_content(BytesText::new(src.source_type.as_ooxml_str()))?;
+                    s.create_element("b:Guid")
+                        .write_text_content(BytesText::new(&tag_to_guid(&src.tag)))?;
                     // Authors: b:Author > b:Author > b:NameList > b:Person
                     if !src.authors.is_empty() {
                         s.create_element("b:Author").write_inner_content(|a_outer| {
@@ -2363,13 +2392,16 @@ fn generate_custom_xml_sources(
 }
 
 /// Generate the `customXml/itemProps1.xml` schema URI declaration.
-fn generate_custom_xml_item_props(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<()> {
+fn generate_custom_xml_item_props(
+    writer: &mut Writer<&mut Vec<u8>>,
+    sources: &[crate::document::CitationSource],
+) -> io::Result<()> {
+    let guid = tag_to_guid(
+        &sources.iter().map(|s| s.tag.as_str()).collect::<Vec<_>>().join(","),
+    );
     writer
         .create_element("ds:datastoreItem")
-        .with_attribute((
-            "ds:itemID",
-            "{C5A3B2D1-E4F5-6789-0123-456789ABCDEF}",
-        ))
+        .with_attribute(("ds:itemID", guid.as_str()))
         .with_attribute((
             "xmlns:ds",
             "http://schemas.openxmlformats.org/officeDocument/2006/customXml",

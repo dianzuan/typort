@@ -1442,4 +1442,89 @@ mod tests {
         assert!(xml.contains("BIBLIOGRAPHY"), "expected BIBLIOGRAPHY field code: {xml}");
         assert!(xml.contains("Smith, J."), "expected cached bibliography text: {xml}");
     }
+
+    // ── OOXML spec compliance tests ────────────────────────────────────
+
+    #[test]
+    fn source_type_thesis_serializes_as_report() {
+        assert_eq!(document::SourceType::Thesis.as_ooxml_str(), "Report");
+    }
+
+    #[test]
+    fn custom_xml_sources_has_guid() {
+        use document::{CitationSource, SourceType};
+        let mut doc = Document::new();
+        doc.citation_sources.push(CitationSource {
+            tag: "Test1".into(),
+            source_type: SourceType::Misc,
+            authors: vec![],
+            title: Some("Test".into()),
+            year: None, journal_name: None, volume: None, issue: None,
+            pages: None, doi: None, url: None, publisher: None,
+            city: None, edition: None, book_title: None,
+        });
+        let mut para = document::Paragraph::new();
+        para.add_citation(vec!["Test1".into()], "[1]".into());
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        let xml = read_zip_entry(&buf, "customXml/item1.xml");
+        assert!(xml.contains("<b:Guid>"), "expected b:Guid element: {xml}");
+        assert!(xml.contains("<b:Guid>{"), "expected GUID format with braces: {xml}");
+    }
+
+    #[test]
+    fn bibliography_sdt_has_unique_id() {
+        let mut doc = Document::new();
+        let mut p1 = document::Paragraph::new();
+        p1.add_citation(vec!["Smi20".into()], "[1]".into());
+        doc.add_paragraph(p1);
+        let mut bib_para = document::Paragraph::new();
+        bib_para.add_run("Smith (2020).");
+        doc.body.elements.push(document::BlockElement::BibliographyBlock {
+            paragraphs: vec![bib_para],
+        });
+
+        let buf = build_docx(&doc);
+        let xml = read_zip_entry(&buf, "word/document.xml");
+        assert!(!xml.contains("111145805"), "SDT ID should not be hardcoded: {xml}");
+    }
+
+    #[test]
+    fn bibliography_sdt_has_doc_part_gallery() {
+        let mut doc = Document::new();
+        let mut bib_para = document::Paragraph::new();
+        bib_para.add_run("Reference entry.");
+        doc.body.elements.push(document::BlockElement::BibliographyBlock {
+            paragraphs: vec![bib_para],
+        });
+
+        let buf = build_docx(&doc);
+        let xml = read_zip_entry(&buf, "word/document.xml");
+        assert!(xml.contains("w:docPartGallery"), "expected docPartGallery: {xml}");
+        assert!(xml.contains("Bibliographies"), "expected Bibliographies value: {xml}");
+        assert!(xml.contains("w:docPartUnique"), "expected docPartUnique: {xml}");
+    }
+
+    #[test]
+    fn custom_xml_item_props_has_unique_guid() {
+        use document::{CitationSource, SourceType};
+        let mut doc = Document::new();
+        doc.citation_sources.push(CitationSource {
+            tag: "A".into(),
+            source_type: SourceType::Misc,
+            authors: vec![],
+            title: None, year: None, journal_name: None, volume: None,
+            issue: None, pages: None, doi: None, url: None,
+            publisher: None, city: None, edition: None, book_title: None,
+        });
+        let mut para = document::Paragraph::new();
+        para.add_citation(vec!["A".into()], "[1]".into());
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        let xml = read_zip_entry(&buf, "customXml/itemProps1.xml");
+        assert!(!xml.contains("C5A3B2D1"), "itemProps should not use hardcoded UUID: {xml}");
+        assert!(xml.contains("ds:itemID=\"{"), "expected GUID format: {xml}");
+    }
 }
