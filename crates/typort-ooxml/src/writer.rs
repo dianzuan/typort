@@ -1583,18 +1583,24 @@ fn write_bookmark_end<W: Write>(writer: &mut Writer<W>, id: u32) -> io::Result<(
     Ok(())
 }
 
+/// Write a `<w:r><w:fldChar w:fldCharType="..."/></w:r>` element.
+fn write_fld_char<W: Write>(writer: &mut Writer<W>, char_type: &str) -> io::Result<()> {
+    writer.create_element("w:r").write_inner_content(|w| {
+        w.create_element("w:fldChar")
+            .with_attribute(("w:fldCharType", char_type))
+            .write_empty()?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
 fn write_field_ref<W: Write>(
     writer: &mut Writer<W>,
     bookmark_name: &str,
     display_text: &str,
 ) -> io::Result<()> {
     // fldChar begin
-    writer.create_element("w:r").write_inner_content(|w| {
-        w.create_element("w:fldChar")
-            .with_attribute(("w:fldCharType", "begin"))
-            .write_empty()?;
-        Ok(())
-    })?;
+    write_fld_char(writer, "begin")?;
     // instrText with REF field code
     let bookmark_name = truncate_bookmark_name(bookmark_name);
     let instr = format!(" REF {bookmark_name} \\h ");
@@ -1605,12 +1611,7 @@ fn write_field_ref<W: Write>(
         Ok(())
     })?;
     // fldChar separate
-    writer.create_element("w:r").write_inner_content(|w| {
-        w.create_element("w:fldChar")
-            .with_attribute(("w:fldCharType", "separate"))
-            .write_empty()?;
-        Ok(())
-    })?;
+    write_fld_char(writer, "separate")?;
     // Display text (fallback)
     writer.create_element("w:r").write_inner_content(|w| {
         w.create_element("w:t")
@@ -1619,12 +1620,7 @@ fn write_field_ref<W: Write>(
         Ok(())
     })?;
     // fldChar end
-    writer.create_element("w:r").write_inner_content(|w| {
-        w.create_element("w:fldChar")
-            .with_attribute(("w:fldCharType", "end"))
-            .write_empty()?;
-        Ok(())
-    })?;
+    write_fld_char(writer, "end")?;
     Ok(())
 }
 
@@ -1665,12 +1661,7 @@ fn write_citation_sdt<W: Write>(
             sdt.create_element("w:sdtContent")
                 .write_inner_content(|content| {
                     // fldChar begin
-                    content.create_element("w:r").write_inner_content(|w| {
-                        w.create_element("w:fldChar")
-                            .with_attribute(("w:fldCharType", "begin"))
-                            .write_empty()?;
-                        Ok(())
-                    })?;
+                    write_fld_char(content, "begin")?;
                     // instrText: CITATION key1 \l 1033 [\m key2 \m key3 ...]
                     let mut instr = String::new();
                     instr.push_str(" CITATION ");
@@ -1690,12 +1681,7 @@ fn write_citation_sdt<W: Write>(
                         Ok(())
                     })?;
                     // fldChar separate
-                    content.create_element("w:r").write_inner_content(|w| {
-                        w.create_element("w:fldChar")
-                            .with_attribute(("w:fldCharType", "separate"))
-                            .write_empty()?;
-                        Ok(())
-                    })?;
+                    write_fld_char(content, "separate")?;
                     // Display text with noProof
                     content.create_element("w:r").write_inner_content(|w| {
                         w.create_element("w:rPr").write_inner_content(|rpr| {
@@ -1708,12 +1694,7 @@ fn write_citation_sdt<W: Write>(
                         Ok(())
                     })?;
                     // fldChar end
-                    content.create_element("w:r").write_inner_content(|w| {
-                        w.create_element("w:fldChar")
-                            .with_attribute(("w:fldCharType", "end"))
-                            .write_empty()?;
-                        Ok(())
-                    })?;
+                    write_fld_char(content, "end")?;
                     Ok(())
                 })?;
             Ok(())
@@ -1786,12 +1767,7 @@ fn write_bibliography_sdt<W: Write>(
                             Ok(())
                         })?;
                         // fldChar begin
-                        pw.create_element("w:r").write_inner_content(|w| {
-                            w.create_element("w:fldChar")
-                                .with_attribute(("w:fldCharType", "begin"))
-                                .write_empty()?;
-                            Ok(())
-                        })?;
+                        write_fld_char(pw, "begin")?;
                         // instrText
                         pw.create_element("w:r").write_inner_content(|w| {
                             w.create_element("w:instrText")
@@ -1800,12 +1776,7 @@ fn write_bibliography_sdt<W: Write>(
                             Ok(())
                         })?;
                         // fldChar separate
-                        pw.create_element("w:r").write_inner_content(|w| {
-                            w.create_element("w:fldChar")
-                                .with_attribute(("w:fldCharType", "separate"))
-                                .write_empty()?;
-                            Ok(())
-                        })?;
+                        write_fld_char(pw, "separate")?;
                         Ok(())
                     })?;
                     // Cached bibliography paragraphs
@@ -1822,12 +1793,7 @@ fn write_bibliography_sdt<W: Write>(
                     }
                     // Closing paragraph with field end
                     content.create_element("w:p").write_inner_content(|pw| {
-                        pw.create_element("w:r").write_inner_content(|w| {
-                            w.create_element("w:fldChar")
-                                .with_attribute(("w:fldCharType", "end"))
-                                .write_empty()?;
-                            Ok(())
-                        })?;
+                        write_fld_char(pw, "end")?;
                         Ok(())
                     })?;
                     Ok(())
@@ -1891,12 +1857,7 @@ fn write_page_break<W: Write>(writer: &mut Writer<W>) -> io::Result<()> {
 fn write_toc_field<W: Write>(writer: &mut Writer<W>, max_depth: u8) -> io::Result<()> {
     let instr = format!(r#" TOC \o "1-{max_depth}" \h \z \u "#);
     // fldChar begin
-    writer.create_element("w:r").write_inner_content(|w| {
-        w.create_element("w:fldChar")
-            .with_attribute(("w:fldCharType", "begin"))
-            .write_empty()?;
-        Ok(())
-    })?;
+    write_fld_char(writer, "begin")?;
     // instrText
     writer.create_element("w:r").write_inner_content(|w| {
         w.create_element("w:instrText")
@@ -1905,12 +1866,7 @@ fn write_toc_field<W: Write>(writer: &mut Writer<W>, max_depth: u8) -> io::Resul
         Ok(())
     })?;
     // fldChar separate
-    writer.create_element("w:r").write_inner_content(|w| {
-        w.create_element("w:fldChar")
-            .with_attribute(("w:fldCharType", "separate"))
-            .write_empty()?;
-        Ok(())
-    })?;
+    write_fld_char(writer, "separate")?;
     // Placeholder text
     writer.create_element("w:r").write_inner_content(|w| {
         w.create_element("w:t")
@@ -1920,12 +1876,7 @@ fn write_toc_field<W: Write>(writer: &mut Writer<W>, max_depth: u8) -> io::Resul
         Ok(())
     })?;
     // fldChar end
-    writer.create_element("w:r").write_inner_content(|w| {
-        w.create_element("w:fldChar")
-            .with_attribute(("w:fldCharType", "end"))
-            .write_empty()?;
-        Ok(())
-    })?;
+    write_fld_char(writer, "end")?;
     Ok(())
 }
 
@@ -2137,12 +2088,7 @@ fn generate_page_number_footer_xml(
                     Ok(())
                 })?;
                 // fldChar begin
-                pw.create_element("w:r").write_inner_content(|rw| {
-                    rw.create_element("w:fldChar")
-                        .with_attribute(("w:fldCharType", "begin"))
-                        .write_empty()?;
-                    Ok(())
-                })?;
+                write_fld_char(pw, "begin")?;
                 // instrText with PAGE field code
                 pw.create_element("w:r").write_inner_content(|rw| {
                     rw.create_element("w:instrText")
@@ -2151,12 +2097,7 @@ fn generate_page_number_footer_xml(
                     Ok(())
                 })?;
                 // fldChar separate
-                pw.create_element("w:r").write_inner_content(|rw| {
-                    rw.create_element("w:fldChar")
-                        .with_attribute(("w:fldCharType", "separate"))
-                        .write_empty()?;
-                    Ok(())
-                })?;
+                write_fld_char(pw, "separate")?;
                 // Fallback display text
                 pw.create_element("w:r").write_inner_content(|rw| {
                     rw.create_element("w:t")
@@ -2164,12 +2105,7 @@ fn generate_page_number_footer_xml(
                     Ok(())
                 })?;
                 // fldChar end
-                pw.create_element("w:r").write_inner_content(|rw| {
-                    rw.create_element("w:fldChar")
-                        .with_attribute(("w:fldCharType", "end"))
-                        .write_empty()?;
-                    Ok(())
-                })?;
+                write_fld_char(pw, "end")?;
                 Ok(())
             })?;
             Ok(())
