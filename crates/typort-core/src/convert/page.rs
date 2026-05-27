@@ -1700,6 +1700,7 @@ fn extract_non_black_color(paint: &typst_library::visualize::Paint) -> Option<St
 }
 
 /// Per-run style overrides resolved from paged output, keyed by Span or text.
+#[derive(Clone)]
 struct RunStyleOverride {
     color: Option<String>,
     font_ascii: Option<String>,
@@ -1806,17 +1807,10 @@ pub fn apply_styles_from_paged(
 
         for &span in &item.spans {
             if !span.is_detached() {
-                span_overrides.entry(span).or_default().push((
-                    item.text.clone(),
-                    RunStyleOverride {
-                        color: ovr.color.clone(),
-                        font_ascii: ovr.font_ascii.clone(),
-                        font_east_asia: ovr.font_east_asia.clone(),
-                        size_half_pt: ovr.size_half_pt,
-                        force_bold: ovr.force_bold,
-                        force_italic: ovr.force_italic,
-                    },
-                ));
+                span_overrides
+                    .entry(span)
+                    .or_default()
+                    .push((item.text.clone(), ovr.clone()));
             }
         }
         text_overrides.entry(item.text.clone()).or_default().push(RunStyleOverride {

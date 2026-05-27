@@ -680,23 +680,7 @@ fn collect_horizontal_lines(frame: &Frame, offset: Point, min_width: f64, lines:
 /// the paged output.  This fixes cases where Typst's HTML export splits inline
 /// content (e.g. `super()` calls interleaved with author names in a `#for` loop)
 /// into separate block-level elements that become separate Word paragraphs.
-pub(super) fn merge_same_line_paragraphs(doc: &mut Document, paged: &PagedDocument) {
-    let all_lines = extract_lines_from_all_pages(paged);
-    if all_lines.is_empty() {
-        return;
-    }
-
-    // Build text → y-position map from paged output
-    let mut text_y_map: HashMap<String, f64> = HashMap::new();
-    for line in &all_lines {
-        for run in &line.runs {
-            if !run.text.trim().is_empty() {
-                text_y_map.insert(run.text.clone(), line.y_pt);
-            }
-        }
-        text_y_map.insert(line.text.clone(), line.y_pt);
-    }
-
+pub(super) fn merge_same_line_paragraphs(doc: &mut Document, _paged: &PagedDocument) {
     let mut i = 0;
     while i + 1 < doc.body.elements.len() {
         let should_merge = {
@@ -750,31 +734,4 @@ pub(super) fn merge_same_line_paragraphs(doc: &mut Document, paged: &PagedDocume
             i += 1;
         }
     }
-}
-
-
-fn find_y_for_text(
-    text: &str,
-    text_y_map: &HashMap<String, f64>,
-    all_lines: &[FrameLine],
-) -> Option<f64> {
-    // Direct lookup
-    if let Some(&y) = text_y_map.get(text) {
-        return Some(y);
-    }
-    // Substring match: find the first line whose text contains this text
-    let trimmed = text.trim();
-    if !trimmed.is_empty() {
-        for line in all_lines {
-            if line.text.contains(trimmed) || trimmed.contains(&line.text) {
-                return Some(line.y_pt);
-            }
-            for run in &line.runs {
-                if run.text.contains(trimmed) || trimmed.contains(run.text.as_str()) {
-                    return Some(line.y_pt);
-                }
-            }
-        }
-    }
-    None
 }

@@ -53,16 +53,23 @@ fn load_bibliography_library(
         match source {
             DataSource::Path(path_str) => {
                 let path = root.join(path_str.as_str().trim_start_matches('/'));
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    parse_into_library(&mut library, &content, &path);
+                match std::fs::read_to_string(&path) {
+                    Ok(content) => {
+                        let is_bib = path.extension().and_then(|e| e.to_str()) == Some("bib");
+                        if let Some(parsed) = try_parse_bibliography(&content, is_bib) {
+                            merge_library(&mut library, parsed);
+                        } else {
+                            eprintln!("typort: warning: failed to parse bibliography file {path:?}");
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("typort: warning: could not read bibliography file {path:?}: {e}");
+                    }
                 }
             }
             DataSource::Bytes(bytes) => {
                 if let Ok(content) = std::str::from_utf8(bytes.as_slice()) {
-                    // Try BibLaTeX first, then YAML
-                    if let Ok(parsed) = hayagriva::io::from_biblatex_str(content) {
-                        merge_library(&mut library, parsed);
-                    } else if let Ok(parsed) = hayagriva::io::from_yaml_str(content) {
+                    if let Some(parsed) = try_parse_bibliography(content, false) {
                         merge_library(&mut library, parsed);
                     }
                 }
@@ -73,32 +80,13 @@ fn load_bibliography_library(
     library
 }
 
-/// Parse a bibliography file's content based on its extension.
-fn parse_into_library(library: &mut hayagriva::Library, content: &str, path: &Path) {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
-
-    match ext {
-        "bib" => {
-            if let Ok(parsed) = hayagriva::io::from_biblatex_str(content) {
-                merge_library(library, parsed);
-            }
-        }
-        "yaml" | "yml" => {
-            if let Ok(parsed) = hayagriva::io::from_yaml_str(content) {
-                merge_library(library, parsed);
-            }
-        }
-        _ => {
-            // Try BibLaTeX first, then YAML
-            if let Ok(parsed) = hayagriva::io::from_biblatex_str(content) {
-                merge_library(library, parsed);
-            } else if let Ok(parsed) = hayagriva::io::from_yaml_str(content) {
-                merge_library(library, parsed);
-            }
-        }
+fn try_parse_bibliography(content: &str, prefer_bib: bool) -> Option<hayagriva::Library> {
+    if prefer_bib {
+        hayagriva::io::from_biblatex_str(content).ok()
+            .or_else(|| hayagriva::io::from_yaml_str(content).ok())
+    } else {
+        hayagriva::io::from_yaml_str(content).ok()
+            .or_else(|| hayagriva::io::from_biblatex_str(content).ok())
     }
 }
 
@@ -123,11 +111,19 @@ fn entry_to_citation_source(tag: &str, entry: &hayagriva::Entry) -> CitationSour
     let issue = entry.issue().map(|i| i.to_string());
     let pages = entry.page_range().map(|p| p.to_string());
 
-    let journal_name = entry
+    let parent_title = entry
         .parents()
         .first()
         .and_then(|p| p.title())
         .map(|t| t.value.to_str().into_owned());
+
+    let is_chapter_like = matches!(
+        entry.entry_type(),
+        EntryType::Chapter | EntryType::Anthos | EntryType::Entry
+    );
+
+    let journal_name = if is_chapter_like { None } else { parent_title.clone() };
+    let book_title = if is_chapter_like { parent_title } else { None };
 
     let publisher = entry
         .publisher()
@@ -140,15 +136,6 @@ fn entry_to_citation_source(tag: &str, entry: &hayagriva::Entry) -> CitationSour
         .map(|l| l.value.to_str().into_owned());
 
     let edition = entry.edition().map(|e| e.to_string());
-
-    let book_title = if matches!(
-        entry.entry_type(),
-        EntryType::Chapter | EntryType::Anthos
-    ) {
-        journal_name.clone()
-    } else {
-        None
-    };
 
     CitationSource {
         tag: tag.to_string(),
