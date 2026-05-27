@@ -229,4 +229,88 @@ mod tests {
         assert_eq!(mapped.last, "Smith");
         assert_eq!(mapped.first.as_deref(), Some("John"));
     }
+
+    /// Parse a BibLaTeX string and convert the entry with the given key.
+    fn parse_and_convert(bib: &str, key: &str) -> CitationSource {
+        let lib = hayagriva::io::from_biblatex_str(bib).unwrap();
+        let entry = lib.get(key).unwrap();
+        entry_to_citation_source(key, entry)
+    }
+
+    #[test]
+    fn article_entry_has_journal_metadata() {
+        let src = parse_and_convert(
+            r#"
+            @article{smith2020,
+                author = {Smith, John},
+                title = {Test Article},
+                journal = {Test Journal},
+                year = {2020},
+                volume = {1},
+                pages = {1--10},
+            }
+            "#,
+            "smith2020",
+        );
+        assert_eq!(src.source_type, SourceType::JournalArticle);
+        assert_eq!(src.title.as_deref(), Some("Test Article"));
+        assert_eq!(src.year.as_deref(), Some("2020"));
+        assert_eq!(src.journal_name.as_deref(), Some("Test Journal"));
+        // Note: hayagriva puts volume on the parent (journal) entry for articles,
+        // so entry.volume() returns None; the parent carries it instead.
+        assert!(!src.authors.is_empty());
+        assert_eq!(src.authors[0].last, "Smith");
+        assert_eq!(src.book_title, None);
+    }
+
+    #[test]
+    fn chapter_entry_has_book_title() {
+        let src = parse_and_convert(
+            r#"
+            @inbook{jones2019,
+                author = {Jones, Alice},
+                title = {A Chapter},
+                booktitle = {Great Book},
+                year = {2019},
+                publisher = {Example Press},
+            }
+            "#,
+            "jones2019",
+        );
+        assert_eq!(src.source_type, SourceType::BookSection);
+        assert_eq!(src.book_title.as_deref(), Some("Great Book"));
+        assert_eq!(src.journal_name, None);
+    }
+
+    #[test]
+    fn web_entry_maps_to_internet_site() {
+        let src = parse_and_convert(
+            r#"
+            @online{web2023,
+                author = {Doe, Jane},
+                title = {A Web Page},
+                year = {2023},
+                url = {https://example.com},
+            }
+            "#,
+            "web2023",
+        );
+        assert_eq!(src.source_type, SourceType::InternetSite);
+        assert_eq!(src.title.as_deref(), Some("A Web Page"));
+    }
+
+    #[test]
+    fn entry_with_no_authors_has_empty_vec() {
+        let src = parse_and_convert(
+            r#"
+            @misc{anon2022,
+                title = {Anonymous Work},
+                year = {2022},
+            }
+            "#,
+            "anon2022",
+        );
+        assert!(src.authors.is_empty());
+        assert_eq!(src.title.as_deref(), Some("Anonymous Work"));
+    }
 }
