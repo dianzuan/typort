@@ -12,6 +12,12 @@ use typort_ooxml::document::{
 };
 use typst::layout::{Frame, FrameItem, PagedDocument, Point};
 
+/// Per-span and per-text style override maps produced by [`build_style_override_maps`].
+type StyleOverrideMaps = (
+    HashMap<typst_syntax::Span, Vec<(String, RunStyleOverride)>>,
+    HashMap<String, Vec<RunStyleOverride>>,
+);
+
 /// Extract document style (fonts, sizes, spacing) from the rendered `PagedDocument`.
 ///
 /// Walks the first few pages' frames to find the most common font family and size,
@@ -705,12 +711,11 @@ pub fn extract_import_paths(source: &str) -> Vec<String> {
 
 fn collect_import_paths(node: &typst_syntax::SyntaxNode, paths: &mut Vec<String>) {
     use typst_syntax::SyntaxKind;
-    if node.kind() == SyntaxKind::ModuleImport {
-        if let Some(import) = node.cast::<typst_syntax::ast::ModuleImport<'_>>() {
-            if let typst_syntax::ast::Expr::Str(s) = import.source() {
-                paths.push(s.get().to_string());
-            }
-        }
+    if node.kind() == SyntaxKind::ModuleImport
+        && let Some(import) = node.cast::<typst_syntax::ast::ModuleImport<'_>>()
+        && let typst_syntax::ast::Expr::Str(s) = import.source()
+    {
+        paths.push(s.get().to_string());
     }
     for child in node.children() {
         collect_import_paths(child, paths);
@@ -1785,10 +1790,7 @@ fn build_style_override_maps(
     rendered_cjk: &str,
     declared_ascii: &str,
     body_cjk_fonts: &HashSet<&str>,
-) -> (
-    HashMap<typst_syntax::Span, Vec<(String, RunStyleOverride)>>,
-    HashMap<String, Vec<RunStyleOverride>>,
-) {
+) -> StyleOverrideMaps {
     let mut span_overrides: HashMap<typst_syntax::Span, Vec<(String, RunStyleOverride)>> =
         HashMap::new();
     let mut text_overrides: HashMap<String, Vec<RunStyleOverride>> = HashMap::new();
@@ -1813,14 +1815,12 @@ fn build_style_override_maps(
             item.font_family == rendered_ascii || item.font_family == declared_ascii
         };
 
-        let (font_ascii, font_east_asia) = if !is_baseline_font {
-            if font_is_cjk {
-                (None, Some(item.font_family.clone()))
-            } else {
-                (Some(item.font_family.clone()), None)
-            }
-        } else {
+        let (font_ascii, font_east_asia) = if is_baseline_font {
             (None, None)
+        } else if font_is_cjk {
+            (None, Some(item.font_family.clone()))
+        } else {
+            (Some(item.font_family.clone()), None)
         };
 
         let size_override = if size_half == body_size_half_pt {
@@ -1902,7 +1902,7 @@ fn apply_override_to_run(
                         .filter(|o| o.size_half_pt.is_some())
                         .min_by_key(|o| {
                             let s = o.size_half_pt.unwrap_or(0);
-                            (s as i64 - hint as i64).unsigned_abs()
+                            (i64::from(s) - i64::from(hint)).unsigned_abs()
                         })
                         .or_else(|| entries.first())
                 } else {

@@ -315,6 +315,7 @@ fn pt_to_twips(pt: f64) -> u32 {
     (pt * 20.0).round().max(0.0) as u32
 }
 
+#[allow(clippy::cast_precision_loss)] // char count will never exceed f64 precision
 fn insert_missing_at_position(
     doc: &mut Document,
     missing_lines: &[FrameLine],
@@ -335,7 +336,7 @@ fn insert_missing_at_position(
             let max_font_size_pt = line
                 .runs
                 .iter()
-                .map(|r| r.size_half_pt.unwrap_or(21) as f64 / 2.0)
+                .map(|r| f64::from(r.size_half_pt.unwrap_or(21)) / 2.0)
                 .fold(0.0_f64, f64::max);
             // A "real grid" gap should be at least 3em wide; h(0.5em) gaps are much smaller
             let small_gap_threshold = max_font_size_pt * 3.0;
@@ -378,8 +379,8 @@ fn insert_missing_at_position(
                     let mut space_run = Run::new("\u{00a0}");
                     if let Some(first_run) = cluster.runs.first() {
                         space_run.size_half_pt = first_run.size_half_pt;
-                        space_run.font_ascii = first_run.font_ascii.clone();
-                        space_run.font_east_asia = first_run.font_east_asia.clone();
+                        space_run.font_ascii.clone_from(&first_run.font_ascii);
+                        space_run.font_east_asia.clone_from(&first_run.font_east_asia);
                     }
                     para.push_run(space_run);
                 }
@@ -705,12 +706,11 @@ pub(super) fn merge_same_line_paragraphs(doc: &mut Document, _paged: &PagedDocum
                 // Merge when p1 is all-superscript runs (split inline super() calls)
                 // into p2 (the text paragraph that follows). This handles the
                 // pattern where #for loop generates super() before author names.
-                let p1_all_super = !p1.inlines.is_empty()
+                !p1.inlines.is_empty()
                     && p1.inlines.iter().all(|inl| matches!(
                         inl,
                         InlineElement::Text(r) if r.superscript || r.text.trim().is_empty()
-                    ));
-                p1_all_super
+                    ))
             }
         };
 

@@ -51,7 +51,7 @@ pub struct ListInfo {
     pub id: u32,
 }
 
-/// Word bibliography source type (ST_SourceType).
+/// Word bibliography source type (`ST_SourceType`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SourceType {
     JournalArticle,
@@ -73,8 +73,7 @@ impl SourceType {
             Self::Book => "Book",
             Self::BookSection => "BookSection",
             Self::ConferenceProceedings => "ConferenceProceedings",
-            Self::Report => "Report",
-            Self::Thesis => "Report",
+            Self::Report | Self::Thesis => "Report",
             Self::InternetSite => "InternetSite",
             Self::DocumentFromInternetSite => "DocumentFromInternetSite",
             Self::Misc => "Misc",

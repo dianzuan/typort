@@ -1,3 +1,4 @@
+use std::fmt::Write as FmtWrite;
 use std::io::{self, Seek, Write};
 
 use quick_xml::Writer;
@@ -456,7 +457,6 @@ fn generate_document_rels(
             // Bibliography custom XML relationship
             if parts.bibliography {
                 let rid = format!("rId{next_id}");
-                next_id += 1;
                 w.create_element("Relationship")
                     .with_attribute(("Id", rid.as_str()))
                     .with_attribute(("Type", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml"))
@@ -1670,7 +1670,7 @@ fn write_citation_sdt<W: Write>(
                     if let Some(first) = keys.first() {
                         instr.push_str(first);
                     }
-                    instr.push_str(&format!(r" \l {locale_id}"));
+                    let _ = write!(instr, r" \l {locale_id}");
                     for key in keys.iter().skip(1) {
                         instr.push_str(r" \m ");
                         instr.push_str(key);

@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use hayagriva::types::{EntryType, Person};
 use typst::comemo::Track;
 use typst_html::HtmlDocument;
@@ -57,22 +55,21 @@ fn load_bibliography_library(
                     Ok(content) => {
                         let is_bib = path.extension().and_then(|e| e.to_str()) == Some("bib");
                         if let Some(parsed) = try_parse_bibliography(&content, is_bib) {
-                            merge_library(&mut library, parsed);
+                            merge_library(&mut library, &parsed);
                         } else {
-                            eprintln!("typort: warning: failed to parse bibliography file {path:?}");
+                            eprintln!("typort: warning: failed to parse bibliography file {}", path.display());
                         }
                     }
                     Err(e) => {
-                        eprintln!("typort: warning: could not read bibliography file {path:?}: {e}");
+                        eprintln!("typort: warning: could not read bibliography file {}: {e}", path.display());
                     }
                 }
             }
             DataSource::Bytes(bytes) => {
-                if let Ok(content) = std::str::from_utf8(bytes.as_slice()) {
-                    if let Some(parsed) = try_parse_bibliography(content, false) {
-                        merge_library(&mut library, parsed);
+                if let Ok(content) = std::str::from_utf8(bytes.as_slice())
+                    && let Some(parsed) = try_parse_bibliography(content, false) {
+                        merge_library(&mut library, &parsed);
                     }
-                }
             }
         }
     }
@@ -90,13 +87,13 @@ fn try_parse_bibliography(content: &str, prefer_bib: bool) -> Option<hayagriva::
     }
 }
 
-fn merge_library(target: &mut hayagriva::Library, source: hayagriva::Library) {
+fn merge_library(target: &mut hayagriva::Library, source: &hayagriva::Library) {
     for entry in source.iter() {
         target.push(entry);
     }
 }
 
-/// Convert a hayagriva Entry to a Word CitationSource with full metadata.
+/// Convert a hayagriva Entry to a Word `CitationSource` with full metadata.
 fn entry_to_citation_source(tag: &str, entry: &hayagriva::Entry) -> CitationSource {
     let authors = entry
         .authors()
@@ -107,9 +104,9 @@ fn entry_to_citation_source(tag: &str, entry: &hayagriva::Entry) -> CitationSour
     let year = entry.date().map(|d| d.year.to_string());
     let doi = entry.doi().map(String::from);
     let url = entry.url().map(|u| u.value.to_string());
-    let volume = entry.volume().map(|v| v.to_string());
-    let issue = entry.issue().map(|i| i.to_string());
-    let pages = entry.page_range().map(|p| p.to_string());
+    let volume = entry.volume().map(std::string::ToString::to_string);
+    let issue = entry.issue().map(std::string::ToString::to_string);
+    let pages = entry.page_range().map(std::string::ToString::to_string);
 
     let parent_title = entry
         .parents()
@@ -135,11 +132,11 @@ fn entry_to_citation_source(tag: &str, entry: &hayagriva::Entry) -> CitationSour
         .and_then(|p| p.location())
         .map(|l| l.value.to_str().into_owned());
 
-    let edition = entry.edition().map(|e| e.to_string());
+    let edition = entry.edition().map(std::string::ToString::to_string);
 
     CitationSource {
         tag: tag.to_string(),
-        source_type: map_entry_type(entry.entry_type()),
+        source_type: map_entry_type(*entry.entry_type()),
         authors,
         title,
         year,
@@ -157,7 +154,7 @@ fn entry_to_citation_source(tag: &str, entry: &hayagriva::Entry) -> CitationSour
 }
 
 /// Map a hayagriva `EntryType` to a Word `SourceType`.
-pub fn map_entry_type(entry_type: &EntryType) -> SourceType {
+pub fn map_entry_type(entry_type: EntryType) -> SourceType {
     match entry_type {
         EntryType::Article | EntryType::Newspaper => SourceType::JournalArticle,
         EntryType::Book | EntryType::Reference | EntryType::Anthology => SourceType::Book,
@@ -165,9 +162,7 @@ pub fn map_entry_type(entry_type: &EntryType) -> SourceType {
         EntryType::Proceedings | EntryType::Conference => SourceType::ConferenceProceedings,
         EntryType::Report => SourceType::Report,
         EntryType::Thesis => SourceType::Thesis,
-        EntryType::Web | EntryType::Blog | EntryType::Post | EntryType::Thread => {
-            SourceType::InternetSite
-        }
+        EntryType::Web | EntryType::Blog | EntryType::Post | EntryType::Thread => SourceType::InternetSite,
         _ => SourceType::Misc,
     }
 }
@@ -188,32 +183,32 @@ mod tests {
     #[test]
     fn article_maps_to_journal_article() {
         assert_eq!(
-            map_entry_type(&EntryType::Article),
+            map_entry_type(EntryType::Article),
             SourceType::JournalArticle
         );
     }
 
     #[test]
     fn book_maps_to_book() {
-        assert_eq!(map_entry_type(&EntryType::Book), SourceType::Book);
+        assert_eq!(map_entry_type(EntryType::Book), SourceType::Book);
     }
 
     #[test]
     fn thesis_maps_to_thesis() {
-        assert_eq!(map_entry_type(&EntryType::Thesis), SourceType::Thesis);
+        assert_eq!(map_entry_type(EntryType::Thesis), SourceType::Thesis);
     }
 
     #[test]
     fn web_maps_to_internet_site() {
         assert_eq!(
-            map_entry_type(&EntryType::Web),
+            map_entry_type(EntryType::Web),
             SourceType::InternetSite
         );
     }
 
     #[test]
     fn unknown_maps_to_misc() {
-        assert_eq!(map_entry_type(&EntryType::Video), SourceType::Misc);
+        assert_eq!(map_entry_type(EntryType::Video), SourceType::Misc);
     }
 
     #[test]
