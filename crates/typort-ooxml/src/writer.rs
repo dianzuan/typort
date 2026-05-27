@@ -984,7 +984,8 @@ fn write_paragraph<W: Write>(
                 InlineElement::Citation { keys, display_text } => {
                     let sdt_id = citation_id_counter.get();
                     citation_id_counter.set(sdt_id + 1);
-                    write_citation_sdt(w, keys, display_text, sdt_id)?;
+                    let locale_id = lang_to_lcid(&doc_style.lang_east_asia);
+                    write_citation_sdt(w, keys, display_text, sdt_id, locale_id)?;
                 }
             }
         }
@@ -1644,6 +1645,7 @@ fn write_citation_sdt<W: Write>(
     keys: &[String],
     display_text: &str,
     sdt_id: u32,
+    locale_id: u32,
 ) -> io::Result<()> {
     writer
         .create_element("w:sdt")
@@ -1662,13 +1664,13 @@ fn write_citation_sdt<W: Write>(
                 .write_inner_content(|content| {
                     // fldChar begin
                     write_fld_char(content, "begin")?;
-                    // instrText: CITATION key1 \l 1033 [\m key2 \m key3 ...]
+                    // instrText: CITATION key1 \l <locale> [\m key2 \m key3 ...]
                     let mut instr = String::new();
                     instr.push_str(" CITATION ");
                     if let Some(first) = keys.first() {
                         instr.push_str(first);
                     }
-                    instr.push_str(r" \l 1033");
+                    instr.push_str(&format!(r" \l {locale_id}"));
                     for key in keys.iter().skip(1) {
                         instr.push_str(r" \m ");
                         instr.push_str(key);
@@ -2175,6 +2177,19 @@ fn write_header_footer_paragraph<W: Write>(
         Ok(())
     })?;
     Ok(())
+}
+
+/// Map a BCP 47 language tag to a Windows LCID for CITATION field codes.
+fn lang_to_lcid(lang: &str) -> u32 {
+    if lang.starts_with("zh") {
+        2052 // zh-CN
+    } else if lang.starts_with("ja") {
+        1041 // ja-JP
+    } else if lang.starts_with("ko") {
+        1042 // ko-KR
+    } else {
+        1033 // en-US (default)
+    }
 }
 
 fn tag_to_guid(tag: &str) -> String {

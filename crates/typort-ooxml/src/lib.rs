@@ -1333,8 +1333,8 @@ mod tests {
         let buf = build_docx(&doc);
         let xml = read_zip_entry(&buf, "word/document.xml");
         assert!(
-            xml.contains(r"CITATION Smi20 \l 1033 \m Jon21"),
-            "expected merged citation field in: {xml}"
+            xml.contains(r"CITATION Smi20 \l 2052 \m Jon21"),
+            "expected merged citation field with zh-CN locale in: {xml}"
         );
     }
 
