@@ -1744,12 +1744,56 @@ pub fn apply_styles_from_paged(
     }
     let declared_ascii = &doc.style.body_font_ascii;
 
-    // Build Span → style override lookup (Vec to handle multiple paged items per span)
-    let mut span_overrides: HashMap<typst_syntax::Span, Vec<(String, RunStyleOverride)>> = HashMap::new();
-    // Text-based fallback for runs without spans (Vec to handle multiple sizes per text)
+    let (span_overrides, text_overrides) = build_style_override_maps(
+        &paged_styles,
+        body_size_half_pt,
+        &rendered_ascii,
+        &rendered_cjk,
+        declared_ascii,
+        &body_cjk_fonts,
+    );
+
+    // Apply run-level overrides to body elements
+    apply_overrides_to_elements(
+        &mut doc.body.elements,
+        &span_overrides,
+        &text_overrides,
+    );
+
+    // Apply run-level overrides to footnotes
+    for footnote in &mut doc.footnotes {
+        for inline in &mut footnote.content {
+            if let InlineElement::Text(run) = inline {
+                apply_override_to_run(run, &span_overrides, &text_overrides, None);
+            }
+        }
+    }
+
+    // Apply paragraph alignment from x-positions
+    apply_paragraph_alignment(paged, &paged_styles, doc);
+}
+
+/// Build per-span and per-text style override maps from paged run styles.
+///
+/// Compares each rendered run against the detected baselines (font + size)
+/// and emits an override entry only when the run differs from the baseline.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn build_style_override_maps(
+    paged_styles: &[PagedRunStyle],
+    body_size_half_pt: u32,
+    rendered_ascii: &str,
+    rendered_cjk: &str,
+    declared_ascii: &str,
+    body_cjk_fonts: &HashSet<&str>,
+) -> (
+    HashMap<typst_syntax::Span, Vec<(String, RunStyleOverride)>>,
+    HashMap<String, Vec<RunStyleOverride>>,
+) {
+    let mut span_overrides: HashMap<typst_syntax::Span, Vec<(String, RunStyleOverride)>> =
+        HashMap::new();
     let mut text_overrides: HashMap<String, Vec<RunStyleOverride>> = HashMap::new();
 
-    for item in &paged_styles {
+    for item in paged_styles {
         let size_half = (item.size_pt * 2.0).round() as u32;
 
         let color = item.color_hex.clone();
@@ -1766,7 +1810,7 @@ pub fn apply_styles_from_paged(
                 body_cjk_fonts.contains(item.font_family.as_str())
             }
         } else {
-            item.font_family == rendered_ascii || item.font_family == *declared_ascii
+            item.font_family == rendered_ascii || item.font_family == declared_ascii
         };
 
         let (font_ascii, font_east_asia) = if !is_baseline_font {
@@ -1813,34 +1857,13 @@ pub fn apply_styles_from_paged(
                     .push((item.text.clone(), ovr.clone()));
             }
         }
-        text_overrides.entry(item.text.clone()).or_default().push(RunStyleOverride {
-            color: ovr.color,
-            font_ascii: ovr.font_ascii,
-            font_east_asia: ovr.font_east_asia,
-            size_half_pt: ovr.size_half_pt,
-            force_bold: ovr.force_bold,
-            force_italic: ovr.force_italic,
-        });
+        text_overrides
+            .entry(item.text.clone())
+            .or_default()
+            .push(ovr.clone());
     }
 
-    // Apply run-level overrides to body elements
-    apply_overrides_to_elements(
-        &mut doc.body.elements,
-        &span_overrides,
-        &text_overrides,
-    );
-
-    // Apply run-level overrides to footnotes
-    for footnote in &mut doc.footnotes {
-        for inline in &mut footnote.content {
-            if let InlineElement::Text(run) = inline {
-                apply_override_to_run(run, &span_overrides, &text_overrides, None);
-            }
-        }
-    }
-
-    // Apply paragraph alignment from x-positions
-    apply_paragraph_alignment(paged, &paged_styles, doc);
+    (span_overrides, text_overrides)
 }
 
 fn apply_override_to_run(
