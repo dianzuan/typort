@@ -2210,6 +2210,7 @@ fn generate_custom_xml_sources(
     writer: &mut Writer<&mut Vec<u8>>,
     sources: &[crate::document::CitationSource],
 ) -> io::Result<()> {
+    // APA is the default and most common academic citation style in Word.
     writer
         .create_element("b:Sources")
         .with_attribute((
@@ -2231,99 +2232,72 @@ fn generate_custom_xml_sources(
                         .write_text_content(BytesText::new(src.source_type.as_ooxml_str()))?;
                     s.create_element("b:Guid")
                         .write_text_content(BytesText::new(&tag_to_guid(&src.tag)))?;
-                    // Authors: b:Author > b:Author > b:NameList > b:Person
                     if !src.authors.is_empty() {
-                        s.create_element("b:Author").write_inner_content(|a_outer| {
-                            a_outer.create_element("b:Author").write_inner_content(
-                                |a_inner| {
-                                    a_inner
-                                        .create_element("b:NameList")
-                                        .write_inner_content(|nl| {
-                                            for person in &src.authors {
-                                                nl.create_element("b:Person").write_inner_content(
-                                                    |p| {
-                                                        p.create_element("b:Last")
-                                                            .write_text_content(BytesText::new(
-                                                                &person.last,
-                                                            ))?;
-                                                        if let Some(first) = &person.first {
-                                                            p.create_element("b:First")
-                                                                .write_text_content(
-                                                                    BytesText::new(first),
-                                                                )?;
-                                                        }
-                                                        if let Some(middle) = &person.middle {
-                                                            p.create_element("b:Middle")
-                                                                .write_text_content(
-                                                                    BytesText::new(middle),
-                                                                )?;
-                                                        }
-                                                        Ok(())
-                                                    },
-                                                )?;
-                                            }
-                                            Ok(())
-                                        })?;
-                                    Ok(())
-                                },
-                            )?;
-                            Ok(())
-                        })?;
+                        write_bibliography_authors(s, &src.authors)?;
                     }
-                    // Optional fields — only emit when Some
-                    if let Some(title) = &src.title {
-                        s.create_element("b:Title")
-                            .write_text_content(BytesText::new(title))?;
-                    }
-                    if let Some(year) = &src.year {
-                        s.create_element("b:Year")
-                            .write_text_content(BytesText::new(year))?;
-                    }
-                    if let Some(journal) = &src.journal_name {
-                        s.create_element("b:JournalName")
-                            .write_text_content(BytesText::new(journal))?;
-                    }
-                    if let Some(volume) = &src.volume {
-                        s.create_element("b:Volume")
-                            .write_text_content(BytesText::new(volume))?;
-                    }
-                    if let Some(issue) = &src.issue {
-                        s.create_element("b:Issue")
-                            .write_text_content(BytesText::new(issue))?;
-                    }
-                    if let Some(pages) = &src.pages {
-                        s.create_element("b:Pages")
-                            .write_text_content(BytesText::new(pages))?;
-                    }
-                    if let Some(doi) = &src.doi {
-                        s.create_element("b:DOI")
-                            .write_text_content(BytesText::new(doi))?;
-                    }
-                    if let Some(url) = &src.url {
-                        s.create_element("b:URL")
-                            .write_text_content(BytesText::new(url))?;
-                    }
-                    if let Some(publisher) = &src.publisher {
-                        s.create_element("b:Publisher")
-                            .write_text_content(BytesText::new(publisher))?;
-                    }
-                    if let Some(city) = &src.city {
-                        s.create_element("b:City")
-                            .write_text_content(BytesText::new(city))?;
-                    }
-                    if let Some(edition) = &src.edition {
-                        s.create_element("b:Edition")
-                            .write_text_content(BytesText::new(edition))?;
-                    }
-                    if let Some(book_title) = &src.book_title {
-                        s.create_element("b:BookTitle")
-                            .write_text_content(BytesText::new(book_title))?;
-                    }
+                    write_optional_bib_field(s, "b:Title", src.title.as_deref())?;
+                    write_optional_bib_field(s, "b:Year", src.year.as_deref())?;
+                    write_optional_bib_field(s, "b:JournalName", src.journal_name.as_deref())?;
+                    write_optional_bib_field(s, "b:Volume", src.volume.as_deref())?;
+                    write_optional_bib_field(s, "b:Issue", src.issue.as_deref())?;
+                    write_optional_bib_field(s, "b:Pages", src.pages.as_deref())?;
+                    write_optional_bib_field(s, "b:DOI", src.doi.as_deref())?;
+                    write_optional_bib_field(s, "b:URL", src.url.as_deref())?;
+                    write_optional_bib_field(s, "b:Publisher", src.publisher.as_deref())?;
+                    write_optional_bib_field(s, "b:City", src.city.as_deref())?;
+                    write_optional_bib_field(s, "b:Edition", src.edition.as_deref())?;
+                    write_optional_bib_field(s, "b:BookTitle", src.book_title.as_deref())?;
                     Ok(())
                 })?;
             }
             Ok(())
         })?;
+    Ok(())
+}
+
+/// Write the `b:Author > b:Author > b:NameList > b:Person` nesting for bibliography authors.
+fn write_bibliography_authors(
+    writer: &mut Writer<&mut Vec<u8>>,
+    authors: &[crate::document::PersonName],
+) -> io::Result<()> {
+    writer
+        .create_element("b:Author")
+        .write_inner_content(|a_outer| {
+            a_outer
+                .create_element("b:Author")
+                .write_inner_content(|a_inner| {
+                    a_inner
+                        .create_element("b:NameList")
+                        .write_inner_content(|nl| {
+                            for person in authors {
+                                nl.create_element("b:Person").write_inner_content(|p| {
+                                    p.create_element("b:Last")
+                                        .write_text_content(BytesText::new(&person.last))?;
+                                    write_optional_bib_field(p, "b:First", person.first.as_deref())?;
+                                    write_optional_bib_field(p, "b:Middle", person.middle.as_deref())?;
+                                    Ok(())
+                                })?;
+                            }
+                            Ok(())
+                        })?;
+                    Ok(())
+                })?;
+            Ok(())
+        })?;
+    Ok(())
+}
+
+/// Write a bibliography field element only when the value is `Some`.
+fn write_optional_bib_field(
+    writer: &mut Writer<&mut Vec<u8>>,
+    element: &str,
+    value: Option<&str>,
+) -> io::Result<()> {
+    if let Some(v) = value {
+        writer
+            .create_element(element)
+            .write_text_content(BytesText::new(v))?;
+    }
     Ok(())
 }
 
