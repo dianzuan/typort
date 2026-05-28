@@ -63,6 +63,14 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
         if line.text.chars().count() < 2 {
             continue;
         }
+        // Skip very short lines ending with sentence-final punctuation —
+        // these are fragments of sentence tails from line-wrapped paragraphs
+        // that are already present in the full text.
+        if line.text.chars().count() <= 5
+            && line.text.trim().ends_with(|c: char| matches!(c, '。' | '.' | '；' | '！' | '？'))
+        {
+            continue;
+        }
         if line.all_math_font {
             continue;
         }
@@ -106,11 +114,26 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
             .map(|s| s.trim().to_string())
             .unwrap_or_default();
         let line_demath_nospace = line_demath.replace(' ', "");
-        if full_doc_text.contains(&line.text)
-            || full_doc_text.contains(&line_normalized)
-            || full_doc_text.contains(&line_stripped)
-            || full_doc_text.contains(&line_demath)
-            || full_doc_text_nospace.contains(&line_demath_nospace)
+        // Short lines (< 6 chars) can match as false-positive substrings in
+        // longer paragraphs (e.g. author name "作者甲" inside author bio).
+        // For these, only check per-paragraph exact match, not full-text substring.
+        let short_line = line.text.chars().count() < 6;
+        let short_line_exact = short_line
+            && doc.body.elements.iter().any(|e| {
+                if let BlockElement::Paragraph(p) = e {
+                    let t = p.text_content();
+                    t.trim() == line.text.trim()
+                } else {
+                    false
+                }
+            });
+        if short_line_exact
+            || (!short_line
+                && (full_doc_text.contains(&line.text)
+                    || full_doc_text.contains(&line_normalized)
+                    || full_doc_text.contains(&line_stripped)
+                    || full_doc_text.contains(&line_demath)
+                    || full_doc_text_nospace.contains(&line_demath_nospace)))
             || (!line_no_numbering.is_empty() && full_doc_text.contains(&line_no_numbering))
             || (!line_no_fig_prefix.is_empty() && full_doc_text.contains(&line_no_fig_prefix))
             || exclude_text.contains(&line.text)
@@ -585,12 +608,14 @@ fn insert_missing_at_position(
             // Don't merge if current starts with "（" or "(" (affiliation).
             let prev_text = prev.text_content();
             let curr_text = curr.text_content();
-            let prev_short = prev_text.chars().count() < 40;
-            let curr_short = curr_text.chars().count() < 40;
+            let combined_len = prev_text.chars().count() + curr_text.chars().count();
+            let combined_short = combined_len < 60;
             let curr_is_affiliation = curr_text.starts_with('（')
                 || curr_text.starts_with('(');
+            // Don't merge very short items (likely author names, not title fragments)
+            let curr_too_short = curr_text.chars().count() <= 5;
             prev_center && curr_center && prev_size == curr_size
-                && prev_short && curr_short && !curr_is_affiliation
+                && combined_short && !curr_is_affiliation && !curr_too_short
         } else {
             false
         };
