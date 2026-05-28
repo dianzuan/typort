@@ -297,6 +297,11 @@ pub(super) fn extract_lines_from_all_pages(paged: &PagedDocument) -> Vec<FrameLi
                     let is_super = item.size_pt < body_size * 0.8;
                     let mut run = Run::new(&item.text);
                     run.superscript = is_super;
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                    let half_pt = (item.size_pt * 2.0).round() as u32;
+                    if half_pt != (body_size * 2.0).round() as u32 {
+                        run.size_half_pt = Some(half_pt);
+                    }
                     cluster_runs.push(run.clone());
                     all_runs.push(run);
                     full_text.push_str(&item.text);
@@ -614,8 +619,12 @@ fn insert_missing_at_position(
                 || curr_text.starts_with('(');
             // Don't merge very short items (likely author names, not title fragments)
             let curr_too_short = curr_text.chars().count() <= 5;
+            // Merge if both are short, OR if both have the same non-default
+            // font size (i.e. they're from the same styled block like a title)
+            let same_styled = prev_size == curr_size && prev_size.is_some();
             prev_center && curr_center && prev_size == curr_size
-                && combined_short && !curr_is_affiliation && !curr_too_short
+                && (combined_short || same_styled)
+                && !curr_is_affiliation && !curr_too_short
         } else {
             false
         };
