@@ -65,11 +65,29 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
         if line.all_math_font {
             continue;
         }
+        // Skip lines that are mostly math symbols (short lines with few CJK/Latin words).
+        // These are typically equation fragments or table cell math that's already in the doc.
+        {
+            let char_count = line.text.chars().count();
+            let alnum_count = line.text.chars().filter(|c| c.is_alphanumeric()).count();
+            if char_count < 20 && alnum_count * 3 < char_count * 2 {
+                continue;
+            }
+        }
         let line_normalized = strip_cjk_spaces_str(&line.text);
         let line_stripped = strip_visual_markers(&line.text);
+        let line_no_numbering = strip_heading_numbering(&line.text);
+        // Also strip "表 N " / "图 N " figure caption prefix for matching
+        let line_no_fig_prefix = line.text.trim()
+            .strip_prefix("表 ").or_else(|| line.text.trim().strip_prefix("图 "))
+            .and_then(|s| s.strip_prefix(|c: char| c.is_ascii_digit()))
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
         if full_doc_text.contains(&line.text)
             || full_doc_text.contains(&line_normalized)
             || full_doc_text.contains(&line_stripped)
+            || (!line_no_numbering.is_empty() && full_doc_text.contains(&line_no_numbering))
+            || (!line_no_fig_prefix.is_empty() && full_doc_text.contains(&line_no_fig_prefix))
             || exclude_text.contains(&line.text)
         {
             continue;
@@ -284,6 +302,43 @@ fn count_title_lines(paged_lines: &[FrameLine], doc: &Document) -> usize {
         }
     }
     count
+}
+
+/// Strip common Chinese heading numbering prefixes for fuzzy matching.
+/// Patterns: "一、", "（一）", "1. ", "第一章 " etc.
+fn strip_heading_numbering(text: &str) -> String {
+    let trimmed = text.trim();
+    // "一、引言" → "引言", "二、文献综述" → "文献综述"
+    let cn_nums = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十",
+                   "十一", "十二", "十三", "十四", "十五"];
+    for num in &cn_nums {
+        let prefix = format!("{num}、");
+        if let Some(rest) = trimmed.strip_prefix(&prefix) {
+            return rest.trim().to_string();
+        }
+        let prefix = format!("（{num}）");
+        if let Some(rest) = trimmed.strip_prefix(&prefix) {
+            return rest.trim().to_string();
+        }
+        // With space after prefix: "一、 引言"
+        let prefix = format!("{num}、 ");
+        if let Some(rest) = trimmed.strip_prefix(&prefix) {
+            return rest.trim().to_string();
+        }
+        let prefix = format!("（{num}） ");
+        if let Some(rest) = trimmed.strip_prefix(&prefix) {
+            return rest.trim().to_string();
+        }
+    }
+    // Arabic number prefixes: "1. ", "2. ", "1 ", etc.
+    if let Some(rest) = trimmed.strip_prefix(|c: char| c.is_ascii_digit()) {
+        let rest = rest.strip_prefix('.').unwrap_or(rest);
+        let rest = rest.strip_prefix(' ').unwrap_or(rest);
+        if !rest.is_empty() {
+            return rest.to_string();
+        }
+    }
+    String::new()
 }
 
 /// Extract contiguous CJK character runs of at least `min_len` characters.
