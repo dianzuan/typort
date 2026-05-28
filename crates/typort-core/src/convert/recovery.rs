@@ -74,6 +74,8 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
         {
             continue;
         }
+        // Fuzzy match: for lines containing math (short tokens mixed with text),
+        // check if significant text fragments (3+ chars) are already in the doc.
         let words: Vec<&str> = line.text.split_whitespace().collect();
         if words.len() >= 2 {
             let sig_count = words.iter().filter(|w| w.chars().count() >= 3).count();
@@ -82,6 +84,19 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
                 .filter(|w| w.chars().count() >= 3 && full_doc_text.contains(**w))
                 .count();
             if sig_count >= 2 && matched * 2 > sig_count {
+                continue;
+            }
+        }
+        // Additional check: extract CJK-only substrings (4+ chars) and check
+        // if any appear in the doc. Math-heavy lines have text fragments split
+        // by symbols; if the CJK fragments match, the line is already present.
+        let cjk_fragments: Vec<String> = extract_cjk_fragments(&line.text, 4);
+        if !cjk_fragments.is_empty() {
+            let frag_matched = cjk_fragments
+                .iter()
+                .filter(|f| full_doc_text.contains(f.as_str()))
+                .count();
+            if frag_matched * 2 > cjk_fragments.len() {
                 continue;
             }
         }
@@ -269,6 +284,27 @@ fn count_title_lines(paged_lines: &[FrameLine], doc: &Document) -> usize {
         }
     }
     count
+}
+
+/// Extract contiguous CJK character runs of at least `min_len` characters.
+fn extract_cjk_fragments(text: &str, min_len: usize) -> Vec<String> {
+    let mut fragments = Vec::new();
+    let mut current = String::new();
+    for c in text.chars() {
+        if super::page::is_cjk_char(c) {
+            current.push(c);
+        } else {
+            if current.chars().count() >= min_len {
+                fragments.push(std::mem::take(&mut current));
+            } else {
+                current.clear();
+            }
+        }
+    }
+    if current.chars().count() >= min_len {
+        fragments.push(current);
+    }
+    fragments
 }
 
 pub(super) fn extract_doc_text(doc: &Document) -> String {
