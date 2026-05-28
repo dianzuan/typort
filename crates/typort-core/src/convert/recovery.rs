@@ -564,9 +564,51 @@ fn insert_missing_at_position(
         paragraphs.push(BlockElement::Paragraph(para));
     }
 
-    if !paragraphs.is_empty() {
+    // Merge consecutive centered paragraphs that have the same font size
+    // (likely a single title wrapping across multiple rendered lines).
+    let mut merged: Vec<BlockElement> = Vec::new();
+    for elem in paragraphs {
+        let should_merge = if let (
+            Some(BlockElement::Paragraph(prev)),
+            BlockElement::Paragraph(curr),
+        ) = (merged.last(), &elem)
+        {
+            let prev_center = matches!(prev.alignment, Some(Alignment::Center));
+            let curr_center = matches!(curr.alignment, Some(Alignment::Center));
+            let prev_size = prev.inlines.iter().find_map(|i| {
+                if let InlineElement::Text(r) = i { r.size_half_pt } else { None }
+            });
+            let curr_size = curr.inlines.iter().find_map(|i| {
+                if let InlineElement::Text(r) = i { r.size_half_pt } else { None }
+            });
+            // Only merge short centered paragraphs (wrapped title lines).
+            // Don't merge if current starts with "（" or "(" (affiliation).
+            let prev_text = prev.text_content();
+            let curr_text = curr.text_content();
+            let prev_short = prev_text.chars().count() < 40;
+            let curr_short = curr_text.chars().count() < 40;
+            let curr_is_affiliation = curr_text.starts_with('（')
+                || curr_text.starts_with('(');
+            prev_center && curr_center && prev_size == curr_size
+                && prev_short && curr_short && !curr_is_affiliation
+        } else {
+            false
+        };
+
+        if should_merge {
+            let BlockElement::Paragraph(curr) = elem else { unreachable!() };
+            let Some(BlockElement::Paragraph(prev)) = merged.last_mut() else {
+                unreachable!()
+            };
+            prev.inlines.extend(curr.inlines);
+        } else {
+            merged.push(elem);
+        }
+    }
+
+    if !merged.is_empty() {
         let tail = doc.body.elements.split_off(insert_idx);
-        doc.body.elements.extend(paragraphs);
+        doc.body.elements.extend(merged);
         doc.body.elements.extend(tail);
     }
 }
