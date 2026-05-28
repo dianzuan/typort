@@ -44,6 +44,7 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
 
     let title_line_count = count_title_lines(&all_page_lines, doc);
     let full_doc_text = extract_doc_text(doc);
+    let full_doc_text_nospace = strip_math_italic(&full_doc_text).replace(' ', "");
 
     let mut exclude_text = extract_header_footer_text(doc);
     for footnote in &doc.footnotes {
@@ -65,16 +66,37 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
         if line.all_math_font {
             continue;
         }
-        // Skip lines that are mostly math symbols (short lines with few CJK/Latin words).
-        // These are typically equation fragments or table cell math that's already in the doc.
+        // Skip lines that look like figure/table captions — these are handled
+        // by the figure/table conversion path and recovering them as standalone
+        // paragraphs inserts them at the wrong position.
         {
-            let char_count = line.text.chars().count();
-            let alnum_count = line.text.chars().filter(|c| c.is_alphanumeric()).count();
-            if char_count < 20 && alnum_count * 3 < char_count * 2 {
+            let t = line.text.trim();
+            if t.starts_with("表 ") || t.starts_with("表\u{00a0}")
+                || t.starts_with("图 ") || t.starts_with("图\u{00a0}")
+                || t.starts_with("Table ") || t.starts_with("Figure ")
+            {
+                continue;
+            }
+        }
+        // Skip short lines with math symbols — these are equation fragments
+        // that are already represented as OMML in the document.
+        {
+            let math_chars = line.text.chars().filter(|c| {
+                ('\u{1D400}'..='\u{1D7FF}').contains(c)
+                    || ('\u{2200}'..='\u{22FF}').contains(c) // math operators (∗, ∑, etc.)
+                    || *c == '>' || *c == '<' || *c == '≥' || *c == '≤'
+            }).count();
+            let total = line.text.chars().count();
+            // Short lines with ANY math: skip if under 8 chars total
+            if total < 8 && math_chars > 0 {
+                continue;
+            }
+            if total > 0 && math_chars * 4 > total {
                 continue;
             }
         }
         let line_normalized = strip_cjk_spaces_str(&line.text);
+        let line_demath = strip_math_italic(&line.text);
         let line_stripped = strip_visual_markers(&line.text);
         let line_no_numbering = strip_heading_numbering(&line.text);
         // Also strip "表 N " / "图 N " figure caption prefix for matching
@@ -83,9 +105,12 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
             .and_then(|s| s.strip_prefix(|c: char| c.is_ascii_digit()))
             .map(|s| s.trim().to_string())
             .unwrap_or_default();
+        let line_demath_nospace = line_demath.replace(' ', "");
         if full_doc_text.contains(&line.text)
             || full_doc_text.contains(&line_normalized)
             || full_doc_text.contains(&line_stripped)
+            || full_doc_text.contains(&line_demath)
+            || full_doc_text_nospace.contains(&line_demath_nospace)
             || (!line_no_numbering.is_empty() && full_doc_text.contains(&line_no_numbering))
             || (!line_no_fig_prefix.is_empty() && full_doc_text.contains(&line_no_fig_prefix))
             || exclude_text.contains(&line.text)
@@ -94,27 +119,48 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
         }
         // Fuzzy match: for lines containing math (short tokens mixed with text),
         // check if significant text fragments (3+ chars) are already in the doc.
+        // Also check with math italic stripped to handle Unicode math ↔ ASCII OMML.
         let words: Vec<&str> = line.text.split_whitespace().collect();
         if words.len() >= 2 {
             let sig_count = words.iter().filter(|w| w.chars().count() >= 3).count();
             let matched = words
                 .iter()
-                .filter(|w| w.chars().count() >= 3 && full_doc_text.contains(**w))
+                .filter(|w| {
+                    let wlen = w.chars().count();
+                    if wlen < 3 { return false; }
+                    full_doc_text.contains(*w) || {
+                        let dw = strip_math_italic(w);
+                        full_doc_text.contains(dw.as_str())
+                            || full_doc_text_nospace.contains(dw.replace(' ', "").as_str())
+                    }
+                })
                 .count();
             if sig_count >= 2 && matched * 2 > sig_count {
                 continue;
             }
         }
-        // Additional check: extract CJK-only substrings (4+ chars) and check
-        // if any appear in the doc. Math-heavy lines have text fragments split
-        // by symbols; if the CJK fragments match, the line is already present.
-        let cjk_fragments: Vec<String> = extract_cjk_fragments(&line.text, 4);
-        if !cjk_fragments.is_empty() {
-            let frag_matched = cjk_fragments
+        // If the line has any CJK-heavy word (4+ ideographs) that appears in
+        // doc text, the line is likely already present (mixed with OMML math).
+        if words.iter().any(|w| {
+            let cjk_count = w.chars().filter(|c| matches!(*c, '\u{4E00}'..='\u{9FFF}')).count();
+            cjk_count >= 4 && full_doc_text.contains(*w)
+        }) {
+            continue;
+        }
+        // CJK fragment matching: extract CJK ideograph substrings (8+ chars)
+        // and check against doc text.
+        let long_frags: Vec<String> = extract_cjk_fragments(&line.text, 8);
+        if long_frags.iter().any(|f| full_doc_text.contains(f.as_str())) {
+            continue;
+        }
+        // For shorter fragments (4+ chars), require majority to match.
+        let short_frags: Vec<String> = extract_cjk_fragments(&line.text, 4);
+        if short_frags.len() >= 2 {
+            let frag_matched = short_frags
                 .iter()
                 .filter(|f| full_doc_text.contains(f.as_str()))
                 .count();
-            if frag_matched * 2 > cjk_fragments.len() {
+            if frag_matched * 2 > short_frags.len() {
                 continue;
             }
         }
@@ -304,6 +350,34 @@ fn count_title_lines(paged_lines: &[FrameLine], doc: &Document) -> usize {
     count
 }
 
+/// Map Unicode Mathematical Italic/Bold/Script characters to ASCII equivalents.
+/// Paged output renders math as Unicode math italic (U+1D400-U+1D7FF) while
+/// OMML stores them as plain ASCII with formatting attributes.
+fn strip_math_italic(text: &str) -> String {
+    text.chars()
+        .map(|c| {
+            let cp = c as u32;
+            match cp {
+                // Math italic small a-z: U+1D44E-U+1D467
+                0x1D44E..=0x1D467 => (b'a' + (cp - 0x1D44E) as u8) as char,
+                // Math italic capital A-Z: U+1D434-U+1D44D
+                0x1D434..=0x1D44D => (b'A' + (cp - 0x1D434) as u8) as char,
+                // Math bold small a-z: U+1D41A-U+1D433
+                0x1D41A..=0x1D433 => (b'a' + (cp - 0x1D41A) as u8) as char,
+                // Math bold capital A-Z: U+1D400-U+1D419
+                0x1D400..=0x1D419 => (b'A' + (cp - 0x1D400) as u8) as char,
+                // Math bold italic small a-z: U+1D482-U+1D49B
+                0x1D482..=0x1D49B => (b'a' + (cp - 0x1D482) as u8) as char,
+                // Math bold italic capital A-Z: U+1D468-U+1D481
+                0x1D468..=0x1D481 => (b'A' + (cp - 0x1D468) as u8) as char,
+                // Math italic h: U+210E
+                0x210E => 'h',
+                _ => c,
+            }
+        })
+        .collect()
+}
+
 /// Strip common Chinese heading numbering prefixes for fuzzy matching.
 /// Patterns: "一、", "（一）", "1. ", "第一章 " etc.
 fn strip_heading_numbering(text: &str) -> String {
@@ -341,12 +415,14 @@ fn strip_heading_numbering(text: &str) -> String {
     String::new()
 }
 
-/// Extract contiguous CJK character runs of at least `min_len` characters.
+/// Extract contiguous CJK ideograph runs of at least `min_len` characters.
+/// Uses only CJK Unified Ideographs (not fullwidth punctuation) so that
+/// fragments like "被主流接受" match regardless of surrounding punctuation.
 fn extract_cjk_fragments(text: &str, min_len: usize) -> Vec<String> {
     let mut fragments = Vec::new();
     let mut current = String::new();
     for c in text.chars() {
-        if super::page::is_cjk_char(c) {
+        if matches!(c, '\u{4E00}'..='\u{9FFF}' | '\u{3400}'..='\u{4DBF}') {
             current.push(c);
         } else {
             if current.chars().count() >= min_len {
