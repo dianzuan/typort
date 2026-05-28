@@ -36,6 +36,7 @@ struct FrameTextItem {
 }
 
 /// Recover content that exists in the `PagedDocument` but was lost from the `HtmlDocument` DOM.
+#[allow(clippy::too_many_lines)]
 pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document) {
     let all_page_lines = extract_lines_from_all_pages(paged);
     if all_page_lines.is_empty() {
@@ -67,7 +68,7 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
         // these are fragments of sentence tails from line-wrapped paragraphs
         // that are already present in the full text.
         if line.text.chars().count() <= 5
-            && line.text.trim().ends_with(|c: char| matches!(c, '。' | '.' | '；' | '！' | '？'))
+            && line.text.trim().ends_with(['。', '.', '；', '！', '？'])
         {
             continue;
         }
@@ -299,7 +300,8 @@ pub(super) fn extract_lines_from_all_pages(paged: &PagedDocument) -> Vec<FrameLi
                     run.superscript = is_super;
                     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                     let half_pt = (item.size_pt * 2.0).round() as u32;
-                    if half_pt != (body_size * 2.0).round() as u32 {
+                    #[allow(clippy::cast_sign_loss)]
+                    if half_pt != (body_size * 2.0).round().max(0.0) as u32 {
                         run.size_half_pt = Some(half_pt);
                     }
                     cluster_runs.push(run.clone());
@@ -381,6 +383,7 @@ fn count_title_lines(paged_lines: &[FrameLine], doc: &Document) -> usize {
 /// Map Unicode Mathematical Italic/Bold/Script characters to ASCII equivalents.
 /// Paged output renders math as Unicode math italic (U+1D400-U+1D7FF) while
 /// OMML stores them as plain ASCII with formatting attributes.
+#[allow(clippy::cast_possible_truncation)]
 fn strip_math_italic(text: &str) -> String {
     text.chars()
         .map(|c| {
@@ -452,12 +455,10 @@ fn extract_cjk_fragments(text: &str, min_len: usize) -> Vec<String> {
     for c in text.chars() {
         if matches!(c, '\u{4E00}'..='\u{9FFF}' | '\u{3400}'..='\u{4DBF}') {
             current.push(c);
+        } else if current.chars().count() >= min_len {
+            fragments.push(std::mem::take(&mut current));
         } else {
-            if current.chars().count() >= min_len {
-                fragments.push(std::mem::take(&mut current));
-            } else {
-                current.clear();
-            }
+            current.clear();
         }
     }
     if current.chars().count() >= min_len {
@@ -510,7 +511,7 @@ fn pt_to_twips(pt: f64) -> u32 {
     (pt * 20.0).round().max(0.0) as u32
 }
 
-#[allow(clippy::cast_precision_loss)] // char count will never exceed f64 precision
+#[allow(clippy::cast_precision_loss, clippy::too_many_lines)]
 fn insert_missing_at_position(
     doc: &mut Document,
     missing_lines: &[FrameLine],
