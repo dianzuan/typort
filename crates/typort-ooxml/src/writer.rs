@@ -204,29 +204,70 @@ fn collect_images_from_table<'a>(
     }
 }
 
-/// Compute the relationship ID for an image given its 1-based index.
-/// Image relationship IDs start after the fixed relationships (styles, fontTable,
-/// footnotes, numbering, settings, header, footer).
-fn image_rel_id(image_index: usize, parts: DocParts) -> String {
-    // Base count: rId1=styles, rId2=fontTable
-    let mut base = 2;
+/// A fixed (non-image) relationship part of `document.xml.rels`.
+///
+/// The order of [`fixed_relationships`] is the **single source of truth** for
+/// rId assignment: `generate_document_rels` writes the parts in this order, and
+/// both `image_rel_id` and `header_footer_rel_id` derive their numbers from the
+/// same list. Add or reorder a part in one place and every rId stays consistent.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RelKind {
+    Styles,
+    FontTable,
+    Footnotes,
+    Numbering,
+    Settings,
+    Header,
+    Footer,
+    Bibliography,
+}
+
+impl RelKind {
+    /// The relationship `Type` URL and `Target` filename for this part.
+    fn type_and_target(self) -> (String, &'static str) {
+        const PREFIX: &str =
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
+        let (suffix, target) = match self {
+            RelKind::Styles => ("styles", "styles.xml"),
+            RelKind::FontTable => ("fontTable", "fontTable.xml"),
+            RelKind::Footnotes => ("footnotes", "footnotes.xml"),
+            RelKind::Numbering => ("numbering", "numbering.xml"),
+            RelKind::Settings => ("settings", "settings.xml"),
+            RelKind::Header => ("header", "header1.xml"),
+            RelKind::Footer => ("footer", "footer1.xml"),
+            RelKind::Bibliography => ("customXml", "../customXml/item1.xml"),
+        };
+        (format!("{PREFIX}{suffix}"), target)
+    }
+}
+
+/// The fixed relationship parts present in this document, in write order.
+/// rId of a fixed part is its index here + 1; images follow at `len() + n`.
+fn fixed_relationships(parts: DocParts) -> Vec<RelKind> {
+    let mut kinds = vec![RelKind::Styles, RelKind::FontTable];
     if parts.footnotes {
-        base += 1;
+        kinds.push(RelKind::Footnotes);
     }
     if parts.numbering {
-        base += 1;
+        kinds.push(RelKind::Numbering);
     }
-    base += 1; // settings
+    kinds.push(RelKind::Settings);
     if parts.header {
-        base += 1;
+        kinds.push(RelKind::Header);
     }
     if parts.footer {
-        base += 1;
+        kinds.push(RelKind::Footer);
     }
     if parts.bibliography {
-        base += 1;
+        kinds.push(RelKind::Bibliography);
     }
-    format!("rId{}", base + image_index)
+    kinds
+}
+
+/// Compute the relationship ID for an image given its 1-based index.
+/// Image relationships follow all fixed parts in `document.xml.rels`.
+fn image_rel_id(image_index: usize, parts: DocParts) -> String {
+    format!("rId{}", fixed_relationships(parts).len() + image_index)
 }
 
 pub(crate) fn xml_part(
@@ -364,107 +405,14 @@ fn generate_document_rels(
             "http://schemas.openxmlformats.org/package/2006/relationships",
         ))
         .write_inner_content(|w| {
-            // Use a counter to assign sequential rId values
-            let mut next_id = 1_usize;
-
-            // rId1 = styles
-            let rid = format!("rId{next_id}");
-            next_id += 1;
-            w.create_element("Relationship")
-                .with_attribute(("Id", rid.as_str()))
-                .with_attribute((
-                    "Type",
-                    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles",
-                ))
-                .with_attribute(("Target", "styles.xml"))
-                .write_empty()?;
-
-            // rId2 = fontTable
-            let rid = format!("rId{next_id}");
-            next_id += 1;
-            w.create_element("Relationship")
-                .with_attribute(("Id", rid.as_str()))
-                .with_attribute((
-                    "Type",
-                    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable",
-                ))
-                .with_attribute(("Target", "fontTable.xml"))
-                .write_empty()?;
-
-            if parts.footnotes {
-                let rid = format!("rId{next_id}");
-                next_id += 1;
+            // Fixed parts, in the order that defines every rId (see `RelKind`).
+            for (idx, kind) in fixed_relationships(parts).iter().enumerate() {
+                let rid = format!("rId{}", idx + 1);
+                let (rel_type, target) = kind.type_and_target();
                 w.create_element("Relationship")
                     .with_attribute(("Id", rid.as_str()))
-                    .with_attribute((
-                        "Type",
-                        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes",
-                    ))
-                    .with_attribute(("Target", "footnotes.xml"))
-                    .write_empty()?;
-            }
-
-            if parts.numbering {
-                let rid = format!("rId{next_id}");
-                next_id += 1;
-                w.create_element("Relationship")
-                    .with_attribute(("Id", rid.as_str()))
-                    .with_attribute((
-                        "Type",
-                        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering",
-                    ))
-                    .with_attribute(("Target", "numbering.xml"))
-                    .write_empty()?;
-            }
-
-            // settings
-            let rid = format!("rId{next_id}");
-            next_id += 1;
-            w.create_element("Relationship")
-                .with_attribute(("Id", rid.as_str()))
-                .with_attribute((
-                    "Type",
-                    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings",
-                ))
-                .with_attribute(("Target", "settings.xml"))
-                .write_empty()?;
-
-            // header
-            if parts.header {
-                let rid = format!("rId{next_id}");
-                next_id += 1;
-                w.create_element("Relationship")
-                    .with_attribute(("Id", rid.as_str()))
-                    .with_attribute((
-                        "Type",
-                        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header",
-                    ))
-                    .with_attribute(("Target", "header1.xml"))
-                    .write_empty()?;
-            }
-
-            // footer
-            if parts.footer {
-                let rid = format!("rId{next_id}");
-                next_id += 1; // keep counter consistent for image_rel_id parity
-                let _ = next_id;
-                w.create_element("Relationship")
-                    .with_attribute(("Id", rid.as_str()))
-                    .with_attribute((
-                        "Type",
-                        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer",
-                    ))
-                    .with_attribute(("Target", "footer1.xml"))
-                    .write_empty()?;
-            }
-
-            // Bibliography custom XML relationship
-            if parts.bibliography {
-                let rid = format!("rId{next_id}");
-                w.create_element("Relationship")
-                    .with_attribute(("Id", rid.as_str()))
-                    .with_attribute(("Type", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml"))
-                    .with_attribute(("Target", "../customXml/item1.xml"))
+                    .with_attribute(("Type", rel_type.as_str()))
+                    .with_attribute(("Target", target))
                     .write_empty()?;
             }
 
@@ -558,29 +506,20 @@ fn generate_settings(
     Ok(())
 }
 
-/// Compute the relationship ID for a header or footer.
-/// Headers/footers come after settings in the relationship chain.
+/// Compute the relationship ID for a header or footer by locating it in the
+/// single source of truth (`fixed_relationships`). Only called when the part is
+/// present (guarded by `parts.header` / `parts.footer` at the call sites).
 fn header_footer_rel_id(is_header: bool, parts: DocParts) -> String {
-    // Base count: rId1=styles, rId2=fontTable
-    let mut id = 2;
-    if parts.footnotes {
-        id += 1;
-    }
-    if parts.numbering {
-        id += 1;
-    }
-    id += 1; // settings
-    if is_header {
-        // header is the next one after settings
-        id += 1;
+    let kind = if is_header {
+        RelKind::Header
     } else {
-        // footer comes after header (if present)
-        if parts.header {
-            id += 1;
-        }
-        id += 1;
-    }
-    format!("rId{id}")
+        RelKind::Footer
+    };
+    let pos = fixed_relationships(parts)
+        .iter()
+        .position(|k| *k == kind)
+        .expect("header/footer rel id requested for a part that is not present");
+    format!("rId{}", pos + 1)
 }
 
 fn generate_document_xml(
