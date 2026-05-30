@@ -2671,6 +2671,7 @@ dependencies = [
  "quick-xml 0.37.5",
  "typst",
  "typst-library",
+ "unicode-math-class",
 ]
 
 [[package]]

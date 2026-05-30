@@ -10,3 +10,4 @@ license.workspace = true
 quick-xml.workspace = true
 typst.workspace = true
 typst-library.workspace = true
+unicode-math-class.workspace = true

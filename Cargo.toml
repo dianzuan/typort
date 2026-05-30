@@ -43,6 +43,10 @@ toml = "0.8"
 # tree transitively; `local-offset` enables querying the system time zone.
 time = { version = "0.3", features = ["local-offset"] }
 
+# Math character classification — the same crate Typst uses, so our nary
+# operand boundary (stop at a Relation-class symbol) matches Typst's own model.
+unicode-math-class = "0.1"
+
 # CLI
 clap = { version = "4", features = ["derive"] }
 

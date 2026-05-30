@@ -692,6 +692,50 @@ fn math_product_produces_m_nary() {
 }
 
 #[test]
+fn math_nary_operand_is_inside_m_e() {
+    // The summand must live inside the n-ary's <m:e>, not be left empty with the
+    // operand detached as siblings (ECMA-376 violation). For `sum_(i=1)^n i^2`,
+    // the m:e following m:sup must contain the summand `i^2` (an m:sSup).
+    let xml = fixture_doc_xml("issue_nary_operand_body");
+    let start = xml.find("<m:nary>").expect("expected an n-ary for the sum");
+    let end = xml.find("</m:nary>").expect("n-ary should close");
+    let nary = &xml[start..end];
+    assert!(
+        !nary.contains("</m:sup><m:e/>") && !nary.contains("</m:sup><m:e></m:e>"),
+        "n-ary body <m:e> must not be empty: {nary}"
+    );
+    // The summand i^2 (an m:sSup) lives inside the n-ary body.
+    assert!(
+        nary.contains("<m:sSup>"),
+        "summand i^2 should be inside the n-ary body, got: {nary}"
+    );
+}
+
+#[test]
+fn math_nary_operand_stops_at_relation() {
+    // Operand boundary = a Relation-class symbol. In `sum_(i=1)^n i^2 = S`, the
+    // `= S` must fall OUTSIDE the n-ary's operand body, not get pulled into the
+    // summand. (Note the `=` inside the lower limit `i=1` is in <m:sub> and is
+    // legitimately within the n-ary — so we check the operand <m:e> specifically,
+    // not the whole n-ary.) The fixture has exactly one n-ary.
+    let xml = fixture_doc_xml("issue_nary_operand_body");
+    let nary_end = xml.find("</m:nary>").expect("expected an n-ary");
+    let nary = &xml[..nary_end];
+    // The operand body is the <m:e> that follows </m:sup>.
+    let body_start = nary.find("</m:sup>").expect("n-ary has an upper limit") + "</m:sup>".len();
+    let operand = &nary[body_start..];
+    assert!(
+        !operand.contains("<m:t>=</m:t>"),
+        "the `=` relation must NOT be inside the n-ary operand body: {operand}"
+    );
+    let after = &xml[nary_end..];
+    assert!(
+        after.contains("<m:t>=</m:t>") && after.contains("<m:t>S</m:t>"),
+        "the `= S` must appear after </m:nary>"
+    );
+}
+
+#[test]
 fn math_nested_fraction() {
     let doc_xml = math_unit_doc_xml();
     // Count occurrences of <m:f> — should be at least 3: the simple frac, and 2 from nested

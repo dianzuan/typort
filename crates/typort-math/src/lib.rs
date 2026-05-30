@@ -131,8 +131,25 @@ fn convert_eq_array<W: Write>(writer: &mut Writer<W>, body: &Content) -> std::io
 fn convert_content<W: Write>(writer: &mut Writer<W>, content: &Content) -> std::io::Result<()> {
     // Check what type the content is and dispatch accordingly
     if let Some(seq) = content.to_packed::<SequenceElem>() {
-        for child in &seq.children {
-            convert_content(writer, child)?;
+        // Walk siblings with lookahead so a big operator (∫, ∑, …) can claim its
+        // operand. Typst stores the operand as flat following siblings, but OMML's
+        // m:nary needs it inside <m:e>. We consume forward until a Relation-class
+        // symbol (=, <, ≤, →, …) or the end of the run — the operand boundary in
+        // standard math notation. See convert_nary / is_relation_boundary.
+        let children = &seq.children;
+        let mut i = 0;
+        while i < children.len() {
+            if let Some((base, sub, sup)) = nary_attach_parts(&children[i]) {
+                let mut end = i + 1;
+                while end < children.len() && !is_relation_boundary(&children[end]) {
+                    end += 1;
+                }
+                convert_nary(writer, base, sub, sup, &children[i + 1..end])?;
+                i = end;
+            } else {
+                convert_content(writer, &children[i])?;
+                i += 1;
+            }
         }
     } else if let Some(attach) = content.to_packed::<AttachElem>() {
         convert_attach(writer, attach)?;
@@ -201,9 +218,12 @@ fn convert_attach<W: Write>(writer: &mut Writer<W>, attach: &AttachElem) -> std:
     let sup = attach.t.as_option().as_ref().and_then(|v| v.as_ref());
     let sub = attach.b.as_option().as_ref().and_then(|v| v.as_ref());
 
-    // Check if this is a nary operator (sum, integral, product, etc.)
+    // Check if this is a nary operator (sum, integral, product, etc.). When an
+    // AttachElem reaches here directly (not via the sequence walk in
+    // convert_content), there are no following siblings to bind, so the operand
+    // is empty; the sequence walk is what supplies a real operand.
     if is_nary_base(base) {
-        return convert_nary(writer, base, sub, sup);
+        return convert_nary(writer, base, sub, sup, &[]);
     }
 
     match (sub, sup) {
@@ -286,12 +306,19 @@ fn is_nary_base(content: &Content) -> bool {
     }
 }
 
-/// Convert a nary (big operator) with sub/superscripts to m:nary
+/// Convert a nary (big operator) with sub/superscripts to m:nary.
+///
+/// `body` is the operand (integrand/summand) the caller collected from the
+/// following siblings in the sequence — see [`convert_content`]. OMML requires
+/// the operand inside `<m:e>`; Typst stores it flat after the operator, so the
+/// caller binds it and passes it here. An empty `body` yields an empty `<m:e>`
+/// (e.g. a bare `sum` with nothing after it).
 fn convert_nary<W: Write>(
     writer: &mut Writer<W>,
     base: &Content,
     sub: Option<&Content>,
     sup: Option<&Content>,
+    body: &[Content],
 ) -> std::io::Result<()> {
     let chr = if let Some(sym) = base.to_packed::<SymbolElem>() {
         sym.text.to_string()
@@ -328,12 +355,56 @@ fn convert_nary<W: Write>(
             }
             Ok(())
         })?;
-        // The nary body in OMML wraps subsequent content; in Typst,
-        // the following content is separate in the sequence. Leave body empty.
-        w.create_element("m:e").write_inner_content(|_| Ok(()))?;
+        w.create_element("m:e").write_inner_content(|e| {
+            for item in body {
+                convert_content(e, item)?;
+            }
+            Ok(())
+        })?;
         Ok(())
     })?;
     Ok(())
+}
+
+/// If `content` is an `AttachElem` whose base is a nary operator, return its
+/// (base, sub, sup) so the caller can bind an operand and emit `m:nary`.
+/// Also matches a bare nary symbol with no scripts.
+fn nary_attach_parts(content: &Content) -> Option<(&Content, Option<&Content>, Option<&Content>)> {
+    if let Some(attach) = content.to_packed::<AttachElem>() {
+        if is_nary_base(&attach.base) {
+            let sup = attach.t.as_option().as_ref().and_then(|v| v.as_ref());
+            let sub = attach.b.as_option().as_ref().and_then(|v| v.as_ref());
+            return Some((&attach.base, sub, sup));
+        }
+        return None;
+    }
+    if is_nary_base(content) {
+        return Some((content, None, None));
+    }
+    None
+}
+
+/// Whether `content` is a symbol of the Relation math class (`=`, `<`, `≤`,
+/// `→`, …). Such a symbol ends a nary operand: in `sum_i a_i = S`, the `= S`
+/// is not part of the summand. Uses the same `unicode-math-class` table Typst
+/// itself uses, so the boundary matches Typst's own classification.
+fn is_relation_boundary(content: &Content) -> bool {
+    let sym = content.to_packed::<SymbolElem>();
+    let text = match sym {
+        Some(s) => s.text.as_str(),
+        None => return false,
+    };
+    let mut chars = text.chars();
+    match (chars.next(), chars.next()) {
+        // Single-character symbol: classify it.
+        (Some(c), None) => {
+            matches!(
+                unicode_math_class::class(c),
+                Some(unicode_math_class::MathClass::Relation)
+            )
+        }
+        _ => false,
+    }
 }
 
 fn convert_frac<W: Write>(writer: &mut Writer<W>, frac: &FracElem) -> std::io::Result<()> {
