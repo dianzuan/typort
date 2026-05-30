@@ -67,7 +67,9 @@ typort uses a **dual-compilation strategy**:
 
 2. **PagedDocument** — Typst's page layout gives us visual properties: actual fonts, sizes, colors, alignment, page dimensions, and content that has no HTML representation (like `#align(center)[...]` or `#grid(...)`).
 
-The converter walks the HTML structure for document ordering, queries the Introspector for content details, and cross-references the PagedDocument for styling. All values (fonts, sizes, spacing, indentation, alignment) are detected from the actual rendering — nothing is hardcoded.
+3. **Source AST** — typort also re-parses the `.typ` source (and its imports) for `set` rules like `#set text(font: ...)`. Values the author declared explicitly are authoritative and override the heuristics derived from rendering.
+
+The converter walks the HTML structure for document ordering, queries the Introspector for content details, and cross-references the PagedDocument for styling. All values (fonts, sizes, spacing, indentation, alignment) are detected from the actual rendering or the source — nothing is hardcoded for any particular document. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full design.
 
 OOXML XML is generated directly via `quick-xml`. No docx-rs, no intermediate format.
 
@@ -86,8 +88,8 @@ crates/
 
 ```bash
 cargo build --workspace
-cargo test --workspace          # 339 tests
-cargo clippy --workspace        # 0 warnings
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 ## Known limitations
