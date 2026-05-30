@@ -225,8 +225,7 @@ enum RelKind {
 impl RelKind {
     /// The relationship `Type` URL and `Target` filename for this part.
     fn type_and_target(self) -> (String, &'static str) {
-        const PREFIX: &str =
-            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
+        const PREFIX: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/";
         let (suffix, target) = match self {
             RelKind::Styles => ("styles", "styles.xml"),
             RelKind::FontTable => ("fontTable", "fontTable.xml"),
