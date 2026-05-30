@@ -39,6 +39,10 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 
+# Date/time — for World::today (real local date). Already in the dependency
+# tree transitively; `local-offset` enables querying the system time zone.
+time = { version = "0.3", features = ["local-offset"] }
+
 # CLI
 clap = { version = "4", features = ["derive"] }
 

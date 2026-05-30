@@ -21,3 +21,4 @@ zip.workspace = true
 typst.workspace = true
 typst-pdf.workspace = true
 typort-presets.workspace = true
+time.workspace = true

@@ -20,3 +20,4 @@ typort-presets.workspace = true
 resvg.workspace = true
 tiny-skia.workspace = true
 hayagriva.workspace = true
+time.workspace = true

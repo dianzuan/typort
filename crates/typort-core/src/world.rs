@@ -106,8 +106,23 @@ impl World for TyportWorld {
         self.fonts.get(index)?.get()
     }
 
-    fn today(&self, _offset: Option<i64>) -> Option<Datetime> {
-        Datetime::from_ymd(2026, 1, 1)
+    fn today(&self, offset: Option<i64>) -> Option<Datetime> {
+        // Per the `World` contract: `offset` is a UTC offset in hours, or `None`
+        // for the local time zone. `now_local()` can fail (e.g. the time crate
+        // refuses to read the zone from a multi-threaded process); fall back to
+        // UTC rather than a fixed placeholder so the date is at least real.
+        let now =
+            time::OffsetDateTime::now_local().unwrap_or_else(|_| time::OffsetDateTime::now_utc());
+        let resolved = match offset {
+            None => now,
+            Some(hours) => {
+                let secs = i32::try_from(hours).ok()?.checked_mul(3600)?;
+                now.to_offset(time::UtcOffset::from_whole_seconds(secs).ok()?)
+            }
+        };
+        // `time::Month` discriminants are 1..=12 and `day()` is 1..=31 — exactly
+        // the `u8` ranges Datetime::from_ymd expects.
+        Datetime::from_ymd(resolved.year(), resolved.month() as u8, resolved.day())
     }
 }
 

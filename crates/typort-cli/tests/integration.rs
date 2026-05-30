@@ -3009,6 +3009,26 @@ fn issue_caption_not_duplicated_by_recovery() {
 }
 
 #[test]
+fn issue_today_is_real_date_not_fixed() {
+    // World::today() must return the real current date, not a fixed placeholder.
+    // Compare against the system date computed the same way at test time, so the
+    // assertion holds on any day. Falls back to UTC if the local zone is
+    // unavailable — matching the implementation in world.rs.
+    let now = time::OffsetDateTime::now_local().unwrap_or_else(|_| time::OffsetDateTime::now_utc());
+    let expected = format!(
+        "{:04}-{:02}-{:02}",
+        now.year(),
+        now.month() as u8,
+        now.day()
+    );
+    let xml = fixture_doc_xml("issue_today_real_date");
+    assert!(
+        xml.contains(&expected),
+        "document should contain today's date {expected}, but did not (fixed placeholder?)"
+    );
+}
+
+#[test]
 fn issue_inline_math_spacing_preserved() {
     let xml = fixture_doc_xml("issue_inline_math_spacing");
     assert!(
