@@ -442,8 +442,7 @@ fn walk_tags(
                         }
                         "image" => {
                             // Consume the next image from the queue extracted from PagedDocument
-                            if !image_queue.is_empty() {
-                                let img_data = image_queue.pop_front().unwrap();
+                            if let Some(img_data) = image_queue.pop_front() {
                                 let mut para = Paragraph::new();
                                 para.add_image(img_data);
                                 doc.add_paragraph(para);
@@ -1107,8 +1106,7 @@ fn handle_inline_tag(
         }
         "image" => {
             // Inline image within a paragraph
-            if !image_queue.is_empty() {
-                let img_data = image_queue.pop_front().unwrap();
+            if let Some(img_data) = image_queue.pop_front() {
                 para.add_image(img_data);
             }
             find_tag_end(children, i, tag.location())
