@@ -761,20 +761,14 @@ fn features_footnote_restart_and_font_hint() {
 }
 
 #[test]
-fn features_suppress_indent_and_bibliography() {
+fn features_suppress_indent_after_heading() {
     let doc_xml = fixture_doc_xml("complex_paper");
 
-    // Feature 3: First paragraph after heading has firstLine="0" (suppress indent)
-    // The Normal style has firstLine="420", so paragraphs after headings should override
+    // First paragraph after heading has firstLine="0" (suppress indent).
+    // The Normal style has firstLine="420", so paragraphs after headings should override.
     assert!(
         doc_xml.contains("w:firstLine=\"0\""),
         "document.xml should have firstLine=\"0\" for paragraphs after headings"
-    );
-
-    // Feature 4: Bibliography paragraphs have hanging indent
-    assert!(
-        doc_xml.contains("w:hanging=\"420\"") && doc_xml.contains("w:left=\"420\""),
-        "document.xml should have hanging indent for bibliography entries"
     );
 }
 

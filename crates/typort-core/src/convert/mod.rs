@@ -2280,10 +2280,16 @@ fn find_body(root: &HtmlElement) -> Option<&HtmlElement> {
 }
 
 /// Post-processing: suppress first-line indent on the first paragraph after
-/// each heading, and apply hanging indent to bibliography paragraphs.
+/// each heading.
+///
+/// Bibliography hanging indent is applied only to *real* bibliographies — those
+/// Typst emits with the `doc-bibliography` role from `#bibliography(...)` (see
+/// the `"section"` arm of `handle_html_element`). Hand-written paragraphs that
+/// merely look like a reference list are, to Typst, ordinary text, so typort
+/// converts them as ordinary text rather than guessing from heading keywords
+/// (which would assume the document's language — see CLAUDE.md philosophy P1).
 fn apply_paragraph_formatting(doc: &mut Document) {
     let mut after_heading = false;
-    let mut in_bibliography = false;
     let mut is_first_element = true;
 
     for element in &mut doc.body.elements {
@@ -2294,24 +2300,12 @@ fn apply_paragraph_formatting(doc: &mut Document) {
                 if is_first_element {
                     p.spacing_before = Some(0);
                 }
-                // Detect bibliography section
-                let text = p.text_content();
-                let text_lower = text.to_lowercase();
-                if text.contains("参考文献")
-                    || text_lower.contains("references")
-                    || text_lower.contains("bibliography")
-                {
-                    in_bibliography = true;
-                }
                 after_heading = true;
             } else {
                 // Normal paragraph
                 if after_heading {
                     p.suppress_indent = true;
                     after_heading = false;
-                }
-                if in_bibliography {
-                    p.hanging_indent = true;
                 }
             }
             is_first_element = false;
