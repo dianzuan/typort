@@ -197,15 +197,20 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
 }
 
 /// Apply authoritative values from source AST, overriding heuristic guesses.
-fn apply_source_overrides(
-    ovr: &page::SourceStyleOverrides,
-    doc: &mut Document,
-) {
+fn apply_source_overrides(ovr: &page::SourceStyleOverrides, doc: &mut Document) {
     // Page margins
-    if let Some(v) = ovr.margin_top { doc.page_settings.margin_top = v; }
-    if let Some(v) = ovr.margin_bottom { doc.page_settings.margin_bottom = v; }
-    if let Some(v) = ovr.margin_left { doc.page_settings.margin_left = v; }
-    if let Some(v) = ovr.margin_right { doc.page_settings.margin_right = v; }
+    if let Some(v) = ovr.margin_top {
+        doc.page_settings.margin_top = v;
+    }
+    if let Some(v) = ovr.margin_bottom {
+        doc.page_settings.margin_bottom = v;
+    }
+    if let Some(v) = ovr.margin_left {
+        doc.page_settings.margin_left = v;
+    }
+    if let Some(v) = ovr.margin_right {
+        doc.page_settings.margin_right = v;
+    }
 
     // Columns
     if let Some(cols) = ovr.columns {
@@ -881,9 +886,7 @@ fn strip_cjk_spaces(para: &mut Paragraph) {
 }
 
 pub(super) fn strip_visual_markers(s: &str) -> String {
-    let trimmed = s.trim_start_matches(|c: char| {
-        matches!(c, '•' | '‣' | '◦' | '▪' | '▸' | '–' | '—')
-    });
+    let trimmed = s.trim_start_matches(['•', '‣', '◦', '▪', '▸', '–', '—']);
     let trimmed = trimmed.trim_start();
     // Strip leading "1." or "1.1" or "1.1.1" numbering patterns
     let trimmed = if let Some(rest) = trimmed.strip_prefix(|c: char| c.is_ascii_digit()) {
@@ -1155,8 +1158,8 @@ fn handle_inline_tag(
             para.add_page_break();
             find_tag_end(children, i, tag.location())
         }
-        "super" | "sub" | "raw" | "underline" | "strike"
-        | "highlight" | "overline" | "smallcaps" => {
+        "super" | "sub" | "raw" | "underline" | "strike" | "highlight" | "overline"
+        | "smallcaps" => {
             let end = find_tag_end(children, i, tag.location());
             let text = collect_flat_text(&children[i + 1..end]);
             if !text.is_empty() {

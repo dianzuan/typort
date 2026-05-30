@@ -1,9 +1,9 @@
 use hayagriva::types::{EntryType, Person};
+use typort_ooxml::document::{CitationSource, SourceType};
 use typst::comemo::Track;
 use typst_html::HtmlDocument;
 use typst_library::loading::DataSource;
 use typst_library::model::BibliographyElem;
-use typort_ooxml::document::{CitationSource, SourceType};
 
 use crate::world::TyportWorld;
 
@@ -40,10 +40,7 @@ pub fn extract_bibliography_sources(
 }
 
 /// Load and parse all bibliography source files into a hayagriva Library.
-fn load_bibliography_library(
-    sources: &[DataSource],
-    world: &TyportWorld,
-) -> hayagriva::Library {
+fn load_bibliography_library(sources: &[DataSource], world: &TyportWorld) -> hayagriva::Library {
     let mut library = hayagriva::Library::new();
     let root = world.root();
 
@@ -57,19 +54,26 @@ fn load_bibliography_library(
                         if let Some(parsed) = try_parse_bibliography(&content, is_bib) {
                             merge_library(&mut library, &parsed);
                         } else {
-                            eprintln!("typort: warning: failed to parse bibliography file {}", path.display());
+                            eprintln!(
+                                "typort: warning: failed to parse bibliography file {}",
+                                path.display()
+                            );
                         }
                     }
                     Err(e) => {
-                        eprintln!("typort: warning: could not read bibliography file {}: {e}", path.display());
+                        eprintln!(
+                            "typort: warning: could not read bibliography file {}: {e}",
+                            path.display()
+                        );
                     }
                 }
             }
             DataSource::Bytes(bytes) => {
                 if let Ok(content) = std::str::from_utf8(bytes.as_slice())
-                    && let Some(parsed) = try_parse_bibliography(content, false) {
-                        merge_library(&mut library, &parsed);
-                    }
+                    && let Some(parsed) = try_parse_bibliography(content, false)
+                {
+                    merge_library(&mut library, &parsed);
+                }
             }
         }
     }
@@ -79,10 +83,12 @@ fn load_bibliography_library(
 
 fn try_parse_bibliography(content: &str, prefer_bib: bool) -> Option<hayagriva::Library> {
     if prefer_bib {
-        hayagriva::io::from_biblatex_str(content).ok()
+        hayagriva::io::from_biblatex_str(content)
+            .ok()
             .or_else(|| hayagriva::io::from_yaml_str(content).ok())
     } else {
-        hayagriva::io::from_yaml_str(content).ok()
+        hayagriva::io::from_yaml_str(content)
+            .ok()
             .or_else(|| hayagriva::io::from_biblatex_str(content).ok())
     }
 }
@@ -119,7 +125,11 @@ fn entry_to_citation_source(tag: &str, entry: &hayagriva::Entry) -> CitationSour
         EntryType::Chapter | EntryType::Anthos | EntryType::Entry
     );
 
-    let journal_name = if is_chapter_like { None } else { parent_title.clone() };
+    let journal_name = if is_chapter_like {
+        None
+    } else {
+        parent_title.clone()
+    };
     let book_title = if is_chapter_like { parent_title } else { None };
 
     let publisher = entry
@@ -162,7 +172,9 @@ pub fn map_entry_type(entry_type: EntryType) -> SourceType {
         EntryType::Proceedings | EntryType::Conference => SourceType::ConferenceProceedings,
         EntryType::Report => SourceType::Report,
         EntryType::Thesis => SourceType::Thesis,
-        EntryType::Web | EntryType::Blog | EntryType::Post | EntryType::Thread => SourceType::InternetSite,
+        EntryType::Web | EntryType::Blog | EntryType::Post | EntryType::Thread => {
+            SourceType::InternetSite
+        }
         _ => SourceType::Misc,
     }
 }
@@ -200,10 +212,7 @@ mod tests {
 
     #[test]
     fn web_maps_to_internet_site() {
-        assert_eq!(
-            map_entry_type(EntryType::Web),
-            SourceType::InternetSite
-        );
+        assert_eq!(map_entry_type(EntryType::Web), SourceType::InternetSite);
     }
 
     #[test]

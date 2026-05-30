@@ -102,8 +102,7 @@ pub fn extract_document_style(paged: &PagedDocument) -> DocumentStyle {
         detect_body_paragraph_spacing(body_size_half_pt, &heading_sizes, paged);
 
     // Detect CJK content presence from rendered text
-    let has_cjk = !ascii_font_counts.is_empty()
-        && cjk_font_counts.values().sum::<usize>() > 0;
+    let has_cjk = !ascii_font_counts.is_empty() && cjk_font_counts.values().sum::<usize>() > 0;
 
     DocumentStyle {
         body_font_ascii,
@@ -122,7 +121,11 @@ pub fn extract_document_style(paged: &PagedDocument) -> DocumentStyle {
         heading_sizes,
         body_alignment: detect_justification(paged),
         lang_latin: "en-US".to_string(),
-        lang_east_asia: if has_cjk { "zh-CN".to_string() } else { "en-US".to_string() },
+        lang_east_asia: if has_cjk {
+            "zh-CN".to_string()
+        } else {
+            "en-US".to_string()
+        },
         has_cjk_content: has_cjk,
         hyperlink_color: "0563C1".to_string(),
         body_cap_height_ratio,
@@ -156,7 +159,8 @@ fn detect_first_line_indent(paged: &PagedDocument, body_pt: f64) -> u32 {
 
     // Group by y (lines), find the left-most x per line
     let page_width = page.frame.width().to_pt();
-    let (body_top, body_bottom) = find_body_zone(page_width, page.frame.height().to_pt(), None, None);
+    let (body_top, body_bottom) =
+        find_body_zone(page_width, page.frame.height().to_pt(), None, None);
 
     let body_frags: Vec<&TextFragment> = fragments
         .iter()
@@ -722,10 +726,7 @@ fn collect_import_paths(node: &typst_syntax::SyntaxNode, paths: &mut Vec<String>
     }
 }
 
-fn collect_set_rules(
-    node: &typst_syntax::SyntaxNode,
-    ovr: &mut SourceStyleOverrides,
-) {
+fn collect_set_rules(node: &typst_syntax::SyntaxNode, ovr: &mut SourceStyleOverrides) {
     use typst_syntax::SyntaxKind;
 
     // Skip SetRule nodes inside ShowRule — those apply to specific elements,
@@ -756,10 +757,7 @@ fn collect_set_rules(
     }
 }
 
-fn parse_page_args(
-    args: typst_syntax::ast::Args<'_>,
-    ovr: &mut SourceStyleOverrides,
-) {
+fn parse_page_args(args: typst_syntax::ast::Args<'_>, ovr: &mut SourceStyleOverrides) {
     for arg in args.items() {
         let typst_syntax::ast::Arg::Named(named) = arg else {
             continue;
@@ -781,10 +779,7 @@ fn parse_page_args(
     }
 }
 
-fn parse_margin_value(
-    expr: typst_syntax::ast::Expr<'_>,
-    ovr: &mut SourceStyleOverrides,
-) {
+fn parse_margin_value(expr: typst_syntax::ast::Expr<'_>, ovr: &mut SourceStyleOverrides) {
     match expr {
         typst_syntax::ast::Expr::Numeric(n) => {
             let twips = numeric_to_twips(n);
@@ -841,40 +836,44 @@ fn parse_margin_value(
                 ovr.margin_top = Some(v);
                 ovr.margin_bottom = Some(v);
             }
-            if let Some(v) = top { ovr.margin_top = Some(v); }
-            if let Some(v) = bottom { ovr.margin_bottom = Some(v); }
-            if let Some(v) = left { ovr.margin_left = Some(v); }
-            if let Some(v) = right { ovr.margin_right = Some(v); }
+            if let Some(v) = top {
+                ovr.margin_top = Some(v);
+            }
+            if let Some(v) = bottom {
+                ovr.margin_bottom = Some(v);
+            }
+            if let Some(v) = left {
+                ovr.margin_left = Some(v);
+            }
+            if let Some(v) = right {
+                ovr.margin_right = Some(v);
+            }
         }
         _ => {}
     }
 }
 
-fn parse_text_args(
-    args: typst_syntax::ast::Args<'_>,
-    ovr: &mut SourceStyleOverrides,
-) {
+fn parse_text_args(args: typst_syntax::ast::Args<'_>, ovr: &mut SourceStyleOverrides) {
     for arg in args.items() {
         match arg {
-            typst_syntax::ast::Arg::Named(named) => {
-                match named.name().as_str() {
-                    "font" => {
-                        if ovr.text_font.is_none() {
-                            ovr.text_font = extract_font_list(named.expr());
+            typst_syntax::ast::Arg::Named(named) => match named.name().as_str() {
+                "font" => {
+                    if ovr.text_font.is_none() {
+                        ovr.text_font = extract_font_list(named.expr());
+                    }
+                }
+                "size" => {
+                    if ovr.text_size_half_pt.is_none()
+                        && let typst_syntax::ast::Expr::Numeric(n) = named.expr()
+                    {
+                        let half_pt = numeric_to_half_pt(n);
+                        if half_pt > 0 {
+                            ovr.text_size_half_pt = Some(half_pt);
                         }
                     }
-                    "size" => {
-                        if ovr.text_size_half_pt.is_none()
-                            && let typst_syntax::ast::Expr::Numeric(n) = named.expr() {
-                                let half_pt = numeric_to_half_pt(n);
-                                if half_pt > 0 {
-                                    ovr.text_size_half_pt = Some(half_pt);
-                                }
-                            }
-                    }
-                    _ => {}
                 }
-            }
+                _ => {}
+            },
             typst_syntax::ast::Arg::Pos(typst_syntax::ast::Expr::Numeric(n)) => {
                 let half_pt = numeric_to_half_pt(n);
                 if half_pt > 0 {
@@ -886,53 +885,57 @@ fn parse_text_args(
     }
 }
 
-fn parse_par_args(
-    args: typst_syntax::ast::Args<'_>,
-    ovr: &mut SourceStyleOverrides,
-) {
+fn parse_par_args(args: typst_syntax::ast::Args<'_>, ovr: &mut SourceStyleOverrides) {
     for arg in args.items() {
         let typst_syntax::ast::Arg::Named(named) = arg else {
             continue;
         };
         match named.name().as_str() {
             "first-line-indent" => {
-                if ovr.first_line_indent_twips.is_none() && ovr.first_line_indent_em.is_none()
-                    && let typst_syntax::ast::Expr::Numeric(n) = named.expr() {
-                        let (value, unit) = n.get();
-                        if unit == typst_syntax::ast::Unit::Em {
-                            ovr.first_line_indent_em = Some(value);
-                        } else {
-                            ovr.first_line_indent_twips = Some(numeric_to_twips(n));
-                        }
+                if ovr.first_line_indent_twips.is_none()
+                    && ovr.first_line_indent_em.is_none()
+                    && let typst_syntax::ast::Expr::Numeric(n) = named.expr()
+                {
+                    let (value, unit) = n.get();
+                    if unit == typst_syntax::ast::Unit::Em {
+                        ovr.first_line_indent_em = Some(value);
+                    } else {
+                        ovr.first_line_indent_twips = Some(numeric_to_twips(n));
                     }
+                }
             }
             "leading" => {
-                if ovr.par_leading_twips.is_none() && ovr.par_leading_em.is_none()
-                    && let typst_syntax::ast::Expr::Numeric(n) = named.expr() {
-                        let (value, unit) = n.get();
-                        if unit == typst_syntax::ast::Unit::Em {
-                            ovr.par_leading_em = Some(value);
-                        } else {
-                            ovr.par_leading_twips = Some(numeric_to_twips(n));
-                        }
+                if ovr.par_leading_twips.is_none()
+                    && ovr.par_leading_em.is_none()
+                    && let typst_syntax::ast::Expr::Numeric(n) = named.expr()
+                {
+                    let (value, unit) = n.get();
+                    if unit == typst_syntax::ast::Unit::Em {
+                        ovr.par_leading_em = Some(value);
+                    } else {
+                        ovr.par_leading_twips = Some(numeric_to_twips(n));
                     }
+                }
             }
             "spacing" => {
-                if ovr.par_spacing_twips.is_none() && ovr.par_spacing_em.is_none()
-                    && let typst_syntax::ast::Expr::Numeric(n) = named.expr() {
-                        let (value, unit) = n.get();
-                        if unit == typst_syntax::ast::Unit::Em {
-                            ovr.par_spacing_em = Some(value);
-                        } else {
-                            ovr.par_spacing_twips = Some(numeric_to_twips(n));
-                        }
+                if ovr.par_spacing_twips.is_none()
+                    && ovr.par_spacing_em.is_none()
+                    && let typst_syntax::ast::Expr::Numeric(n) = named.expr()
+                {
+                    let (value, unit) = n.get();
+                    if unit == typst_syntax::ast::Unit::Em {
+                        ovr.par_spacing_em = Some(value);
+                    } else {
+                        ovr.par_spacing_twips = Some(numeric_to_twips(n));
                     }
+                }
             }
             "justify" => {
                 if ovr.justify.is_none()
-                    && let typst_syntax::ast::Expr::Bool(b) = named.expr() {
-                        ovr.justify = Some(b.get());
-                    }
+                    && let typst_syntax::ast::Expr::Bool(b) = named.expr()
+                {
+                    ovr.justify = Some(b.get());
+                }
             }
             _ => {}
         }
@@ -946,7 +949,8 @@ fn extract_font_list(expr: typst_syntax::ast::Expr<'_>) -> Option<Vec<String>> {
             let fonts: Vec<String> = arr
                 .items()
                 .filter_map(|item| {
-                    if let typst_syntax::ast::ArrayItem::Pos(typst_syntax::ast::Expr::Str(s)) = item {
+                    if let typst_syntax::ast::ArrayItem::Pos(typst_syntax::ast::Expr::Str(s)) = item
+                    {
                         Some(s.get().to_string())
                     } else {
                         None
@@ -1074,7 +1078,8 @@ pub fn apply_section_breaks(
         // (1-based) — i.e., the element just before the new section begins.
         let target_page = section.start_page; // 0-based → 1-based = start_page itself
 
-        let approx_idx = if !element_page_map.is_empty() && element_page_map.len() == total_elements {
+        let approx_idx = if !element_page_map.is_empty() && element_page_map.len() == total_elements
+        {
             // Use the introspector-based mapping: find the last element
             // whose page number is < start_page+1 (i.e., on a page before
             // the new section).
@@ -1086,9 +1091,9 @@ pub fn apply_section_breaks(
                 .map_or(0, |(idx, _)| idx)
         } else {
             // Fallback: proportional mapping (legacy behaviour)
-            let total_pages = element_page_map.len().max(
-                sections.last().map_or(1, |s| s.start_page + 1),
-            );
+            let total_pages = element_page_map
+                .len()
+                .max(sections.last().map_or(1, |s| s.start_page + 1));
             section.start_page * total_elements / total_pages.max(1)
         };
 
@@ -1665,7 +1670,10 @@ fn detect_rendered_body_style(styles: &[PagedRunStyle]) -> (String, String, u32)
         *size_counts.entry(half_pt).or_insert(0) += item.text.len();
 
         let has_cjk = item.text.chars().any(is_cjk_char);
-        let has_ascii = item.text.chars().any(|c| c.is_ascii_alphabetic() || c.is_ascii_digit());
+        let has_ascii = item
+            .text
+            .chars()
+            .any(|c| c.is_ascii_alphabetic() || c.is_ascii_digit());
         if has_cjk {
             *cjk_font_counts.entry(&item.font_family).or_insert(0) += item.text.len();
         }
@@ -1718,10 +1726,7 @@ struct RunStyleOverride {
 /// Apply all per-run styles (color, font, size, bold, italic) and paragraph
 /// alignment from the `PagedDocument` to the document model in a single pass.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-pub fn apply_styles_from_paged(
-    paged: &PagedDocument,
-    doc: &mut typort_ooxml::document::Document,
-) {
+pub fn apply_styles_from_paged(paged: &PagedDocument, doc: &mut typort_ooxml::document::Document) {
     let paged_styles = collect_paged_run_styles(paged);
     if paged_styles.is_empty() {
         return;
@@ -1759,11 +1764,7 @@ pub fn apply_styles_from_paged(
     );
 
     // Apply run-level overrides to body elements
-    apply_overrides_to_elements(
-        &mut doc.body.elements,
-        &span_overrides,
-        &text_overrides,
-    );
+    apply_overrides_to_elements(&mut doc.body.elements, &span_overrides, &text_overrides);
 
     // Apply run-level overrides to footnotes
     for footnote in &mut doc.footnotes {
@@ -1952,11 +1953,7 @@ fn apply_overrides_to_elements(
                 for row in &mut t.rows {
                     for cell in &mut row.cells {
                         for para in &mut cell.paragraphs {
-                            apply_overrides_to_paragraph(
-                                para,
-                                span_overrides,
-                                text_overrides,
-                            );
+                            apply_overrides_to_paragraph(para, span_overrides, text_overrides);
                         }
                     }
                 }
@@ -1982,9 +1979,7 @@ fn apply_overrides_to_paragraph(
         match inline {
             typort_ooxml::document::InlineElement::Text(run) => {
                 let is_ambiguous = run.span.is_none()
-                    && text_overrides
-                        .get(&run.text)
-                        .is_some_and(|e| e.len() > 1);
+                    && text_overrides.get(&run.text).is_some_and(|e| e.len() > 1);
                 if is_ambiguous {
                     has_ambiguous = true;
                 } else {
@@ -2017,16 +2012,9 @@ fn apply_overrides_to_paragraph(
         for inline in &mut para.inlines {
             if let typort_ooxml::document::InlineElement::Text(run) = inline {
                 let is_ambiguous = run.span.is_none()
-                    && text_overrides
-                        .get(&run.text)
-                        .is_some_and(|e| e.len() > 1);
+                    && text_overrides.get(&run.text).is_some_and(|e| e.len() > 1);
                 if is_ambiguous {
-                    apply_override_to_run(
-                        run,
-                        span_overrides,
-                        text_overrides,
-                        sibling_size,
-                    );
+                    apply_override_to_run(run, span_overrides, text_overrides, sibling_size);
                 }
             }
         }
@@ -2229,7 +2217,10 @@ mod tests {
         let source = r#"#set text(font: "Linux Libertine", size: 10.5pt)"#;
         let ovr = extract_source_style_overrides(source);
         assert_eq!(ovr.text_size_half_pt, Some(21));
-        assert_eq!(ovr.text_font.as_deref(), Some(&["Linux Libertine".to_string()][..]));
+        assert_eq!(
+            ovr.text_font.as_deref(),
+            Some(&["Linux Libertine".to_string()][..])
+        );
     }
 
     #[test]
@@ -2262,9 +2253,6 @@ mod tests {
             ovr.first_line_indent_em.unwrap() > 0.0,
             "first-line-indent should be > 0"
         );
-        assert!(
-            ovr.par_leading_em.is_some(),
-            "leading should be detected"
-        );
+        assert!(ovr.par_leading_em.is_some(), "leading should be detected");
     }
 }

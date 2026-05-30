@@ -337,7 +337,9 @@ mod tests {
     #[test]
     fn footnote_ref_decimal_emits_footnote_reference() {
         let mut doc = Document::new();
-        let fn_id = doc.add_footnote(vec![document::InlineElement::Text(document::Run::new("note text"))]);
+        let fn_id = doc.add_footnote(vec![document::InlineElement::Text(document::Run::new(
+            "note text",
+        ))]);
         let mut para = document::Paragraph::new();
         para.add_run("See");
         para.add_footnote_ref(fn_id);
@@ -360,7 +362,9 @@ mod tests {
     fn footnote_ref_circled_emits_custom_mark_follows() {
         let mut doc = Document::new();
         doc.style.footnote_format = FootnoteFormat::CircledNumber;
-        let fn_id = doc.add_footnote(vec![document::InlineElement::Text(document::Run::new("circled note"))]);
+        let fn_id = doc.add_footnote(vec![document::InlineElement::Text(document::Run::new(
+            "circled note",
+        ))]);
         let mut para = document::Paragraph::new();
         para.add_footnote_ref(fn_id);
         doc.add_paragraph(para);
@@ -383,7 +387,9 @@ mod tests {
     #[test]
     fn footnotes_xml_contains_footnote_text_and_ref() {
         let mut doc = Document::new();
-        doc.add_footnote(vec![document::InlineElement::Text(document::Run::new("This is a footnote."))]);
+        doc.add_footnote(vec![document::InlineElement::Text(document::Run::new(
+            "This is a footnote.",
+        ))]);
         // Need at least one paragraph referencing it so the doc is valid,
         // but footnotes.xml is generated from doc.footnotes regardless.
         let mut para = document::Paragraph::new();
@@ -510,7 +516,9 @@ mod tests {
     #[test]
     fn styles_xml_has_footnote_styles_when_footnotes_present() {
         let mut doc = Document::new();
-        doc.add_footnote(vec![document::InlineElement::Text(document::Run::new("fn"))]);
+        doc.add_footnote(vec![document::InlineElement::Text(document::Run::new(
+            "fn",
+        ))]);
         let mut para = document::Paragraph::new();
         para.add_footnote_ref(2);
         doc.add_paragraph(para);
@@ -1285,7 +1293,10 @@ mod tests {
             book_title: None,
         });
         assert_eq!(doc.citation_sources.len(), 1);
-        assert_eq!(doc.citation_sources[0].source_type.as_ooxml_str(), "JournalArticle");
+        assert_eq!(
+            doc.citation_sources[0].source_type.as_ooxml_str(),
+            "JournalArticle"
+        );
     }
 
     // ── 44. Paragraph add citation ─────────────────────────────────────
@@ -1315,9 +1326,18 @@ mod tests {
         let buf = build_docx(&doc);
         let xml = read_zip_entry(&buf, "word/document.xml");
         assert!(xml.contains("w:sdt"), "expected SDT wrapper in: {xml}");
-        assert!(xml.contains("w:citation"), "expected w:citation marker in: {xml}");
-        assert!(xml.contains("CITATION Smi20"), "expected CITATION field code in: {xml}");
-        assert!(xml.contains("(Smith, 2020)"), "expected display text in: {xml}");
+        assert!(
+            xml.contains("w:citation"),
+            "expected w:citation marker in: {xml}"
+        );
+        assert!(
+            xml.contains("CITATION Smi20"),
+            "expected CITATION field code in: {xml}"
+        );
+        assert!(
+            xml.contains("(Smith, 2020)"),
+            "expected display text in: {xml}"
+        );
     }
 
     #[test]
@@ -1370,16 +1390,40 @@ mod tests {
         doc.add_paragraph(para);
 
         let buf = build_docx(&doc);
-        assert!(zip_has_entry(&buf, "customXml/item1.xml"), "expected customXml/item1.xml");
+        assert!(
+            zip_has_entry(&buf, "customXml/item1.xml"),
+            "expected customXml/item1.xml"
+        );
         let xml = read_zip_entry(&buf, "customXml/item1.xml");
         assert!(xml.contains("b:Sources"), "expected b:Sources root: {xml}");
-        assert!(xml.contains("<b:Tag>Smi20</b:Tag>"), "expected b:Tag: {xml}");
-        assert!(xml.contains("<b:SourceType>JournalArticle</b:SourceType>"), "expected source type: {xml}");
-        assert!(xml.contains("<b:Last>Smith</b:Last>"), "expected author last: {xml}");
-        assert!(xml.contains("<b:First>John</b:First>"), "expected author first: {xml}");
-        assert!(xml.contains("<b:Title>Example Article</b:Title>"), "expected title: {xml}");
-        assert!(xml.contains("<b:Year>2020</b:Year>"), "expected year: {xml}");
-        assert!(xml.contains("<b:JournalName>Journal of Examples</b:JournalName>"), "expected journal: {xml}");
+        assert!(
+            xml.contains("<b:Tag>Smi20</b:Tag>"),
+            "expected b:Tag: {xml}"
+        );
+        assert!(
+            xml.contains("<b:SourceType>JournalArticle</b:SourceType>"),
+            "expected source type: {xml}"
+        );
+        assert!(
+            xml.contains("<b:Last>Smith</b:Last>"),
+            "expected author last: {xml}"
+        );
+        assert!(
+            xml.contains("<b:First>John</b:First>"),
+            "expected author first: {xml}"
+        );
+        assert!(
+            xml.contains("<b:Title>Example Article</b:Title>"),
+            "expected title: {xml}"
+        );
+        assert!(
+            xml.contains("<b:Year>2020</b:Year>"),
+            "expected year: {xml}"
+        );
+        assert!(
+            xml.contains("<b:JournalName>Journal of Examples</b:JournalName>"),
+            "expected journal: {xml}"
+        );
     }
 
     #[test]
@@ -1391,9 +1435,17 @@ mod tests {
             source_type: SourceType::Misc,
             authors: vec![],
             title: Some("Test".into()),
-            year: None, journal_name: None, volume: None, issue: None,
-            pages: None, doi: None, url: None, publisher: None,
-            city: None, edition: None, book_title: None,
+            year: None,
+            journal_name: None,
+            volume: None,
+            issue: None,
+            pages: None,
+            doi: None,
+            url: None,
+            publisher: None,
+            city: None,
+            edition: None,
+            book_title: None,
         });
         let mut para = document::Paragraph::new();
         para.add_citation(vec!["Test1".into()], "[1]".into());
@@ -1405,16 +1457,28 @@ mod tests {
         assert!(zip_has_entry(&buf, "customXml/_rels/item1.xml.rels"));
 
         let props = read_zip_entry(&buf, "customXml/itemProps1.xml");
-        assert!(props.contains("ds:datastoreItem"), "expected datastoreItem: {props}");
+        assert!(
+            props.contains("ds:datastoreItem"),
+            "expected datastoreItem: {props}"
+        );
 
         let rels = read_zip_entry(&buf, "customXml/_rels/item1.xml.rels");
-        assert!(rels.contains("customXmlProps"), "expected customXmlProps rel: {rels}");
+        assert!(
+            rels.contains("customXmlProps"),
+            "expected customXmlProps rel: {rels}"
+        );
 
         let ct = read_zip_entry(&buf, "[Content_Types].xml");
-        assert!(ct.contains("customXmlProperties"), "expected content type override: {ct}");
+        assert!(
+            ct.contains("customXmlProperties"),
+            "expected content type override: {ct}"
+        );
 
         let doc_rels = read_zip_entry(&buf, "word/_rels/document.xml.rels");
-        assert!(doc_rels.contains("customXml"), "expected customXml relationship: {doc_rels}");
+        assert!(
+            doc_rels.contains("customXml"),
+            "expected customXml relationship: {doc_rels}"
+        );
     }
 
     #[test]
@@ -1432,15 +1496,26 @@ mod tests {
         let mut bib_para = document::Paragraph::new();
         bib_para.add_run("Smith, J. (2020). Example. Journal, 42(3), 100-115.");
         bib_para.hanging_indent = true;
-        doc.body.elements.push(document::BlockElement::BibliographyBlock {
-            paragraphs: vec![bib_para],
-        });
+        doc.body
+            .elements
+            .push(document::BlockElement::BibliographyBlock {
+                paragraphs: vec![bib_para],
+            });
 
         let buf = build_docx(&doc);
         let xml = read_zip_entry(&buf, "word/document.xml");
-        assert!(xml.contains("w:bibliography"), "expected w:bibliography SDT marker: {xml}");
-        assert!(xml.contains("BIBLIOGRAPHY"), "expected BIBLIOGRAPHY field code: {xml}");
-        assert!(xml.contains("Smith, J."), "expected cached bibliography text: {xml}");
+        assert!(
+            xml.contains("w:bibliography"),
+            "expected w:bibliography SDT marker: {xml}"
+        );
+        assert!(
+            xml.contains("BIBLIOGRAPHY"),
+            "expected BIBLIOGRAPHY field code: {xml}"
+        );
+        assert!(
+            xml.contains("Smith, J."),
+            "expected cached bibliography text: {xml}"
+        );
     }
 
     // ── OOXML spec compliance tests ────────────────────────────────────
@@ -1459,9 +1534,17 @@ mod tests {
             source_type: SourceType::Misc,
             authors: vec![],
             title: Some("Test".into()),
-            year: None, journal_name: None, volume: None, issue: None,
-            pages: None, doi: None, url: None, publisher: None,
-            city: None, edition: None, book_title: None,
+            year: None,
+            journal_name: None,
+            volume: None,
+            issue: None,
+            pages: None,
+            doi: None,
+            url: None,
+            publisher: None,
+            city: None,
+            edition: None,
+            book_title: None,
         });
         let mut para = document::Paragraph::new();
         para.add_citation(vec!["Test1".into()], "[1]".into());
@@ -1470,7 +1553,10 @@ mod tests {
         let buf = build_docx(&doc);
         let xml = read_zip_entry(&buf, "customXml/item1.xml");
         assert!(xml.contains("<b:Guid>"), "expected b:Guid element: {xml}");
-        assert!(xml.contains("<b:Guid>{"), "expected GUID format with braces: {xml}");
+        assert!(
+            xml.contains("<b:Guid>{"),
+            "expected GUID format with braces: {xml}"
+        );
     }
 
     #[test]
@@ -1481,13 +1567,18 @@ mod tests {
         doc.add_paragraph(p1);
         let mut bib_para = document::Paragraph::new();
         bib_para.add_run("Smith (2020).");
-        doc.body.elements.push(document::BlockElement::BibliographyBlock {
-            paragraphs: vec![bib_para],
-        });
+        doc.body
+            .elements
+            .push(document::BlockElement::BibliographyBlock {
+                paragraphs: vec![bib_para],
+            });
 
         let buf = build_docx(&doc);
         let xml = read_zip_entry(&buf, "word/document.xml");
-        assert!(!xml.contains("111145805"), "SDT ID should not be hardcoded: {xml}");
+        assert!(
+            !xml.contains("111145805"),
+            "SDT ID should not be hardcoded: {xml}"
+        );
     }
 
     #[test]
@@ -1495,15 +1586,26 @@ mod tests {
         let mut doc = Document::new();
         let mut bib_para = document::Paragraph::new();
         bib_para.add_run("Reference entry.");
-        doc.body.elements.push(document::BlockElement::BibliographyBlock {
-            paragraphs: vec![bib_para],
-        });
+        doc.body
+            .elements
+            .push(document::BlockElement::BibliographyBlock {
+                paragraphs: vec![bib_para],
+            });
 
         let buf = build_docx(&doc);
         let xml = read_zip_entry(&buf, "word/document.xml");
-        assert!(xml.contains("w:docPartGallery"), "expected docPartGallery: {xml}");
-        assert!(xml.contains("Bibliographies"), "expected Bibliographies value: {xml}");
-        assert!(xml.contains("w:docPartUnique"), "expected docPartUnique: {xml}");
+        assert!(
+            xml.contains("w:docPartGallery"),
+            "expected docPartGallery: {xml}"
+        );
+        assert!(
+            xml.contains("Bibliographies"),
+            "expected Bibliographies value: {xml}"
+        );
+        assert!(
+            xml.contains("w:docPartUnique"),
+            "expected docPartUnique: {xml}"
+        );
     }
 
     #[test]
@@ -1514,9 +1616,18 @@ mod tests {
             tag: "A".into(),
             source_type: SourceType::Misc,
             authors: vec![],
-            title: None, year: None, journal_name: None, volume: None,
-            issue: None, pages: None, doi: None, url: None,
-            publisher: None, city: None, edition: None, book_title: None,
+            title: None,
+            year: None,
+            journal_name: None,
+            volume: None,
+            issue: None,
+            pages: None,
+            doi: None,
+            url: None,
+            publisher: None,
+            city: None,
+            edition: None,
+            book_title: None,
         });
         let mut para = document::Paragraph::new();
         para.add_citation(vec!["A".into()], "[1]".into());
@@ -1524,7 +1635,10 @@ mod tests {
 
         let buf = build_docx(&doc);
         let xml = read_zip_entry(&buf, "customXml/itemProps1.xml");
-        assert!(!xml.contains("C5A3B2D1"), "itemProps should not use hardcoded UUID: {xml}");
+        assert!(
+            !xml.contains("C5A3B2D1"),
+            "itemProps should not use hardcoded UUID: {xml}"
+        );
         assert!(xml.contains("ds:itemID=\"{"), "expected GUID format: {xml}");
     }
 }

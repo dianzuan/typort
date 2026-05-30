@@ -118,10 +118,14 @@ pub fn write_docx<W: Write + Seek>(
     // Custom XML bibliography data source
     if parts.bibliography {
         zip.start_file("customXml/item1.xml", options)?;
-        zip.write_all(&xml_part(|w| generate_custom_xml_sources(w, &doc.citation_sources))?)?;
+        zip.write_all(&xml_part(|w| {
+            generate_custom_xml_sources(w, &doc.citation_sources)
+        })?)?;
 
         zip.start_file("customXml/itemProps1.xml", options)?;
-        zip.write_all(&xml_part(|w| generate_custom_xml_item_props(w, &doc.citation_sources))?)?;
+        zip.write_all(&xml_part(|w| {
+            generate_custom_xml_item_props(w, &doc.citation_sources)
+        })?)?;
 
         zip.start_file("customXml/_rels/item1.xml.rels", options)?;
         zip.write_all(&xml_part(generate_custom_xml_rels)?)?;
@@ -720,10 +724,7 @@ fn write_section_properties<W: Write>(
 }
 
 /// Write `w:footnotePr` element with optional circled-number format and per-page restart.
-fn write_footnote_pr<W: Write>(
-    writer: &mut Writer<W>,
-    format: &FootnoteFormat,
-) -> io::Result<()> {
+fn write_footnote_pr<W: Write>(writer: &mut Writer<W>, format: &FootnoteFormat) -> io::Result<()> {
     writer
         .create_element("w:footnotePr")
         .write_inner_content(|fp| {
@@ -1647,60 +1648,58 @@ fn write_citation_sdt<W: Write>(
     sdt_id: u32,
     locale_id: u32,
 ) -> io::Result<()> {
-    writer
-        .create_element("w:sdt")
-        .write_inner_content(|sdt| {
-            // SDT properties
-            let id_str = sdt_id.to_string();
-            sdt.create_element("w:sdtPr").write_inner_content(|pr| {
-                pr.create_element("w:id")
-                    .with_attribute(("w:val", id_str.as_str()))
-                    .write_empty()?;
-                pr.create_element("w:citation").write_empty()?;
-                Ok(())
-            })?;
-            // SDT content: field code sequence
-            sdt.create_element("w:sdtContent")
-                .write_inner_content(|content| {
-                    // fldChar begin
-                    write_fld_char(content, "begin")?;
-                    // instrText: CITATION key1 \l <locale> [\m key2 \m key3 ...]
-                    let mut instr = String::new();
-                    instr.push_str(" CITATION ");
-                    if let Some(first) = keys.first() {
-                        instr.push_str(first);
-                    }
-                    let _ = write!(instr, r" \l {locale_id}");
-                    for key in keys.iter().skip(1) {
-                        instr.push_str(r" \m ");
-                        instr.push_str(key);
-                    }
-                    instr.push(' ');
-                    content.create_element("w:r").write_inner_content(|w| {
-                        w.create_element("w:instrText")
-                            .with_attribute(("xml:space", "preserve"))
-                            .write_text_content(BytesText::new(&instr))?;
-                        Ok(())
-                    })?;
-                    // fldChar separate
-                    write_fld_char(content, "separate")?;
-                    // Display text with noProof
-                    content.create_element("w:r").write_inner_content(|w| {
-                        w.create_element("w:rPr").write_inner_content(|rpr| {
-                            rpr.create_element("w:noProof").write_empty()?;
-                            Ok(())
-                        })?;
-                        w.create_element("w:t")
-                            .with_attribute(("xml:space", "preserve"))
-                            .write_text_content(BytesText::new(display_text))?;
-                        Ok(())
-                    })?;
-                    // fldChar end
-                    write_fld_char(content, "end")?;
-                    Ok(())
-                })?;
+    writer.create_element("w:sdt").write_inner_content(|sdt| {
+        // SDT properties
+        let id_str = sdt_id.to_string();
+        sdt.create_element("w:sdtPr").write_inner_content(|pr| {
+            pr.create_element("w:id")
+                .with_attribute(("w:val", id_str.as_str()))
+                .write_empty()?;
+            pr.create_element("w:citation").write_empty()?;
             Ok(())
         })?;
+        // SDT content: field code sequence
+        sdt.create_element("w:sdtContent")
+            .write_inner_content(|content| {
+                // fldChar begin
+                write_fld_char(content, "begin")?;
+                // instrText: CITATION key1 \l <locale> [\m key2 \m key3 ...]
+                let mut instr = String::new();
+                instr.push_str(" CITATION ");
+                if let Some(first) = keys.first() {
+                    instr.push_str(first);
+                }
+                let _ = write!(instr, r" \l {locale_id}");
+                for key in keys.iter().skip(1) {
+                    instr.push_str(r" \m ");
+                    instr.push_str(key);
+                }
+                instr.push(' ');
+                content.create_element("w:r").write_inner_content(|w| {
+                    w.create_element("w:instrText")
+                        .with_attribute(("xml:space", "preserve"))
+                        .write_text_content(BytesText::new(&instr))?;
+                    Ok(())
+                })?;
+                // fldChar separate
+                write_fld_char(content, "separate")?;
+                // Display text with noProof
+                content.create_element("w:r").write_inner_content(|w| {
+                    w.create_element("w:rPr").write_inner_content(|rpr| {
+                        rpr.create_element("w:noProof").write_empty()?;
+                        Ok(())
+                    })?;
+                    w.create_element("w:t")
+                        .with_attribute(("xml:space", "preserve"))
+                        .write_text_content(BytesText::new(display_text))?;
+                    Ok(())
+                })?;
+                // fldChar end
+                write_fld_char(content, "end")?;
+                Ok(())
+            })?;
+        Ok(())
+    })?;
     Ok(())
 }
 
@@ -1734,74 +1733,71 @@ fn write_bibliography_sdt<W: Write>(
     image_counter: &std::cell::Cell<usize>,
     citation_id_counter: &std::cell::Cell<u32>,
 ) -> io::Result<()> {
-    writer
-        .create_element("w:sdt")
-        .write_inner_content(|sdt| {
-            // SDT properties with bibliography marker
-            sdt.create_element("w:sdtPr").write_inner_content(|pr| {
-                let sdt_id = citation_id_counter.get();
-                citation_id_counter.set(sdt_id + 1);
-                let id_str = sdt_id.to_string();
-                pr.create_element("w:id")
-                    .with_attribute(("w:val", id_str.as_str()))
-                    .write_empty()?;
-                pr.create_element("w:docPartObj")
-                    .write_inner_content(|dpo| {
-                        dpo.create_element("w:docPartGallery")
-                            .with_attribute(("w:val", "Bibliographies"))
-                            .write_empty()?;
-                        dpo.create_element("w:docPartUnique")
-                            .write_empty()?;
-                        Ok(())
-                    })?;
-                pr.create_element("w:bibliography").write_empty()?;
-                Ok(())
-            })?;
-            // SDT content
-            sdt.create_element("w:sdtContent")
-                .write_inner_content(|content| {
-                    // Opening paragraph with Bibliography style + field begin + instrText + field separate
-                    content.create_element("w:p").write_inner_content(|pw| {
-                        pw.create_element("w:pPr").write_inner_content(|ppr| {
-                            ppr.create_element("w:pStyle")
-                                .with_attribute(("w:val", "Bibliography"))
-                                .write_empty()?;
-                            Ok(())
-                        })?;
-                        // fldChar begin
-                        write_fld_char(pw, "begin")?;
-                        // instrText
-                        pw.create_element("w:r").write_inner_content(|w| {
-                            w.create_element("w:instrText")
-                                .with_attribute(("xml:space", "preserve"))
-                                .write_text_content(BytesText::new(" BIBLIOGRAPHY "))?;
-                            Ok(())
-                        })?;
-                        // fldChar separate
-                        write_fld_char(pw, "separate")?;
-                        Ok(())
-                    })?;
-                    // Cached bibliography paragraphs
-                    for para in paragraphs {
-                        write_paragraph(
-                            content,
-                            para,
-                            fn_format,
-                            doc_style,
-                            parts,
-                            image_counter,
-                            citation_id_counter,
-                        )?;
-                    }
-                    // Closing paragraph with field end
-                    content.create_element("w:p").write_inner_content(|pw| {
-                        write_fld_char(pw, "end")?;
-                        Ok(())
-                    })?;
+    writer.create_element("w:sdt").write_inner_content(|sdt| {
+        // SDT properties with bibliography marker
+        sdt.create_element("w:sdtPr").write_inner_content(|pr| {
+            let sdt_id = citation_id_counter.get();
+            citation_id_counter.set(sdt_id + 1);
+            let id_str = sdt_id.to_string();
+            pr.create_element("w:id")
+                .with_attribute(("w:val", id_str.as_str()))
+                .write_empty()?;
+            pr.create_element("w:docPartObj")
+                .write_inner_content(|dpo| {
+                    dpo.create_element("w:docPartGallery")
+                        .with_attribute(("w:val", "Bibliographies"))
+                        .write_empty()?;
+                    dpo.create_element("w:docPartUnique").write_empty()?;
                     Ok(())
                 })?;
+            pr.create_element("w:bibliography").write_empty()?;
             Ok(())
         })?;
+        // SDT content
+        sdt.create_element("w:sdtContent")
+            .write_inner_content(|content| {
+                // Opening paragraph with Bibliography style + field begin + instrText + field separate
+                content.create_element("w:p").write_inner_content(|pw| {
+                    pw.create_element("w:pPr").write_inner_content(|ppr| {
+                        ppr.create_element("w:pStyle")
+                            .with_attribute(("w:val", "Bibliography"))
+                            .write_empty()?;
+                        Ok(())
+                    })?;
+                    // fldChar begin
+                    write_fld_char(pw, "begin")?;
+                    // instrText
+                    pw.create_element("w:r").write_inner_content(|w| {
+                        w.create_element("w:instrText")
+                            .with_attribute(("xml:space", "preserve"))
+                            .write_text_content(BytesText::new(" BIBLIOGRAPHY "))?;
+                        Ok(())
+                    })?;
+                    // fldChar separate
+                    write_fld_char(pw, "separate")?;
+                    Ok(())
+                })?;
+                // Cached bibliography paragraphs
+                for para in paragraphs {
+                    write_paragraph(
+                        content,
+                        para,
+                        fn_format,
+                        doc_style,
+                        parts,
+                        image_counter,
+                        citation_id_counter,
+                    )?;
+                }
+                // Closing paragraph with field end
+                content.create_element("w:p").write_inner_content(|pw| {
+                    write_fld_char(pw, "end")?;
+                    Ok(())
+                })?;
+                Ok(())
+            })?;
+        Ok(())
+    })?;
     Ok(())
 }
 
@@ -2288,8 +2284,16 @@ fn write_bibliography_authors(
                                 nl.create_element("b:Person").write_inner_content(|p| {
                                     p.create_element("b:Last")
                                         .write_text_content(BytesText::new(&person.last))?;
-                                    write_optional_bib_field(p, "b:First", person.first.as_deref())?;
-                                    write_optional_bib_field(p, "b:Middle", person.middle.as_deref())?;
+                                    write_optional_bib_field(
+                                        p,
+                                        "b:First",
+                                        person.first.as_deref(),
+                                    )?;
+                                    write_optional_bib_field(
+                                        p,
+                                        "b:Middle",
+                                        person.middle.as_deref(),
+                                    )?;
                                     Ok(())
                                 })?;
                             }
@@ -2322,7 +2326,11 @@ fn generate_custom_xml_item_props(
     sources: &[crate::document::CitationSource],
 ) -> io::Result<()> {
     let guid = tag_to_guid(
-        &sources.iter().map(|s| s.tag.as_str()).collect::<Vec<_>>().join(","),
+        &sources
+            .iter()
+            .map(|s| s.tag.as_str())
+            .collect::<Vec<_>>()
+            .join(","),
     );
     writer
         .create_element("ds:datastoreItem")
@@ -2332,15 +2340,16 @@ fn generate_custom_xml_item_props(
             "http://schemas.openxmlformats.org/officeDocument/2006/customXml",
         ))
         .write_inner_content(|w| {
-            w.create_element("ds:schemaRefs").write_inner_content(|sr| {
-                sr.create_element("ds:schemaRef")
-                    .with_attribute((
-                        "ds:uri",
-                        "http://schemas.openxmlformats.org/officeDocument/2006/bibliography",
-                    ))
-                    .write_empty()?;
-                Ok(())
-            })?;
+            w.create_element("ds:schemaRefs")
+                .write_inner_content(|sr| {
+                    sr.create_element("ds:schemaRef")
+                        .with_attribute((
+                            "ds:uri",
+                            "http://schemas.openxmlformats.org/officeDocument/2006/bibliography",
+                        ))
+                        .write_empty()?;
+                    Ok(())
+                })?;
             Ok(())
         })?;
     Ok(())

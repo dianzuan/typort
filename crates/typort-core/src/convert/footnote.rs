@@ -151,9 +151,10 @@ pub(super) fn detect_footnote_format(children: &[HtmlNode], doc: &mut Document) 
     for child in children {
         if let HtmlNode::Element(elem) = child {
             if has_attr_value(elem, "role", "doc-noteref")
-                && let Some(sup) = elem.children.iter().find(|c| {
-                    matches!(c, HtmlNode::Element(e) if tag_name(e) == "sup")
-                })
+                && let Some(sup) = elem
+                    .children
+                    .iter()
+                    .find(|c| matches!(c, HtmlNode::Element(e) if tag_name(e) == "sup"))
                 && let HtmlNode::Element(sup) = sup
                 && let Some(text) = get_text_content(&sup.children)
             {

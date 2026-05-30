@@ -80,9 +80,12 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
         // paragraphs inserts them at the wrong position.
         {
             let t = line.text.trim();
-            if t.starts_with("表 ") || t.starts_with("表\u{00a0}")
-                || t.starts_with("图 ") || t.starts_with("图\u{00a0}")
-                || t.starts_with("Table ") || t.starts_with("Figure ")
+            if t.starts_with("表 ")
+                || t.starts_with("表\u{00a0}")
+                || t.starts_with("图 ")
+                || t.starts_with("图\u{00a0}")
+                || t.starts_with("Table ")
+                || t.starts_with("Figure ")
             {
                 continue;
             }
@@ -90,11 +93,15 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
         // Skip short lines with math symbols — these are equation fragments
         // that are already represented as OMML in the document.
         {
-            let math_chars = line.text.chars().filter(|c| {
-                ('\u{1D400}'..='\u{1D7FF}').contains(c)
+            let math_chars = line
+                .text
+                .chars()
+                .filter(|c| {
+                    ('\u{1D400}'..='\u{1D7FF}').contains(c)
                     || ('\u{2200}'..='\u{22FF}').contains(c) // math operators (∗, ∑, etc.)
                     || *c == '>' || *c == '<' || *c == '≥' || *c == '≤'
-            }).count();
+                })
+                .count();
             let total = line.text.chars().count();
             // Short lines with ANY math: skip if under 8 chars total
             if total < 8 && math_chars > 0 {
@@ -109,8 +116,11 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
         let line_stripped = strip_visual_markers(&line.text);
         let line_no_numbering = strip_heading_numbering(&line.text);
         // Also strip "表 N " / "图 N " figure caption prefix for matching
-        let line_no_fig_prefix = line.text.trim()
-            .strip_prefix("表 ").or_else(|| line.text.trim().strip_prefix("图 "))
+        let line_no_fig_prefix = line
+            .text
+            .trim()
+            .strip_prefix("表 ")
+            .or_else(|| line.text.trim().strip_prefix("图 "))
             .and_then(|s| s.strip_prefix(|c: char| c.is_ascii_digit()))
             .map(|s| s.trim().to_string())
             .unwrap_or_default();
@@ -151,7 +161,9 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
                 .iter()
                 .filter(|w| {
                     let wlen = w.chars().count();
-                    if wlen < 3 { return false; }
+                    if wlen < 3 {
+                        return false;
+                    }
                     full_doc_text.contains(*w) || {
                         let dw = strip_math_italic(w);
                         full_doc_text.contains(dw.as_str())
@@ -166,7 +178,10 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
         // If the line has any CJK-heavy word (4+ ideographs) that appears in
         // doc text, the line is likely already present (mixed with OMML math).
         if words.iter().any(|w| {
-            let cjk_count = w.chars().filter(|c| matches!(*c, '\u{4E00}'..='\u{9FFF}')).count();
+            let cjk_count = w
+                .chars()
+                .filter(|c| matches!(*c, '\u{4E00}'..='\u{9FFF}'))
+                .count();
             cjk_count >= 4 && full_doc_text.contains(*w)
         }) {
             continue;
@@ -174,7 +189,10 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
         // CJK fragment matching: extract CJK ideograph substrings (8+ chars)
         // and check against doc text.
         let long_frags: Vec<String> = extract_cjk_fragments(&line.text, 8);
-        if long_frags.iter().any(|f| full_doc_text.contains(f.as_str())) {
+        if long_frags
+            .iter()
+            .any(|f| full_doc_text.contains(f.as_str()))
+        {
             continue;
         }
         // For shorter fragments (4+ chars), require majority to match.
@@ -414,8 +432,10 @@ fn strip_math_italic(text: &str) -> String {
 fn strip_heading_numbering(text: &str) -> String {
     let trimmed = text.trim();
     // "一、引言" → "引言", "二、文献综述" → "文献综述"
-    let cn_nums = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十",
-                   "十一", "十二", "十三", "十四", "十五"];
+    let cn_nums = [
+        "一", "二", "三", "四", "五", "六", "七", "八", "九", "十", "十一", "十二", "十三", "十四",
+        "十五",
+    ];
     for num in &cn_nums {
         let prefix = format!("{num}、");
         if let Some(rest) = trimmed.strip_prefix(&prefix) {
@@ -520,7 +540,9 @@ fn insert_missing_at_position(
     let insert_idx = find_insert_position_by_y(doc, missing_lines, all_page_lines);
 
     let ps = &doc.page_settings;
-    let content_width_twips = ps.width_twips.saturating_sub(ps.margin_left + ps.margin_right);
+    let content_width_twips = ps
+        .width_twips
+        .saturating_sub(ps.margin_left + ps.margin_right);
 
     let mut paragraphs: Vec<BlockElement> = Vec::new();
     for line in missing_lines {
@@ -540,8 +562,7 @@ fn insert_missing_at_position(
                 // Estimate end of left cluster from x position + char count * average char width
                 let left_char_count: usize =
                     pair[0].runs.iter().map(|r| r.text.chars().count()).sum();
-                let left_end =
-                    pair[0].x_pt + left_char_count as f64 * max_font_size_pt;
+                let left_end = pair[0].x_pt + left_char_count as f64 * max_font_size_pt;
                 let gap = pair[1].x_pt - left_end;
                 gap > small_gap_threshold
             })
@@ -557,7 +578,11 @@ fn insert_missing_at_position(
         if is_real_grid {
             let last_cluster = &line.x_clusters[line.x_clusters.len() - 1];
             let tab_pos = pt_to_twips(last_cluster.x_pt);
-            let tab_stop = if tab_pos > 0 { tab_pos } else { content_width_twips };
+            let tab_stop = if tab_pos > 0 {
+                tab_pos
+            } else {
+                content_width_twips
+            };
             para.tab_stops.push(tab_stop);
             for (idx, cluster) in line.x_clusters.iter().enumerate() {
                 if idx > 0 {
@@ -576,7 +601,9 @@ fn insert_missing_at_position(
                     if let Some(first_run) = cluster.runs.first() {
                         space_run.size_half_pt = first_run.size_half_pt;
                         space_run.font_ascii.clone_from(&first_run.font_ascii);
-                        space_run.font_east_asia.clone_from(&first_run.font_east_asia);
+                        space_run
+                            .font_east_asia
+                            .clone_from(&first_run.font_east_asia);
                     }
                     para.push_run(space_run);
                 }
@@ -597,41 +624,52 @@ fn insert_missing_at_position(
     // (likely a single title wrapping across multiple rendered lines).
     let mut merged: Vec<BlockElement> = Vec::new();
     for elem in paragraphs {
-        let should_merge = if let (
-            Some(BlockElement::Paragraph(prev)),
-            BlockElement::Paragraph(curr),
-        ) = (merged.last(), &elem)
-        {
-            let prev_center = matches!(prev.alignment, Some(Alignment::Center));
-            let curr_center = matches!(curr.alignment, Some(Alignment::Center));
-            let prev_size = prev.inlines.iter().find_map(|i| {
-                if let InlineElement::Text(r) = i { r.size_half_pt } else { None }
-            });
-            let curr_size = curr.inlines.iter().find_map(|i| {
-                if let InlineElement::Text(r) = i { r.size_half_pt } else { None }
-            });
-            // Only merge short centered paragraphs (wrapped title lines).
-            // Don't merge if current starts with "（" or "(" (affiliation).
-            let prev_text = prev.text_content();
-            let curr_text = curr.text_content();
-            let combined_len = prev_text.chars().count() + curr_text.chars().count();
-            let combined_short = combined_len < 60;
-            let curr_is_affiliation = curr_text.starts_with('（')
-                || curr_text.starts_with('(');
-            // Don't merge very short items (likely author names, not title fragments)
-            let curr_too_short = curr_text.chars().count() <= 5;
-            // Merge if both are short, OR if both have the same non-default
-            // font size (i.e. they're from the same styled block like a title)
-            let same_styled = prev_size == curr_size && prev_size.is_some();
-            prev_center && curr_center && prev_size == curr_size
-                && (combined_short || same_styled)
-                && !curr_is_affiliation && !curr_too_short
-        } else {
-            false
-        };
+        let should_merge =
+            if let (Some(BlockElement::Paragraph(prev)), BlockElement::Paragraph(curr)) =
+                (merged.last(), &elem)
+            {
+                let prev_center = matches!(prev.alignment, Some(Alignment::Center));
+                let curr_center = matches!(curr.alignment, Some(Alignment::Center));
+                let prev_size = prev.inlines.iter().find_map(|i| {
+                    if let InlineElement::Text(r) = i {
+                        r.size_half_pt
+                    } else {
+                        None
+                    }
+                });
+                let curr_size = curr.inlines.iter().find_map(|i| {
+                    if let InlineElement::Text(r) = i {
+                        r.size_half_pt
+                    } else {
+                        None
+                    }
+                });
+                // Only merge short centered paragraphs (wrapped title lines).
+                // Don't merge if current starts with "（" or "(" (affiliation).
+                let prev_text = prev.text_content();
+                let curr_text = curr.text_content();
+                let combined_len = prev_text.chars().count() + curr_text.chars().count();
+                let combined_short = combined_len < 60;
+                let curr_is_affiliation = curr_text.starts_with('（') || curr_text.starts_with('(');
+                // Don't merge very short items (likely author names, not title fragments)
+                let curr_too_short = curr_text.chars().count() <= 5;
+                // Merge if both are short, OR if both have the same non-default
+                // font size (i.e. they're from the same styled block like a title)
+                let same_styled = prev_size == curr_size && prev_size.is_some();
+                prev_center
+                    && curr_center
+                    && prev_size == curr_size
+                    && (combined_short || same_styled)
+                    && !curr_is_affiliation
+                    && !curr_too_short
+            } else {
+                false
+            };
 
         if should_merge {
-            let BlockElement::Paragraph(curr) = elem else { unreachable!() };
+            let BlockElement::Paragraph(curr) = elem else {
+                unreachable!()
+            };
             let Some(BlockElement::Paragraph(prev)) = merged.last_mut() else {
                 unreachable!()
             };
@@ -763,8 +801,8 @@ pub(super) fn collect_page_break_locations(
         if page_nums[i] > page_nums[i - 1] {
             let prev_page_num = page_nums[i - 1].get();
             if has_any_pagebreak_elems {
-                let has_explicit = (prev_page_num..page_nums[i].get())
-                    .any(|p| explicit_break_pages.contains(&p));
+                let has_explicit =
+                    (prev_page_num..page_nums[i].get()).any(|p| explicit_break_pages.contains(&p));
                 if !has_explicit {
                     continue;
                 }
@@ -862,17 +900,17 @@ pub(super) fn insert_horizontal_rules_from_paged(
     let full_doc_text = extract_doc_text(doc);
 
     for (page_num, _line_y) in &hrules {
-        let insert_idx =
-            if !element_page_map.is_empty() && element_page_map.len() == total_elements {
-                element_page_map
-                    .iter()
-                    .position(|&p| p >= *page_num)
-                    .unwrap_or(total_elements)
-            } else {
-                let normalized = f64::from(*page_num as u32 - 1) / f64::from(total_pages as u32);
-                let idx = (normalized * total_elements as f64).round() as usize;
-                idx.min(total_elements)
-            };
+        let insert_idx = if !element_page_map.is_empty() && element_page_map.len() == total_elements
+        {
+            element_page_map
+                .iter()
+                .position(|&p| p >= *page_num)
+                .unwrap_or(total_elements)
+        } else {
+            let normalized = f64::from(*page_num as u32 - 1) / f64::from(total_pages as u32);
+            let idx = (normalized * total_elements as f64).round() as usize;
+            idx.min(total_elements)
+        };
 
         let already_has_hrule = doc.body.elements.get(insert_idx).is_some_and(|e| {
             if let BlockElement::Paragraph(p) = e {
@@ -951,23 +989,21 @@ pub(super) fn merge_same_line_paragraphs(doc: &mut Document, _paged: &PagedDocum
                 // into p2 (the text paragraph that follows). This handles the
                 // pattern where #for loop generates super() before author names.
                 !p1.inlines.is_empty()
-                    && p1.inlines.iter().all(|inl| matches!(
-                        inl,
-                        InlineElement::Text(r) if r.superscript || r.text.trim().is_empty()
-                    ))
+                    && p1.inlines.iter().all(|inl| {
+                        matches!(
+                            inl,
+                            InlineElement::Text(r) if r.superscript || r.text.trim().is_empty()
+                        )
+                    })
             }
         };
 
         if should_merge {
             // Remove the all-super p1 and prepend its inlines into p2
-            let BlockElement::Paragraph(p1) =
-                doc.body.elements.remove(i)
-            else {
+            let BlockElement::Paragraph(p1) = doc.body.elements.remove(i) else {
                 unreachable!()
             };
-            let BlockElement::Paragraph(p2) =
-                &mut doc.body.elements[i]
-            else {
+            let BlockElement::Paragraph(p2) = &mut doc.body.elements[i] else {
                 unreachable!()
             };
             let mut merged = p1.inlines;

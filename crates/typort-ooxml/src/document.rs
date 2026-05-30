@@ -390,7 +390,8 @@ impl Paragraph {
 
     /// Add a citation field (SDT-wrapped CITATION field code).
     pub fn add_citation(&mut self, keys: Vec<String>, display_text: String) {
-        self.inlines.push(InlineElement::Citation { keys, display_text });
+        self.inlines
+            .push(InlineElement::Citation { keys, display_text });
     }
 }
 
@@ -453,7 +454,9 @@ pub enum BlockElement {
     Paragraph(Paragraph),
     Table(Table),
     /// Bibliography section wrapped in SDT with BIBLIOGRAPHY field code.
-    BibliographyBlock { paragraphs: Vec<Paragraph> },
+    BibliographyBlock {
+        paragraphs: Vec<Paragraph>,
+    },
 }
 
 #[derive(Debug, Clone, Default)]
@@ -599,12 +602,12 @@ impl Default for DocumentStyle {
         Self {
             body_font_ascii: "Times New Roman".to_string(),
             body_font_east_asia: "\u{5b8b}\u{4f53}".to_string(),
-            body_size_half_pt: 22,       // Typst default: 11pt = 22 half-points
-            line_spacing: 276,           // ~13.8pt: typical rendered line pitch for 11pt body
-            first_line_indent_twips: 0,  // Typst default: no indent
+            body_size_half_pt: 22,      // Typst default: 11pt = 22 half-points
+            line_spacing: 276,          // ~13.8pt: typical rendered line pitch for 11pt body
+            first_line_indent_twips: 0, // Typst default: no indent
             footnote_format: FootnoteFormat::default(),
             code_font: "Courier New".to_string(),
-            code_size_half_pt: 22,       // Typst raw text uses body size by default
+            code_size_half_pt: 22, // Typst raw text uses body size by default
             footnote_size_half_pt: 18,
             // Typst defaults: h1=1.4*22=31, h2=1.2*22=26, h3-h5=body size
             heading_sizes: [31, 26, 22, 22, 22],
