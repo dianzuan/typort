@@ -642,6 +642,9 @@ pub struct SourceStyleOverrides {
     // #set text(font: ..., size: ...)
     pub text_font: Option<Vec<String>>,
     pub text_size_half_pt: Option<u32>,
+    // #set text(lang: "zh", region: "cn") — ISO 639 lang + optional ISO 3166 region.
+    pub text_lang: Option<String>,
+    pub text_region: Option<String>,
     // #set par(first-line-indent: ..., leading: ..., justify: ..., spacing: ...)
     // Values in twips for absolute units, or as em*1000 (milliem) for em units.
     pub first_line_indent_twips: Option<u32>,
@@ -671,6 +674,8 @@ impl SourceStyleOverrides {
         fill!(page_numbering);
         fill!(text_font);
         fill!(text_size_half_pt);
+        fill!(text_lang);
+        fill!(text_region);
         fill!(first_line_indent_twips);
         fill!(first_line_indent_em);
         fill!(par_leading_twips);
@@ -863,6 +868,20 @@ fn parse_text_args(args: typst_syntax::ast::Args<'_>, ovr: &mut SourceStyleOverr
                         }
                     }
                 }
+                "lang" => {
+                    if ovr.text_lang.is_none()
+                        && let typst_syntax::ast::Expr::Str(s) = named.expr()
+                    {
+                        ovr.text_lang = Some(s.get().to_string());
+                    }
+                }
+                "region" => {
+                    if ovr.text_region.is_none()
+                        && let typst_syntax::ast::Expr::Str(s) = named.expr()
+                    {
+                        ovr.text_region = Some(s.get().to_string());
+                    }
+                }
                 _ => {}
             },
             typst_syntax::ast::Arg::Pos(typst_syntax::ast::Expr::Numeric(n)) => {
@@ -969,6 +988,29 @@ pub(super) fn pt_to_twips(pt: f64) -> u32 {
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub(super) fn pt_to_half_pt(pt: f64) -> u32 {
     (pt * 2.0).round().max(0.0) as u32
+}
+
+/// Build a BCP-47 language tag (for Word's `w:lang`) from a Typst `lang` code
+/// plus an optional `region`, exactly as declared in `#set text(...)`.
+///
+/// `lang` is an ISO 639 code ("zh", "ja", "de"); `region` is ISO 3166-1
+/// ("CN", "JP"). When the region is omitted, fall back to the most common
+/// region for that language so Word still gets a fully-qualified tag (Word's
+/// East-Asian handling expects one); unknown languages pass through bare.
+pub(super) fn lang_region_to_bcp47(lang: &str, region: Option<&str>) -> String {
+    let lang = lang.to_ascii_lowercase();
+    if let Some(r) = region {
+        return format!("{lang}-{}", r.to_ascii_uppercase());
+    }
+    match lang.as_str() {
+        "zh" => "zh-CN".to_string(),
+        "ja" => "ja-JP".to_string(),
+        "ko" => "ko-KR".to_string(),
+        "en" => "en-US".to_string(),
+        "de" => "de-DE".to_string(),
+        "fr" => "fr-FR".to_string(),
+        _ => lang,
+    }
 }
 
 fn numeric_to_twips(n: typst_syntax::ast::Numeric<'_>) -> u32 {

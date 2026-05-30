@@ -2993,6 +2993,22 @@ fn issue_figure_caption_present() {
 }
 
 #[test]
+fn issue_caption_not_duplicated_by_recovery() {
+    // A figure/table caption must appear exactly once: the recovery pass must
+    // not re-insert it as a duplicate paragraph. Guaranteed by semantic text
+    // dedup, not by hardcoded "图 "/"表 " keyword skipping (removed for P1).
+    // CJK captions exercise the very path the old keyword filter special-cased.
+    let xml = fixture_doc_xml("issue_caption_dedup_cjk");
+    for caption in ["一个矩形示意图的标题", "实验数据汇总表"] {
+        let count = xml.matches(caption).count();
+        assert_eq!(
+            count, 1,
+            "caption {caption:?} should appear exactly once, found {count} (recovery duplicate?)"
+        );
+    }
+}
+
+#[test]
 fn issue_inline_math_spacing_preserved() {
     let xml = fixture_doc_xml("issue_inline_math_spacing");
     assert!(
@@ -4608,6 +4624,52 @@ fn issue_show_rule_heading_replace_recovery() {
         "second heading text present"
     );
     assert!(xml.contains("Body text"), "body text present");
+}
+
+// ── Language detection: w:lang derived from #set text(lang:), not guessed ──
+
+/// Convert a fixture and return its `word/styles.xml` (where `w:lang` lives).
+fn fixture_styles_xml(fixture: &str) -> String {
+    let path = format!("../../tests/fixtures/{fixture}.typ");
+    let world = typort_core::TyportWorld::new(Path::new(&path)).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    std::io::read_to_string(reader.by_name("word/styles.xml").unwrap()).unwrap()
+}
+
+#[test]
+fn lang_german_is_de_de_not_guessed() {
+    // A German document (no CJK) must derive de-DE from #set text(lang: "de"),
+    // not fall back to the en-US/zh-CN guess. Guards against P1 regressions.
+    let styles = fixture_styles_xml("style_lang_de");
+    assert!(
+        styles.contains(r#"w:val="de-DE""#),
+        "German doc should emit w:lang w:val=de-DE, got: {styles}"
+    );
+}
+
+#[test]
+fn lang_japanese_eastasia_is_ja_jp() {
+    // Regression: a Japanese document declares #set text(lang: "ja"). It must
+    // map to ja-JP on the East-Asian tag — previously mislabeled en-US because
+    // only "zh" was recognized.
+    let styles = fixture_styles_xml("style_cjk_ja");
+    assert!(
+        styles.contains(r#"w:eastAsia="ja-JP""#),
+        "Japanese doc should emit w:eastAsia=ja-JP, got: {styles}"
+    );
+}
+
+#[test]
+fn lang_chinese_eastasia_is_zh_cn() {
+    // #set text(lang: "zh", region: "CN") → zh-CN on the East-Asian tag.
+    let styles = fixture_styles_xml("style_cjk_zh");
+    assert!(
+        styles.contains(r#"w:eastAsia="zh-CN""#),
+        "Chinese doc should emit w:eastAsia=zh-CN, got: {styles}"
+    );
 }
 
 // ── Smoke tests: style / general / edge fixtures convert without panic ──

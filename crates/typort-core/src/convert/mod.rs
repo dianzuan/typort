@@ -235,6 +235,8 @@ fn apply_source_overrides(ovr: &page::SourceStyleOverrides, doc: &mut Document) 
         doc.style.body_size_half_pt = sz;
     }
 
+    apply_language_override(ovr, doc);
+
     // Resolve em-based values using actual body size
     let body_pt = f64::from(doc.style.body_size_half_pt) / 2.0;
 
@@ -325,6 +327,22 @@ fn apply_source_overrides(ovr: &page::SourceStyleOverrides, doc: &mut Document) 
                 0
             };
         }
+    }
+}
+
+/// Apply the document language from `#set text(lang:, region:)`, overriding the
+/// CJK-presence heuristic. CJK languages drive Word's East-Asian tag; all others
+/// drive the Latin tag (the `w:lang` w:val / w:eastAsia split). No-op when the
+/// source declares no language.
+fn apply_language_override(ovr: &page::SourceStyleOverrides, doc: &mut Document) {
+    let Some(lang) = &ovr.text_lang else {
+        return;
+    };
+    let tag = page::lang_region_to_bcp47(lang, ovr.text_region.as_deref());
+    if matches!(lang.to_ascii_lowercase().as_str(), "zh" | "ja" | "ko") {
+        doc.style.lang_east_asia = tag;
+    } else {
+        doc.style.lang_latin = tag;
     }
 }
 

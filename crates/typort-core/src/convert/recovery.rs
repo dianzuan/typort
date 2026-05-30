@@ -75,21 +75,6 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
         if line.all_math_font {
             continue;
         }
-        // Skip lines that look like figure/table captions — these are handled
-        // by the figure/table conversion path and recovering them as standalone
-        // paragraphs inserts them at the wrong position.
-        {
-            let t = line.text.trim();
-            if t.starts_with("表 ")
-                || t.starts_with("表\u{00a0}")
-                || t.starts_with("图 ")
-                || t.starts_with("图\u{00a0}")
-                || t.starts_with("Table ")
-                || t.starts_with("Figure ")
-            {
-                continue;
-            }
-        }
         // Skip short lines with math symbols — these are equation fragments
         // that are already represented as OMML in the document.
         {
@@ -115,15 +100,6 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
         let line_demath = strip_math_italic(&line.text);
         let line_stripped = strip_visual_markers(&line.text);
         let line_no_numbering = strip_heading_numbering(&line.text);
-        // Also strip "表 N " / "图 N " figure caption prefix for matching
-        let line_no_fig_prefix = line
-            .text
-            .trim()
-            .strip_prefix("表 ")
-            .or_else(|| line.text.trim().strip_prefix("图 "))
-            .and_then(|s| s.strip_prefix(|c: char| c.is_ascii_digit()))
-            .map(|s| s.trim().to_string())
-            .unwrap_or_default();
         let line_demath_nospace = line_demath.replace(' ', "");
         // Short lines (< 6 chars) can match as false-positive substrings in
         // longer paragraphs (e.g. author name "作者甲" inside author bio).
@@ -146,7 +122,6 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
                     || full_doc_text.contains(&line_demath)
                     || full_doc_text_nospace.contains(&line_demath_nospace)))
             || (!line_no_numbering.is_empty() && full_doc_text.contains(&line_no_numbering))
-            || (!line_no_fig_prefix.is_empty() && full_doc_text.contains(&line_no_fig_prefix))
             || exclude_text.contains(&line.text)
         {
             continue;
