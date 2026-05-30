@@ -75,14 +75,25 @@ when the author declared a value. This is **three** sources, not two — README'
 
 ## What must pass before committing
 
-CI (`.github/workflows/ci.yml`) is the single source of truth. Run locally:
+CI (`.github/workflows/ci.yml`) runs exactly these four jobs. Run the **same**
+commands locally — match them verbatim, because small differences (e.g. adding
+`--all-targets` to clippy) surface lints CI does not gate on and waste time:
 
 ```bash
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
+cargo check --workspace
+cargo clippy --workspace -- -D warnings   # NOT --all-targets; matches CI
 cargo test --workspace
-cargo build --release --workspace
+cargo fmt --all -- --check
 ```
+
+**Toolchain caveat (verified 2026-05-30):** CI uses
+`dtolnay/rust-toolchain@stable` with no `rust-toolchain.toml`, so it floats to
+the latest stable Rust. A toolchain bump can turn previously-green code red
+without any code change — new rustfmt layout rules or new clippy lints applied to
+existing code. This bit the repo: CI went red after 2026-05-19 purely from a
+toolchain move. If green-on-an-older-toolchain matters, pin it with a
+`rust-toolchain.toml`. Until then, "CI is green" means "green on whatever stable
+shipped today" — always re-run the four commands locally before claiming success.
 
 Do not state a specific test count in prose anywhere (README, docs, comments) —
 counts drift and become lies. Let `cargo test` report the number.
