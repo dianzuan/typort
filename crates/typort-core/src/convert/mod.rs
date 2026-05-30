@@ -37,6 +37,25 @@ struct EquationState {
     global_eq: u64,
 }
 
+/// State threaded through the recursive tag-walker.
+///
+/// Replaces the `(html_doc, doc, eq_state, image_queue, bookmarks, page_breaks)`
+/// parameter tuple that previously appeared on every walk/handle function. The
+/// two read-only references are shared (`&`) and the four sinks are mutable
+/// (`&mut`); pass the whole thing as `&mut WalkCtx`.
+///
+/// Borrow note: when a function both reads `ctx.html_doc.introspector` and
+/// mutates a `&mut` field, lift `let html = ctx.html_doc;` first — `&HtmlDocument`
+/// is `Copy`, so this severs the borrow tie at zero cost.
+struct WalkCtx<'a> {
+    html_doc: &'a HtmlDocument,
+    page_breaks: &'a HashSet<Location>,
+    doc: &'a mut Document,
+    eq_state: &'a mut EquationState,
+    image_queue: &'a mut VecDeque<ImageData>,
+    bookmarks: &'a mut HashSet<String>,
+}
+
 use crate::world::TyportWorld;
 
 /// Rowspan metadata for a single cell: `(html_cell_index, rowspan, colspan)`.
@@ -114,15 +133,17 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
     //    based on the pre-computed page_breaks set from step 6).
     let mut eq_state = EquationState::default();
     let mut bookmarks: HashSet<String> = HashSet::new();
-    walk_tags(
-        &body.children,
-        &html_doc,
-        &mut doc,
-        &mut eq_state,
-        &mut image_queue,
-        &mut bookmarks,
-        &page_breaks,
-    );
+    {
+        let mut ctx = WalkCtx {
+            html_doc: &html_doc,
+            page_breaks: &page_breaks,
+            doc: &mut doc,
+            eq_state: &mut eq_state,
+            image_queue: &mut image_queue,
+            bookmarks: &mut bookmarks,
+        };
+        walk_tags(&body.children, &mut ctx);
+    }
 
     // 8. Detect footnote format (circled numbers)
     footnote::detect_footnote_format(&body.children, &mut doc);
@@ -350,16 +371,9 @@ fn apply_language_override(ovr: &page::SourceStyleOverrides, doc: &mut Document)
 ///
 /// `page_breaks` contains `Location`s of elements that should have a page
 /// break inserted before them (computed by [`collect_page_break_locations`]).
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
-fn walk_tags(
-    children: &[HtmlNode],
-    html_doc: &HtmlDocument,
-    doc: &mut Document,
-    eq_state: &mut EquationState,
-    image_queue: &mut VecDeque<ImageData>,
-    bookmarks: &mut HashSet<String>,
-    page_breaks: &HashSet<Location>,
-) {
+#[allow(clippy::too_many_lines)]
+fn walk_tags(children: &[HtmlNode], ctx: &mut WalkCtx) {
+    let html = ctx.html_doc;
     let mut i = 0;
     while i < children.len() {
         match &children[i] {
@@ -367,17 +381,17 @@ fn walk_tags(
                 if let Tag::Start(content, _) = tag {
                     // Insert a page break before this element if the
                     // introspector-based pre-pass determined there is one.
-                    if page_breaks.contains(&tag.location()) {
+                    if ctx.page_breaks.contains(&tag.location()) {
                         let mut pb_para = Paragraph::new();
                         pb_para.add_page_break();
-                        doc.add_paragraph(pb_para);
+                        ctx.doc.add_paragraph(pb_para);
                     }
                     let elem_name = content.elem().name();
                     match elem_name {
                         "heading" => {
-                            handle_heading(tag, html_doc, doc, bookmarks);
+                            handle_heading(tag, ctx);
                             // Track chapter changes for equation numbering
-                            if let Some(c) = html_doc
+                            if let Some(c) = html
                                 .introspector
                                 .query_first(&typst::foundations::Selector::Location(
                                     tag.location(),
@@ -386,8 +400,8 @@ fn walk_tags(
                             {
                                 let level = c.resolve_level(StyleChain::default()).get();
                                 if level == 1 {
-                                    eq_state.chapter += 1;
-                                    eq_state.eq_in_chapter = 0;
+                                    ctx.eq_state.chapter += 1;
+                                    ctx.eq_state.eq_in_chapter = 0;
                                 }
                             }
                             // Skip past the heading's inner HTML elements to the matching End tag
@@ -397,73 +411,39 @@ fn walk_tags(
                         "par" => {
                             // Merge subsequent inline equations + par fragments
                             // into a single Word paragraph.
-                            i = handle_par_with_inline_equations(
-                                children,
-                                i,
-                                html_doc,
-                                doc,
-                                eq_state,
-                                image_queue,
-                                bookmarks,
-                            );
+                            i = handle_par_with_inline_equations(children, i, ctx);
                         }
                         "equation" => {
-                            handle_equation(tag, html_doc, doc, eq_state, bookmarks);
+                            handle_equation(tag, ctx);
                             let end = find_tag_end(children, i, tag.location());
                             i = end;
                         }
                         "footnote" => {
-                            handle_block_footnote(tag, &children[i..], html_doc, doc);
+                            handle_block_footnote(tag, &children[i..], ctx.html_doc, ctx.doc);
                             let end = find_tag_end(children, i, tag.location());
                             i = end;
                         }
                         "table" => {
                             let end = find_tag_end(children, i, tag.location());
-                            handle_table(
-                                &children[i..=end],
-                                html_doc,
-                                doc,
-                                eq_state,
-                                image_queue,
-                                bookmarks,
-                                page_breaks,
-                            );
+                            handle_table(&children[i..=end], ctx);
                             i = end;
                         }
                         "list" => {
                             let end = find_tag_end(children, i, tag.location());
-                            handle_list(
-                                &children[i..=end],
-                                html_doc,
-                                doc,
-                                false,
-                                eq_state,
-                                image_queue,
-                                bookmarks,
-                                page_breaks,
-                            );
+                            handle_list(&children[i..=end], false, ctx);
                             i = end;
                         }
                         "enum" => {
                             let end = find_tag_end(children, i, tag.location());
-                            handle_list(
-                                &children[i..=end],
-                                html_doc,
-                                doc,
-                                true,
-                                eq_state,
-                                image_queue,
-                                bookmarks,
-                                page_breaks,
-                            );
+                            handle_list(&children[i..=end], true, ctx);
                             i = end;
                         }
                         "image" => {
                             // Consume the next image from the queue extracted from PagedDocument
-                            if let Some(img_data) = image_queue.pop_front() {
+                            if let Some(img_data) = ctx.image_queue.pop_front() {
                                 let mut para = Paragraph::new();
                                 para.add_image(img_data);
-                                doc.add_paragraph(para);
+                                ctx.doc.add_paragraph(para);
                             }
                             let end = find_tag_end(children, i, tag.location());
                             i = end;
@@ -483,27 +463,19 @@ fn walk_tags(
                                 && let Some(label) = content.label()
                             {
                                 let label_str = format!("{}", label.resolve());
-                                if !bookmarks.contains(&label_str) {
-                                    bookmarks.insert(label_str.clone());
-                                    let bk_id = doc.next_bookmark_id();
+                                if !ctx.bookmarks.contains(&label_str) {
+                                    ctx.bookmarks.insert(label_str.clone());
+                                    let bk_id = ctx.doc.next_bookmark_id();
                                     let mut bk_para = Paragraph::new();
                                     bk_para.add_bookmark(bk_id, label_str);
-                                    doc.add_paragraph(bk_para);
+                                    ctx.doc.add_paragraph(bk_para);
                                 }
                             }
-                            walk_tags(
-                                &children[i + 1..end],
-                                html_doc,
-                                doc,
-                                eq_state,
-                                image_queue,
-                                bookmarks,
-                                page_breaks,
-                            );
+                            walk_tags(&children[i + 1..end], ctx);
                             i = end;
                         }
                         "outline" => {
-                            let depth: u8 = html_doc
+                            let depth: u8 = html
                                 .introspector
                                 .query_first(&typst::foundations::Selector::Location(
                                     tag.location(),
@@ -514,14 +486,14 @@ fn walk_tags(
                                 .map_or(3, |d| u8::try_from(d.get()).unwrap_or(3));
                             let mut para = Paragraph::new();
                             para.add_toc(depth);
-                            doc.add_paragraph(para);
+                            ctx.doc.add_paragraph(para);
                             let end = find_tag_end(children, i, tag.location());
                             i = end;
                         }
                         "pagebreak" => {
                             let mut para = Paragraph::new();
                             para.add_page_break();
-                            doc.add_paragraph(para);
+                            ctx.doc.add_paragraph(para);
                             let end = find_tag_end(children, i, tag.location());
                             i = end;
                         }
@@ -533,15 +505,7 @@ fn walk_tags(
                 // Tag::End is consumed implicitly
             }
             HtmlNode::Element(elem) => {
-                handle_html_element(
-                    elem,
-                    html_doc,
-                    doc,
-                    eq_state,
-                    image_queue,
-                    bookmarks,
-                    page_breaks,
-                );
+                handle_html_element(elem, ctx);
             }
             HtmlNode::Text(text, span) => {
                 // Bare text outside of any Tag — emit as a paragraph
@@ -553,7 +517,7 @@ fn walk_tags(
                         run.span = Some(*span);
                     }
                     para.push_run(run);
-                    doc.add_paragraph(para);
+                    ctx.doc.add_paragraph(para);
                 }
             }
             HtmlNode::Frame(_) => {
@@ -565,39 +529,23 @@ fn walk_tags(
 }
 
 /// Handle an HTML element (non-Tag node) — dispatches on element tag name.
-#[allow(clippy::too_many_arguments)]
-fn handle_html_element(
-    elem: &HtmlElement,
-    html_doc: &HtmlDocument,
-    doc: &mut Document,
-    eq_state: &mut EquationState,
-    image_queue: &mut VecDeque<ImageData>,
-    bookmarks: &mut HashSet<String>,
-    page_breaks: &HashSet<Location>,
-) {
+fn handle_html_element(elem: &HtmlElement, ctx: &mut WalkCtx) {
+    let html = ctx.html_doc;
     let tag = tag_name(elem);
     match tag.as_str() {
-        "pre" => convert_code_block(elem, doc),
-        "blockquote" => convert_blockquote(
-            elem,
-            html_doc,
-            doc,
-            eq_state,
-            image_queue,
-            bookmarks,
-            page_breaks,
-        ),
-        "dl" => convert_term_list(elem, doc),
-        "ol" => convert_html_list(elem, doc, true),
-        "ul" => convert_html_list(elem, doc, false),
-        "table" => convert_html_table(elem, doc, html_doc),
+        "pre" => convert_code_block(elem, ctx.doc),
+        "blockquote" => convert_blockquote(elem, ctx),
+        "dl" => convert_term_list(elem, ctx.doc),
+        "ol" => convert_html_list(elem, ctx.doc, true),
+        "ul" => convert_html_list(elem, ctx.doc, false),
+        "table" => convert_html_table(elem, ctx.doc, html),
         "figcaption" => {
             // Collect all figcaption content into a single paragraph
             let mut para = Paragraph::new();
             para.alignment = Some(Alignment::Center);
             collect_html_inlines(&elem.children, &mut para, false, false, false);
             if !para.inlines.is_empty() {
-                doc.add_paragraph(para);
+                ctx.doc.add_paragraph(para);
             }
         }
         "section" => {
@@ -606,23 +554,15 @@ fn handle_html_element(
                 return;
             }
             if has_attr_value(elem, "role", "doc-bibliography") {
-                let start_idx = doc.body.elements.len();
-                walk_tags(
-                    &elem.children,
-                    html_doc,
-                    doc,
-                    eq_state,
-                    image_queue,
-                    bookmarks,
-                    page_breaks,
-                );
-                let bib_elements: Vec<_> = doc.body.elements.drain(start_idx..).collect();
+                let start_idx = ctx.doc.body.elements.len();
+                walk_tags(&elem.children, ctx);
+                let bib_elements: Vec<_> = ctx.doc.body.elements.drain(start_idx..).collect();
                 let mut bib_paragraphs = Vec::new();
                 for element in bib_elements {
                     match element {
                         BlockElement::Paragraph(p) => {
                             if matches!(p.style, Some(ParagraphStyle::Heading(_))) {
-                                doc.add_paragraph(p);
+                                ctx.doc.add_paragraph(p);
                             } else {
                                 let mut bp = p;
                                 bp.hanging_indent = true;
@@ -630,42 +570,26 @@ fn handle_html_element(
                             }
                         }
                         other => {
-                            doc.body.elements.push(other);
+                            ctx.doc.body.elements.push(other);
                         }
                     }
                 }
                 if !bib_paragraphs.is_empty() {
-                    doc.body.elements.push(BlockElement::BibliographyBlock {
+                    ctx.doc.body.elements.push(BlockElement::BibliographyBlock {
                         paragraphs: bib_paragraphs,
                     });
                 }
                 return;
             }
-            walk_tags(
-                &elem.children,
-                html_doc,
-                doc,
-                eq_state,
-                image_queue,
-                bookmarks,
-                page_breaks,
-            );
+            walk_tags(&elem.children, ctx);
         }
         _ => {
             // Check for alignment on this element and apply to child paragraphs
             let alignment = detect_alignment(elem);
-            let start_idx = doc.body.elements.len();
-            walk_tags(
-                &elem.children,
-                html_doc,
-                doc,
-                eq_state,
-                image_queue,
-                bookmarks,
-                page_breaks,
-            );
+            let start_idx = ctx.doc.body.elements.len();
+            walk_tags(&elem.children, ctx);
             if let Some(align) = alignment {
-                for element in &mut doc.body.elements[start_idx..] {
+                for element in &mut ctx.doc.body.elements[start_idx..] {
                     if let BlockElement::Paragraph(para) = element {
                         para.alignment = Some(align.clone());
                     }
@@ -677,14 +601,10 @@ fn handle_html_element(
 
 /// Handle a `HeadingElem` tag: query the introspector for the full Content,
 /// extract level + body runs, and emit a heading paragraph.
-fn handle_heading(
-    tag: &Tag,
-    html_doc: &HtmlDocument,
-    doc: &mut Document,
-    bookmarks: &mut HashSet<String>,
-) {
+fn handle_heading(tag: &Tag, ctx: &mut WalkCtx) {
+    let html = ctx.html_doc;
     let loc = tag.location();
-    let Some(content) = html_doc
+    let Some(content) = html
         .introspector
         .query_first(&typst::foundations::Selector::Location(loc))
     else {
@@ -705,16 +625,16 @@ fn handle_heading(
     // Insert bookmark if heading has a label
     if let Some(label) = content.label() {
         let label_str = format!("{}", label.resolve());
-        if !bookmarks.contains(&label_str) {
-            bookmarks.insert(label_str.clone());
-            let bk_id = doc.next_bookmark_id();
+        if !ctx.bookmarks.contains(&label_str) {
+            ctx.bookmarks.insert(label_str.clone());
+            let bk_id = ctx.doc.next_bookmark_id();
             para.add_bookmark(bk_id, label_str);
         }
     }
 
     // Walk heading body — handle both text runs and inline math
     extract_heading_content(&heading.body, &mut para);
-    doc.add_paragraph(para);
+    ctx.doc.add_paragraph(para);
 }
 
 /// Walk a heading's body content, extracting text runs and inline math.
@@ -737,30 +657,15 @@ fn extract_heading_content(content: &typst::foundations::Content, para: &mut Par
 
 /// Handle a `par` Tag: collect inline children (text, strong, emph, equation, footnote)
 /// and emit a paragraph.
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
-fn handle_par(
-    slice: &[HtmlNode],
-    html_doc: &HtmlDocument,
-    doc: &mut Document,
-    eq_state: &mut EquationState,
-    image_queue: &mut VecDeque<ImageData>,
-    bookmarks: &mut HashSet<String>,
-) {
+#[allow(clippy::too_many_lines)]
+fn handle_par(slice: &[HtmlNode], ctx: &mut WalkCtx) {
     let mut para = Paragraph::new();
     // Skip the first Tag::Start("par") and collect inlines from the inner nodes
     let inner = &slice[1..slice.len().saturating_sub(1)];
-    collect_par_inlines(
-        inner,
-        html_doc,
-        doc,
-        &mut para,
-        eq_state,
-        image_queue,
-        bookmarks,
-    );
+    collect_par_inlines(inner, ctx, &mut para);
     if !para.inlines.is_empty() {
         strip_cjk_spaces(&mut para);
-        doc.add_paragraph(para);
+        ctx.doc.add_paragraph(para);
     }
 }
 
@@ -772,16 +677,12 @@ fn handle_par(
 /// This function detects that pattern and merges everything into one `<w:p>`.
 ///
 /// Returns the index of the last consumed node (the caller's loop will `i += 1`).
-#[allow(clippy::too_many_arguments)]
 fn handle_par_with_inline_equations(
     children: &[HtmlNode],
     par_start: usize,
-    html_doc: &HtmlDocument,
-    doc: &mut Document,
-    eq_state: &mut EquationState,
-    image_queue: &mut VecDeque<ImageData>,
-    bookmarks: &mut HashSet<String>,
+    ctx: &mut WalkCtx,
 ) -> usize {
+    let html = ctx.html_doc;
     let HtmlNode::Tag(tag) = &children[par_start] else {
         return par_start;
     };
@@ -790,15 +691,8 @@ fn handle_par_with_inline_equations(
     // Check if the next sibling after this par is an inline equation.
     // If not, just handle as a normal paragraph (fast path).
     let next_start = par_end + 1;
-    if !is_inline_equation_at(children, next_start, html_doc) {
-        handle_par(
-            &children[par_start..=par_end],
-            html_doc,
-            doc,
-            eq_state,
-            image_queue,
-            bookmarks,
-        );
+    if !is_inline_equation_at(children, next_start, html) {
+        handle_par(&children[par_start..=par_end], ctx);
         return par_end;
     }
 
@@ -807,15 +701,7 @@ fn handle_par_with_inline_equations(
 
     // Collect inlines from the first par fragment
     let inner = &children[par_start + 1..par_end];
-    collect_par_inlines(
-        inner,
-        html_doc,
-        doc,
-        &mut para,
-        eq_state,
-        image_queue,
-        bookmarks,
-    );
+    collect_par_inlines(inner, ctx, &mut para);
 
     // The pattern is strictly: equation -> par -> equation -> par -> ...
     // After each inline equation, we expect a continuation par.
@@ -824,12 +710,12 @@ fn handle_par_with_inline_equations(
     let mut cursor = next_start;
     while cursor < children.len() {
         // Step 1: expect an inline equation
-        if !is_inline_equation_at(children, cursor, html_doc) {
+        if !is_inline_equation_at(children, cursor, html) {
             break;
         }
         if let HtmlNode::Tag(eq_tag) = &children[cursor] {
             let loc = eq_tag.location();
-            if let Some(c) = html_doc
+            if let Some(c) = html
                 .introspector
                 .query_first(&typst::foundations::Selector::Location(loc))
             {
@@ -850,15 +736,7 @@ fn handle_par_with_inline_equations(
             let p_end = find_tag_end(children, cursor, pt.location());
             let p_inner = &children[cursor + 1..p_end];
             para.push_run(Run::new(" "));
-            collect_par_inlines(
-                p_inner,
-                html_doc,
-                doc,
-                &mut para,
-                eq_state,
-                image_queue,
-                bookmarks,
-            );
+            collect_par_inlines(p_inner, ctx, &mut para);
             cursor = p_end + 1;
         } else {
             break;
@@ -869,7 +747,7 @@ fn handle_par_with_inline_equations(
 
     if !para.inlines.is_empty() {
         strip_cjk_spaces(&mut para);
-        doc.add_paragraph(para);
+        ctx.doc.add_paragraph(para);
     }
 
     // Return index of last consumed node (cursor - 1 since the outer loop does i += 1)
@@ -975,16 +853,7 @@ fn is_par_tag_at(children: &[HtmlNode], idx: usize) -> bool {
 
 /// Collect inline elements from nodes inside a paragraph.
 /// This handles Text, `Tag::Start` for strong/emph/equation/footnote, and HTML elements.
-#[allow(clippy::too_many_arguments)]
-fn collect_par_inlines(
-    children: &[HtmlNode],
-    html_doc: &HtmlDocument,
-    doc: &mut Document,
-    para: &mut Paragraph,
-    eq_state: &mut EquationState,
-    image_queue: &mut VecDeque<ImageData>,
-    bookmarks: &mut HashSet<String>,
-) {
+fn collect_par_inlines(children: &[HtmlNode], ctx: &mut WalkCtx, para: &mut Paragraph) {
     let mut i = 0;
     while i < children.len() {
         match &children[i] {
@@ -999,29 +868,11 @@ fn collect_par_inlines(
             }
             HtmlNode::Tag(tag) => {
                 if let Tag::Start(..) = tag {
-                    i = handle_inline_tag(
-                        tag,
-                        children,
-                        i,
-                        html_doc,
-                        doc,
-                        para,
-                        eq_state,
-                        image_queue,
-                        bookmarks,
-                    );
+                    i = handle_inline_tag(tag, children, i, ctx, para);
                 }
             }
             HtmlNode::Element(elem) => {
-                handle_inline_html_element(
-                    elem,
-                    html_doc,
-                    doc,
-                    para,
-                    eq_state,
-                    image_queue,
-                    bookmarks,
-                );
+                handle_inline_html_element(elem, ctx, para);
             }
             HtmlNode::Frame(_) => {}
         }
@@ -1031,18 +882,15 @@ fn collect_par_inlines(
 
 /// Process a single inline `Tag::Start` within a paragraph.
 /// Returns the new index (pointing at the matching End tag).
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+#[allow(clippy::too_many_lines)]
 fn handle_inline_tag(
     tag: &Tag,
     children: &[HtmlNode],
     i: usize,
-    html_doc: &HtmlDocument,
-    doc: &mut Document,
+    ctx: &mut WalkCtx,
     para: &mut Paragraph,
-    eq_state: &mut EquationState,
-    image_queue: &mut VecDeque<ImageData>,
-    bookmarks: &mut HashSet<String>,
 ) -> usize {
+    let html = ctx.html_doc;
     let Tag::Start(content, _) = tag else {
         return i;
     };
@@ -1050,7 +898,7 @@ fn handle_inline_tag(
     match elem_name {
         "strong" => {
             let loc = tag.location();
-            if let Some(strong) = html_doc
+            if let Some(strong) = html
                 .introspector
                 .query_first(&typst::foundations::Selector::Location(loc))
                 .and_then(|c| c.to_packed::<typst_library::model::StrongElem>().cloned())
@@ -1064,7 +912,7 @@ fn handle_inline_tag(
         }
         "emph" => {
             let loc = tag.location();
-            if let Some(emph) = html_doc
+            if let Some(emph) = html
                 .introspector
                 .query_first(&typst::foundations::Selector::Location(loc))
                 .and_then(|c| c.to_packed::<typst_library::model::EmphElem>().cloned())
@@ -1078,7 +926,7 @@ fn handle_inline_tag(
         }
         "equation" => {
             let loc = tag.location();
-            if let Some(c) = html_doc
+            if let Some(c) = html
                 .introspector
                 .query_first(&typst::foundations::Selector::Location(loc))
             {
@@ -1090,16 +938,16 @@ fn handle_inline_tag(
                 if is_block {
                     if !para.inlines.is_empty() {
                         let prev = std::mem::take(para);
-                        doc.add_paragraph(prev);
+                        ctx.doc.add_paragraph(prev);
                     }
-                    let eq_number = compute_equation_number(eq_packed, eq_state);
+                    let eq_number = compute_equation_number(eq_packed, ctx.eq_state);
                     let mut math_para = Paragraph::new();
                     // Insert bookmark if equation has a label
                     if let Some(label) = c.label() {
                         let label_str = format!("{}", label.resolve());
-                        if !bookmarks.contains(&label_str) {
-                            bookmarks.insert(label_str.clone());
-                            let bk_id = doc.next_bookmark_id();
+                        if !ctx.bookmarks.contains(&label_str) {
+                            ctx.bookmarks.insert(label_str.clone());
+                            let bk_id = ctx.doc.next_bookmark_id();
                             math_para.add_bookmark(bk_id, label_str);
                         }
                     }
@@ -1108,7 +956,7 @@ fn handle_inline_tag(
                     } else {
                         math_para.add_math(omml);
                     }
-                    doc.add_paragraph(math_para);
+                    ctx.doc.add_paragraph(math_para);
                 } else {
                     para.add_math(omml);
                 }
@@ -1124,7 +972,7 @@ fn handle_inline_tag(
         }
         "image" => {
             // Inline image within a paragraph
-            if let Some(img_data) = image_queue.pop_front() {
+            if let Some(img_data) = ctx.image_queue.pop_front() {
                 para.add_image(img_data);
             }
             find_tag_end(children, i, tag.location())
@@ -1133,7 +981,7 @@ fn handle_inline_tag(
             // Cross-reference: extract target label and display text
             let end = find_tag_end(children, i, tag.location());
             let loc = tag.location();
-            if let Some(c) = html_doc
+            if let Some(c) = html
                 .introspector
                 .query_first(&typst::foundations::Selector::Location(loc))
                 && let Some(ref_elem) = c.to_packed::<RefElem>()
@@ -1148,7 +996,7 @@ fn handle_inline_tag(
             // Hyperlink: extract URL and formatted display runs
             let end = find_tag_end(children, i, tag.location());
             let loc = tag.location();
-            if let Some(c) = html_doc
+            if let Some(c) = html
                 .introspector
                 .query_first(&typst::foundations::Selector::Location(loc))
                 && let Some(link_elem) = c.to_packed::<typst_library::model::LinkElem>()
@@ -1188,7 +1036,7 @@ fn handle_inline_tag(
         "cite-group" => {
             let end = find_tag_end(children, i, tag.location());
             let loc = tag.location();
-            if let Some(c) = html_doc
+            if let Some(c) = html
                 .introspector
                 .query_first(&typst::foundations::Selector::Location(loc))
                 && let Some(cite_group) = c.to_packed::<CiteGroup>()
@@ -1227,16 +1075,7 @@ fn apply_inline_format(tag_name: &str, run: &mut Run) {
 }
 
 /// Process a single inline HTML element within a paragraph.
-#[allow(clippy::too_many_arguments)]
-fn handle_inline_html_element(
-    elem: &HtmlElement,
-    html_doc: &HtmlDocument,
-    doc: &mut Document,
-    para: &mut Paragraph,
-    eq_state: &mut EquationState,
-    image_queue: &mut VecDeque<ImageData>,
-    bookmarks: &mut HashSet<String>,
-) {
+fn handle_inline_html_element(elem: &HtmlElement, ctx: &mut WalkCtx, para: &mut Paragraph) {
     let tag_str = tag_name(elem);
     match tag_str.as_str() {
         "strong" | "b" => {
@@ -1273,15 +1112,7 @@ fn handle_inline_html_element(
                     para.add_hyperlink(href, runs);
                 }
             } else {
-                collect_par_inlines(
-                    &elem.children,
-                    html_doc,
-                    doc,
-                    para,
-                    eq_state,
-                    image_queue,
-                    bookmarks,
-                );
+                collect_par_inlines(&elem.children, ctx, para);
             }
         }
         "sup" => {
@@ -1301,15 +1132,7 @@ fn handle_inline_html_element(
             }
         }
         _ => {
-            collect_par_inlines(
-                &elem.children,
-                html_doc,
-                doc,
-                para,
-                eq_state,
-                image_queue,
-                bookmarks,
-            );
+            collect_par_inlines(&elem.children, ctx, para);
         }
     }
 }
@@ -1402,15 +1225,10 @@ fn collect_html_inlines_with_doc(
 }
 
 /// Handle a block-level equation Tag.
-fn handle_equation(
-    tag: &Tag,
-    html_doc: &HtmlDocument,
-    doc: &mut Document,
-    eq_state: &mut EquationState,
-    bookmarks: &mut HashSet<String>,
-) {
+fn handle_equation(tag: &Tag, ctx: &mut WalkCtx) {
+    let html = ctx.html_doc;
     let loc = tag.location();
-    let Some(content) = html_doc
+    let Some(content) = html
         .introspector
         .query_first(&typst::foundations::Selector::Location(loc))
     else {
@@ -1428,23 +1246,23 @@ fn handle_equation(
         // Insert bookmark if equation has a label
         if let Some(label) = content.label() {
             let label_str = format!("{}", label.resolve());
-            if !bookmarks.contains(&label_str) {
-                bookmarks.insert(label_str.clone());
-                let bk_id = doc.next_bookmark_id();
+            if !ctx.bookmarks.contains(&label_str) {
+                ctx.bookmarks.insert(label_str.clone());
+                let bk_id = ctx.doc.next_bookmark_id();
                 para.add_bookmark(bk_id, label_str);
             }
         }
-        let eq_number = compute_equation_number(eq_packed, eq_state);
+        let eq_number = compute_equation_number(eq_packed, ctx.eq_state);
         if let Some(number) = eq_number {
             para.add_numbered_math(omml, number);
         } else {
             para.add_math(omml);
         }
-        doc.add_paragraph(para);
+        ctx.doc.add_paragraph(para);
     } else {
         // Inline equation at block level: wrap in a paragraph
         para.add_math(omml);
-        doc.add_paragraph(para);
+        ctx.doc.add_paragraph(para);
     }
 }
 
@@ -1471,41 +1289,25 @@ fn handle_block_footnote(
 }
 
 /// Handle a `table` Tag: find the HTML `<table>` element in the inner children and parse it.
-#[allow(clippy::too_many_arguments)]
-fn handle_table(
-    slice: &[HtmlNode],
-    html_doc: &HtmlDocument,
-    doc: &mut Document,
-    eq_state: &mut EquationState,
-    image_queue: &mut VecDeque<ImageData>,
-    bookmarks: &mut HashSet<String>,
-    page_breaks: &HashSet<Location>,
-) {
+fn handle_table(slice: &[HtmlNode], ctx: &mut WalkCtx) {
+    let html = ctx.html_doc;
     // Look for an HTML <table> element within the tag range
     for node in slice {
         if let HtmlNode::Element(elem) = node {
             let tag = tag_name(elem);
             if tag == "table" {
-                convert_html_table(elem, doc, html_doc);
+                convert_html_table(elem, ctx.doc, html);
                 return;
             }
             // Recurse into child elements to find the table
-            if find_and_convert_table_in_elem(elem, doc, html_doc) {
+            if find_and_convert_table_in_elem(elem, ctx.doc, html) {
                 return;
             }
         }
     }
     // Fallback: walk inner children normally
     let inner = &slice[1..slice.len().saturating_sub(1)];
-    walk_tags(
-        inner,
-        html_doc,
-        doc,
-        eq_state,
-        image_queue,
-        bookmarks,
-        page_breaks,
-    );
+    walk_tags(inner, ctx);
 }
 
 /// Recursively search for a `<table>` element within an HTML element tree.
@@ -1531,42 +1333,24 @@ fn find_and_convert_table_in_elem(
 
 /// Handle a `list` or `enum` Tag: find the HTML `<ul>` or `<ol>` element in the inner
 /// children and parse it.
-#[allow(clippy::too_many_arguments)]
-fn handle_list(
-    slice: &[HtmlNode],
-    html_doc: &HtmlDocument,
-    doc: &mut Document,
-    ordered: bool,
-    eq_state: &mut EquationState,
-    image_queue: &mut VecDeque<ImageData>,
-    bookmarks: &mut HashSet<String>,
-    page_breaks: &HashSet<Location>,
-) {
+fn handle_list(slice: &[HtmlNode], ordered: bool, ctx: &mut WalkCtx) {
     // Look for an HTML <ul> or <ol> element within the tag range
     for node in slice {
         if let HtmlNode::Element(elem) = node {
             let tag = tag_name(elem);
             if (ordered && tag == "ol") || (!ordered && tag == "ul") {
-                convert_html_list(elem, doc, ordered);
+                convert_html_list(elem, ctx.doc, ordered);
                 return;
             }
             // Recurse
-            if find_and_convert_list_in_elem(elem, doc, ordered) {
+            if find_and_convert_list_in_elem(elem, ctx.doc, ordered) {
                 return;
             }
         }
     }
     // Fallback: walk inner children normally
     let inner = &slice[1..slice.len().saturating_sub(1)];
-    walk_tags(
-        inner,
-        html_doc,
-        doc,
-        eq_state,
-        image_queue,
-        bookmarks,
-        page_breaks,
-    );
+    walk_tags(inner, ctx);
 }
 
 /// Recursively search for a `<ul>` or `<ol>` element.
@@ -2034,29 +1818,12 @@ fn convert_code_block(elem: &HtmlElement, doc: &mut Document) {
 }
 
 /// Convert a `<blockquote>` into indented paragraphs.
-#[allow(clippy::too_many_arguments)]
-fn convert_blockquote(
-    elem: &HtmlElement,
-    html_doc: &HtmlDocument,
-    doc: &mut Document,
-    eq_state: &mut EquationState,
-    image_queue: &mut VecDeque<ImageData>,
-    bookmarks: &mut HashSet<String>,
-    page_breaks: &HashSet<Location>,
-) {
-    let start_idx = doc.body.elements.len();
-    walk_tags(
-        &elem.children,
-        html_doc,
-        doc,
-        eq_state,
-        image_queue,
-        bookmarks,
-        page_breaks,
-    );
+fn convert_blockquote(elem: &HtmlElement, ctx: &mut WalkCtx) {
+    let start_idx = ctx.doc.body.elements.len();
+    walk_tags(&elem.children, ctx);
     // Typst quote block default pad = 1em per side
-    let indent_twips = doc.style.body_size_half_pt * 10;
-    for element in &mut doc.body.elements[start_idx..] {
+    let indent_twips = ctx.doc.style.body_size_half_pt * 10;
+    for element in &mut ctx.doc.body.elements[start_idx..] {
         if let BlockElement::Paragraph(para) = element {
             para.left_indent = Some(indent_twips);
             para.suppress_indent = true;
