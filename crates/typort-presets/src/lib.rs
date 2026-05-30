@@ -1,7 +1,7 @@
 #![warn(clippy::pedantic)]
 
 use serde::Deserialize;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// A journal preset loaded from a TOML file.
 #[derive(Debug, Clone, Deserialize)]
@@ -60,18 +60,32 @@ pub fn load_preset(presets_dir: &Path, name: &str) -> Result<Preset, String> {
     Ok(preset)
 }
 
-/// Load a preset from the built-in presets directory (relative to the workspace root).
-/// This searches a few common locations for the presets folder.
+/// Load a preset from the built-in presets directory.
+///
+/// Searches, in order: a `presets/` (or sibling `../presets/`) directory next
+/// to the running executable — so an installed binary finds its presets
+/// regardless of the working directory — then `presets/`, `../presets/`,
+/// `../../presets/` relative to the current directory, which keeps `cargo run`
+/// from the repo working during development.
 ///
 /// # Errors
 /// Returns an error if no preset directory is found or the preset cannot be loaded.
 pub fn load_builtin_preset(name: &str) -> Result<Preset, String> {
-    // Try common locations relative to the binary
-    let candidates = [
-        Path::new("presets"),
-        Path::new("../presets"),
-        Path::new("../../presets"),
-    ];
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    // Next to the installed executable (CWD-independent).
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(exe_dir) = exe.parent()
+    {
+        candidates.push(exe_dir.join("presets"));
+        candidates.push(exe_dir.join("../presets"));
+    }
+
+    // Relative to the current directory (development from the repo).
+    candidates.push(PathBuf::from("presets"));
+    candidates.push(PathBuf::from("../presets"));
+    candidates.push(PathBuf::from("../../presets"));
+
     for dir in &candidates {
         if dir.join(format!("{name}.toml")).exists() {
             return load_preset(dir, name);
