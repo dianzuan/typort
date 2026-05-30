@@ -22,7 +22,6 @@ type StyleOverrideMaps = (
 ///
 /// Walks the first few pages' frames to find the most common font family and size,
 /// which represent the body text styling.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub fn extract_document_style(paged: &PagedDocument) -> DocumentStyle {
     let mut ascii_font_counts: HashMap<String, usize> = HashMap::new();
     let mut cjk_font_counts: HashMap<String, usize> = HashMap::new();
@@ -144,17 +143,16 @@ pub(crate) fn is_cjk_char(c: char) -> bool {
     )
 }
 
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn detect_first_line_indent(paged: &PagedDocument, body_pt: f64) -> u32 {
     let Some(page) = paged.pages.first() else {
-        return (body_pt * 20.0 * 2.0).round() as u32;
+        return pt_to_twips(body_pt * 2.0);
     };
 
     let mut fragments = Vec::new();
     collect_text_fragments(&page.frame, Point::zero(), &mut fragments);
 
     if fragments.len() < 4 {
-        return (body_pt * 20.0 * 2.0).round() as u32;
+        return pt_to_twips(body_pt * 2.0);
     }
 
     // Group by y (lines), find the left-most x per line
@@ -171,7 +169,7 @@ fn detect_first_line_indent(paged: &PagedDocument, body_pt: f64) -> u32 {
     left_edges.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
     if left_edges.len() < 2 {
-        return (body_pt * 20.0 * 2.0).round() as u32;
+        return pt_to_twips(body_pt * 2.0);
     }
 
     // Find the two most common left-edge positions (body margin + indented margin)
@@ -190,18 +188,17 @@ fn detect_first_line_indent(paged: &PagedDocument, body_pt: f64) -> u32 {
         let indent_x = x_clusters[0].0.max(x_clusters[1].0);
         let indent_pt = indent_x - margin_x;
         if indent_pt > 1.0 && indent_pt < body_pt * 6.0 {
-            return (indent_pt * 20.0).round() as u32;
+            return pt_to_twips(indent_pt);
         }
     }
 
     // Fallback: 2 chars wide
-    (body_pt * 20.0 * 2.0).round() as u32
+    pt_to_twips(body_pt * 2.0)
 }
 
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn detect_line_spacing(y_positions: &[(f64, u32)], body_size_half_pt: u32) -> u32 {
     let body_pt = f64::from(body_size_half_pt) / 2.0;
-    let default_twips = (body_pt * 1.65 * 20.0).round() as u32;
+    let default_twips = pt_to_twips(body_pt * 1.65);
 
     // Filter to only body-sized text items (within ±1 half-point of detected body size)
     let mut body_ys: Vec<f64> = y_positions
@@ -230,7 +227,7 @@ fn detect_line_spacing(y_positions: &[(f64, u32)], body_size_half_pt: u32) -> u3
     // mixed within-paragraph and between-paragraph gaps.
     let mut gap_counts: HashMap<u32, usize> = HashMap::new();
     for &g in &gaps {
-        let key = (g * 2.0).round() as u32;
+        let key = pt_to_half_pt(g);
         *gap_counts.entry(key).or_insert(0) += 1;
     }
     let mode_key = gap_counts
@@ -238,7 +235,7 @@ fn detect_line_spacing(y_positions: &[(f64, u32)], body_size_half_pt: u32) -> u3
         .max_by_key(|(_, count)| *count)
         .map_or(0, |(key, _)| key);
     let mode_pitch = f64::from(mode_key) / 2.0;
-    let spacing = (mode_pitch * 20.0).round() as u32;
+    let spacing = pt_to_twips(mode_pitch);
     spacing.clamp(160, 960)
 }
 
@@ -251,7 +248,6 @@ fn detect_line_spacing(y_positions: &[(f64, u32)], body_size_half_pt: u32) -> u3
 /// justified text; a larger one indicates ragged (left-aligned) text.
 ///
 /// Returns `"both"` for justified, `"left"` for left-aligned.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn detect_justification(paged: &PagedDocument) -> String {
     // Collect right-edge x-positions of body text lines from the first few pages.
     // We group text items by y-position (line), then compute the right edge per line.
@@ -408,7 +404,6 @@ fn detect_heading_sizes(size_counts: &HashMap<u32, usize>, body_size: u32) -> [u
 ///
 /// For each heading-sized text item, measures the y-gap to its neighbors.
 /// Groups by which heading level the size matches, returns per-level arrays.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn detect_heading_spacing_per_level(
     body_size: u32,
     heading_sizes: &[u32; 5],
@@ -462,13 +457,13 @@ fn detect_heading_spacing_per_level(
             let gaps = &mut before_per_level[level];
             gaps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             let median = gaps[gaps.len() / 2];
-            result_before[level] = (median * 20.0).round().min(1500.0) as u32;
+            result_before[level] = pt_to_twips(median).min(1500);
         }
         if !after_per_level[level].is_empty() {
             let gaps = &mut after_per_level[level];
             gaps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             let median = gaps[gaps.len() / 2];
-            result_after[level] = (median * 20.0).round().min(800.0) as u32;
+            result_after[level] = pt_to_twips(median).min(800);
         }
     }
 
@@ -477,7 +472,6 @@ fn detect_heading_spacing_per_level(
 
 /// Detect body paragraph spacing from rendered y-gaps between
 /// consecutive body-text lines (excluding heading-sized text).
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn detect_body_paragraph_spacing(
     body_size: u32,
     heading_sizes: &[u32; 5],
@@ -540,19 +534,18 @@ fn detect_body_paragraph_spacing(
     };
 
     let spacing_pt = (median - normal_line_gap).max(0.0);
-    let spacing_twips = (spacing_pt * 20.0).round().min(1000.0) as u32;
+    let spacing_twips = pt_to_twips(spacing_pt).min(1000);
 
     // Use same value for before and after (Typst uses symmetric par spacing)
     (spacing_twips, spacing_twips)
 }
 
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn collect_y_and_size(frame: &Frame, offset: Point, items: &mut Vec<(f64, u32)>) {
     for (pos, item) in frame.items() {
         let abs_y = offset.y + pos.y;
         match item {
             FrameItem::Text(text_item) => {
-                let size_half_pt = (text_item.size.to_pt() * 2.0).round() as u32;
+                let size_half_pt = pt_to_half_pt(text_item.size.to_pt());
                 items.push((abs_y.to_pt(), size_half_pt));
             }
             FrameItem::Group(group) => {
@@ -564,7 +557,6 @@ fn collect_y_and_size(frame: &Frame, offset: Point, items: &mut Vec<(f64, u32)>)
 }
 
 /// Recursively collect font info split by script (ASCII vs CJK), sizes, and y-positions.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn collect_font_info_split(
     frame: &Frame,
     offset: Point,
@@ -579,7 +571,7 @@ fn collect_font_info_split(
         match item {
             FrameItem::Text(text_item) => {
                 let family = text_item.font.info().family.clone();
-                let size_half_pt = (text_item.size.to_pt() * 2.0).round() as u32;
+                let size_half_pt = pt_to_half_pt(text_item.size.to_pt());
                 let glyph_count = text_item.glyphs.len();
                 *size_counts.entry(size_half_pt).or_insert(0) += glyph_count;
                 y_positions.push((abs_y.to_pt(), size_half_pt));
@@ -613,18 +605,17 @@ fn collect_font_info_split(
 }
 
 /// Extract page dimensions from the `PagedDocument` and apply to `PageSettings`.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub fn extract_page_settings(paged: &PagedDocument, settings: &mut PageSettings) {
     let Some(page) = paged.pages.first() else {
         return;
     };
     let w = page.frame.width().to_pt();
     let h = page.frame.height().to_pt();
-    settings.width_twips = (w * 20.0).round() as u32;
-    settings.height_twips = (h * 20.0).round() as u32;
+    settings.width_twips = pt_to_twips(w);
+    settings.height_twips = pt_to_twips(h);
 
     let default_margin = default_margin_pt(w, h);
-    let default_twips = (default_margin * 20.0).round() as u32;
+    let default_twips = pt_to_twips(default_margin);
     settings.margin_top = default_twips;
     settings.margin_bottom = default_twips;
     settings.margin_left = default_twips;
@@ -963,16 +954,29 @@ fn extract_font_list(expr: typst_syntax::ast::Expr<'_>) -> Option<Vec<String>> {
     }
 }
 
+/// Convert a length in points to Word twips (1 pt = 20 twips), rounded.
+///
+/// The single place the `f64 → u32` measurement cast is performed. Negative or
+/// out-of-range inputs saturate to a valid `u32` (Rust `as` casts saturate),
+/// matching the document model's unsigned twip fields.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn numeric_to_twips(n: typst_syntax::ast::Numeric<'_>) -> u32 {
-    let pt = numeric_to_pt(n);
+pub(super) fn pt_to_twips(pt: f64) -> u32 {
     (pt * 20.0).round().max(0.0) as u32
 }
 
+/// Convert a length in points to Word half-points (1 pt = 2 half-pt), rounded.
+/// See [`pt_to_twips`] for the cast rationale.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn numeric_to_half_pt(n: typst_syntax::ast::Numeric<'_>) -> u32 {
-    let pt = numeric_to_pt(n);
+pub(super) fn pt_to_half_pt(pt: f64) -> u32 {
     (pt * 2.0).round().max(0.0) as u32
+}
+
+fn numeric_to_twips(n: typst_syntax::ast::Numeric<'_>) -> u32 {
+    pt_to_twips(numeric_to_pt(n))
+}
+
+fn numeric_to_half_pt(n: typst_syntax::ast::Numeric<'_>) -> u32 {
+    pt_to_half_pt(numeric_to_pt(n))
 }
 
 fn numeric_to_pt(n: typst_syntax::ast::Numeric<'_>) -> f64 {
@@ -1006,7 +1010,6 @@ pub struct DetectedSection {
 /// (if any) represents a change starting at `start_page` index. Each section's
 /// `page_settings` describes the settings BEFORE the break (i.e., the settings
 /// of the section that is ending).
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub fn detect_section_breaks(paged: &PagedDocument) -> Vec<DetectedSection> {
     if paged.pages.len() < 2 {
         return Vec::new();
@@ -1015,19 +1018,19 @@ pub fn detect_section_breaks(paged: &PagedDocument) -> Vec<DetectedSection> {
     let mut sections = Vec::new();
     let prev_w = paged.pages[0].frame.width();
     let prev_h = paged.pages[0].frame.height();
-    let mut prev_width = (prev_w.to_pt() * 20.0).round() as u32;
-    let mut prev_height = (prev_h.to_pt() * 20.0).round() as u32;
+    let mut prev_width = pt_to_twips(prev_w.to_pt());
+    let mut prev_height = pt_to_twips(prev_h.to_pt());
 
     for i in 1..paged.pages.len() {
-        let curr_w = (paged.pages[i].frame.width().to_pt() * 20.0).round() as u32;
-        let curr_h = (paged.pages[i].frame.height().to_pt() * 20.0).round() as u32;
+        let curr_w = pt_to_twips(paged.pages[i].frame.width().to_pt());
+        let curr_h = pt_to_twips(paged.pages[i].frame.height().to_pt());
         let tol = 20; // 1pt tolerance for rounding
         if curr_w.abs_diff(prev_width) > tol || curr_h.abs_diff(prev_height) > tol {
             let margin = default_margin_pt(
                 prev_w.to_pt().min(paged.pages[i].frame.width().to_pt()),
                 prev_h.to_pt().min(paged.pages[i].frame.height().to_pt()),
             );
-            let margin_twips = (margin * 20.0).round() as u32;
+            let margin_twips = pt_to_twips(margin);
             sections.push(DetectedSection {
                 start_page: i,
                 page_settings: PageSettings {
@@ -1659,14 +1662,13 @@ fn collect_styles_from_frame(
 /// Splitting by script prevents a CJK-dominated document from picking a CJK
 /// fallback font as the ASCII baseline (which would cause every Latin run to
 /// get a spurious font override) and vice-versa.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn detect_rendered_body_style(styles: &[PagedRunStyle]) -> (String, String, u32) {
     let mut ascii_font_counts: HashMap<&str, usize> = HashMap::new();
     let mut cjk_font_counts: HashMap<&str, usize> = HashMap::new();
     let mut size_counts: HashMap<u32, usize> = HashMap::new();
 
     for item in styles {
-        let half_pt = (item.size_pt * 2.0).round() as u32;
+        let half_pt = pt_to_half_pt(item.size_pt);
         *size_counts.entry(half_pt).or_insert(0) += item.text.len();
 
         let has_cjk = item.text.chars().any(is_cjk_char);
@@ -1725,7 +1727,6 @@ struct RunStyleOverride {
 
 /// Apply all per-run styles (color, font, size, bold, italic) and paragraph
 /// alignment from the `PagedDocument` to the document model in a single pass.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub fn apply_styles_from_paged(paged: &PagedDocument, doc: &mut typort_ooxml::document::Document) {
     let paged_styles = collect_paged_run_styles(paged);
     if paged_styles.is_empty() {
@@ -1746,7 +1747,7 @@ pub fn apply_styles_from_paged(paged: &PagedDocument, doc: &mut typort_ooxml::do
     if has_declared_cjk_font {
         body_cjk_fonts.insert(&doc.style.body_font_east_asia);
         for item in &paged_styles {
-            let size_half = (item.size_pt * 2.0).round() as u32;
+            let size_half = pt_to_half_pt(item.size_pt);
             if size_half == body_size_half_pt && item.text.chars().any(is_cjk_char) {
                 body_cjk_fonts.insert(&item.font_family);
             }
@@ -1783,7 +1784,6 @@ pub fn apply_styles_from_paged(paged: &PagedDocument, doc: &mut typort_ooxml::do
 ///
 /// Compares each rendered run against the detected baselines (font + size)
 /// and emits an override entry only when the run differs from the baseline.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn build_style_override_maps(
     paged_styles: &[PagedRunStyle],
     body_size_half_pt: u32,
@@ -1797,7 +1797,7 @@ fn build_style_override_maps(
     let mut text_overrides: HashMap<String, Vec<RunStyleOverride>> = HashMap::new();
 
     for item in paged_styles {
-        let size_half = (item.size_pt * 2.0).round() as u32;
+        let size_half = pt_to_half_pt(item.size_pt);
 
         let color = item.color_hex.clone();
 
@@ -2236,7 +2236,7 @@ mod tests {
     fn source_ast_extracts_page_margin() {
         let source = r#"#set page(margin: 2cm)"#;
         let ovr = extract_source_style_overrides(source);
-        let expected = (2.0_f64 * 72.0 / 2.54 * 20.0).round() as u32;
+        let expected = pt_to_twips(2.0_f64 * 72.0 / 2.54);
         assert_eq!(ovr.margin_top, Some(expected));
         assert_eq!(ovr.margin_left, Some(expected));
     }
