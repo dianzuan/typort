@@ -7,8 +7,8 @@ use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
 use crate::document::{
-    Alignment, BlockElement, Document, FootnoteFormat, ImageData, ImageFormat, InlineElement,
-    PageNumberFormat, ParagraphStyle, SectionBreak, SectionBreakType, Table,
+    Alignment, BlockElement, Document, DocumentStyle, FootnoteFormat, ImageData, ImageFormat,
+    InlineElement, PageNumberFormat, ParagraphStyle, SectionBreak, SectionBreakType, Table,
 };
 use crate::styles;
 
@@ -23,6 +23,20 @@ struct DocParts {
     footer: bool,
     bibliography: bool,
     content_width_twips: u32,
+}
+
+/// Read-only context threaded through the body writers (`write_paragraph`,
+/// `write_table`, `write_bibliography_sdt`), replacing the
+/// `(fn_format, doc_style, parts, image_counter, citation_id_counter)` tuple
+/// that previously appeared on each. All fields are shared, so this is passed
+/// by `&WriteCtx`; the `Cell`s carry the running image/citation ids.
+#[derive(Clone, Copy)]
+struct WriteCtx<'a> {
+    fn_format: &'a FootnoteFormat,
+    doc_style: &'a DocumentStyle,
+    parts: DocParts,
+    image_counter: &'a std::cell::Cell<usize>,
+    citation_id_counter: &'a std::cell::Cell<u32>,
 }
 
 /// Write a Document to a .docx file (ZIP archive) into the given writer.
@@ -570,42 +584,25 @@ fn generate_document_xml(
             .width_twips
             .saturating_sub(ps.margin_left + ps.margin_right),
     };
+    let ctx = WriteCtx {
+        fn_format: &doc.style.footnote_format,
+        doc_style: &doc.style,
+        parts,
+        image_counter: &image_counter,
+        citation_id_counter: &citation_id_counter,
+    };
     elem.write_inner_content(|w| {
         w.create_element("w:body").write_inner_content(|body_w| {
             for element in &doc.body.elements {
                 match element {
                     BlockElement::Paragraph(para) => {
-                        write_paragraph(
-                            body_w,
-                            para,
-                            &doc.style.footnote_format,
-                            &doc.style,
-                            parts,
-                            &image_counter,
-                            &citation_id_counter,
-                        )?;
+                        write_paragraph(body_w, para, &ctx)?;
                     }
                     BlockElement::Table(table) => {
-                        write_table(
-                            body_w,
-                            table,
-                            &doc.style.footnote_format,
-                            &doc.style,
-                            parts,
-                            &image_counter,
-                            &citation_id_counter,
-                        )?;
+                        write_table(body_w, table, &ctx)?;
                     }
                     BlockElement::BibliographyBlock { paragraphs } => {
-                        write_bibliography_sdt(
-                            body_w,
-                            paragraphs,
-                            &doc.style.footnote_format,
-                            &doc.style,
-                            parts,
-                            &image_counter,
-                            &citation_id_counter,
-                        )?;
+                        write_bibliography_sdt(body_w, paragraphs, &ctx)?;
                     }
                 }
             }
@@ -718,11 +715,7 @@ fn write_section_page_settings<W: Write>(
 fn write_paragraph<W: Write>(
     writer: &mut Writer<W>,
     para: &crate::document::Paragraph,
-    fn_format: &crate::document::FootnoteFormat,
-    doc_style: &crate::document::DocumentStyle,
-    parts: DocParts,
-    image_counter: &std::cell::Cell<usize>,
-    citation_id_counter: &std::cell::Cell<u32>,
+    ctx: &WriteCtx,
 ) -> io::Result<()> {
     writer.create_element("w:p").write_inner_content(|w| {
         let has_style = para.style.is_some();
@@ -809,7 +802,7 @@ fn write_paragraph<W: Write>(
                             .with_attribute(("w:val", "right"))
                             .with_attribute((
                                 "w:pos",
-                                parts.content_width_twips.to_string().as_str(),
+                                ctx.parts.content_width_twips.to_string().as_str(),
                             ))
                             .write_empty()?;
                         Ok(())
@@ -835,7 +828,7 @@ fn write_paragraph<W: Write>(
                         .write_empty()?;
                 } else if has_hanging {
                     // Bibliography hanging indent: 2em computed from body font size
-                    let bib_indent = doc_style.body_size_half_pt * 10 * 2;
+                    let bib_indent = ctx.doc_style.body_size_half_pt * 10 * 2;
                     let bib_indent_str = bib_indent.to_string();
                     ppr.create_element("w:ind")
                         .with_attribute(("w:left", bib_indent_str.as_str()))
@@ -844,8 +837,8 @@ fn write_paragraph<W: Write>(
                         .write_empty()?;
                 } else if has_list {
                     // List indent: left = 2em, hanging = 1em, computed from body font size
-                    let list_left = doc_style.body_size_half_pt * 10 * 2;
-                    let list_hanging = doc_style.body_size_half_pt * 10;
+                    let list_left = ctx.doc_style.body_size_half_pt * 10 * 2;
+                    let list_hanging = ctx.doc_style.body_size_half_pt * 10;
                     let list_left_str = list_left.to_string();
                     let list_hanging_str = list_hanging.to_string();
                     ppr.create_element("w:ind")
@@ -872,15 +865,15 @@ fn write_paragraph<W: Write>(
                 }
                 // Emit section break (w:sectPr inside w:pPr)
                 if let Some(section) = &para.section_break {
-                    write_section_break(ppr, section, doc_style)?;
+                    write_section_break(ppr, section, ctx.doc_style)?;
                 }
                 Ok(())
             })?;
         }
         for inline in &para.inlines {
             match inline {
-                InlineElement::Text(run) => write_run(w, run, doc_style)?,
-                InlineElement::FootnoteRef(id) => write_footnote_ref(w, *id, fn_format)?,
+                InlineElement::Text(run) => write_run(w, run, ctx.doc_style)?,
+                InlineElement::FootnoteRef(id) => write_footnote_ref(w, *id, ctx.fn_format)?,
                 InlineElement::Math {
                     omml_xml,
                     equation_number,
@@ -891,9 +884,9 @@ fn write_paragraph<W: Write>(
                     }
                 }
                 InlineElement::Image(img) => {
-                    let n = image_counter.get() + 1;
-                    image_counter.set(n);
-                    let rid = image_rel_id(n, parts);
+                    let n = ctx.image_counter.get() + 1;
+                    ctx.image_counter.set(n);
+                    let rid = image_rel_id(n, ctx.parts);
                     write_image_inline(w, img, n, &rid)?;
                 }
                 InlineElement::Bookmark { id, name } => {
@@ -909,7 +902,7 @@ fn write_paragraph<W: Write>(
                     write_field_ref(w, bookmark_name, display_text)?;
                 }
                 InlineElement::Hyperlink { url, runs } => {
-                    write_hyperlink(w, url, runs, doc_style)?;
+                    write_hyperlink(w, url, runs, ctx.doc_style)?;
                 }
                 InlineElement::PageBreak => {
                     write_page_break(w)?;
@@ -921,9 +914,9 @@ fn write_paragraph<W: Write>(
                     write_tab(w)?;
                 }
                 InlineElement::Citation { keys, display_text } => {
-                    let sdt_id = citation_id_counter.get();
-                    citation_id_counter.set(sdt_id + 1);
-                    let locale_id = lang_to_lcid(&doc_style.lang_east_asia);
+                    let sdt_id = ctx.citation_id_counter.get();
+                    ctx.citation_id_counter.set(sdt_id + 1);
+                    let locale_id = lang_to_lcid(&ctx.doc_style.lang_east_asia);
                     write_citation_sdt(w, keys, display_text, sdt_id, locale_id)?;
                 }
             }
@@ -1057,15 +1050,7 @@ fn write_run<W: Write>(
 }
 
 #[allow(clippy::too_many_lines)]
-fn write_table<W: Write>(
-    writer: &mut Writer<W>,
-    table: &Table,
-    fn_format: &crate::document::FootnoteFormat,
-    doc_style: &crate::document::DocumentStyle,
-    parts: DocParts,
-    image_counter: &std::cell::Cell<usize>,
-    citation_id_counter: &std::cell::Cell<u32>,
-) -> io::Result<()> {
+fn write_table<W: Write>(writer: &mut Writer<W>, table: &Table, ctx: &WriteCtx) -> io::Result<()> {
     // Determine number of columns from the first row for equal-width distribution
     let num_cols = table
         .rows
@@ -1147,27 +1132,11 @@ fn write_table<W: Write>(
                             for item in &cell.content {
                                 match item {
                                     crate::document::CellContent::Paragraph(para) => {
-                                        write_paragraph(
-                                            tc_w,
-                                            para,
-                                            fn_format,
-                                            doc_style,
-                                            parts,
-                                            image_counter,
-                                            citation_id_counter,
-                                        )?;
+                                        write_paragraph(tc_w, para, ctx)?;
                                         has_trailing_para = true;
                                     }
                                     crate::document::CellContent::Table(nested_tbl) => {
-                                        write_table(
-                                            tc_w,
-                                            nested_tbl,
-                                            fn_format,
-                                            doc_style,
-                                            parts,
-                                            image_counter,
-                                            citation_id_counter,
-                                        )?;
+                                        write_table(tc_w, nested_tbl, ctx)?;
                                         has_trailing_para = false;
                                     }
                                 }
@@ -1181,15 +1150,7 @@ fn write_table<W: Write>(
                             tc_w.create_element("w:p").write_empty()?;
                         } else {
                             for para in &cell.paragraphs {
-                                write_paragraph(
-                                    tc_w,
-                                    para,
-                                    fn_format,
-                                    doc_style,
-                                    parts,
-                                    image_counter,
-                                    citation_id_counter,
-                                )?;
+                                write_paragraph(tc_w, para, ctx)?;
                             }
                         }
                         Ok(())
@@ -1665,17 +1626,13 @@ fn write_citation_sdt<W: Write>(
 fn write_bibliography_sdt<W: Write>(
     writer: &mut Writer<W>,
     paragraphs: &[crate::document::Paragraph],
-    fn_format: &FootnoteFormat,
-    doc_style: &crate::document::DocumentStyle,
-    parts: DocParts,
-    image_counter: &std::cell::Cell<usize>,
-    citation_id_counter: &std::cell::Cell<u32>,
+    ctx: &WriteCtx,
 ) -> io::Result<()> {
     writer.create_element("w:sdt").write_inner_content(|sdt| {
         // SDT properties with bibliography marker
         sdt.create_element("w:sdtPr").write_inner_content(|pr| {
-            let sdt_id = citation_id_counter.get();
-            citation_id_counter.set(sdt_id + 1);
+            let sdt_id = ctx.citation_id_counter.get();
+            ctx.citation_id_counter.set(sdt_id + 1);
             let id_str = sdt_id.to_string();
             pr.create_element("w:id")
                 .with_attribute(("w:val", id_str.as_str()))
@@ -1717,15 +1674,7 @@ fn write_bibliography_sdt<W: Write>(
                 })?;
                 // Cached bibliography paragraphs
                 for para in paragraphs {
-                    write_paragraph(
-                        content,
-                        para,
-                        fn_format,
-                        doc_style,
-                        parts,
-                        image_counter,
-                        citation_id_counter,
-                    )?;
+                    write_paragraph(content, para, ctx)?;
                 }
                 // Closing paragraph with field end
                 content.create_element("w:p").write_inner_content(|pw| {
