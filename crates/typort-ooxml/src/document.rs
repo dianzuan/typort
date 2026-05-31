@@ -138,6 +138,8 @@ pub enum InlineElement {
     Hyperlink { url: String, runs: Vec<Run> },
     /// A page break (`w:br type="page"`).
     PageBreak,
+    /// A column break (`w:br type="column"`) — `#colbreak()` in a multi-column page.
+    ColumnBreak,
     /// A Table of Contents field code (`TOC \o "1-N" \h \z \u`).
     FieldToc {
         /// Maximum outline depth (e.g. 3 → headings 1–3).
@@ -381,6 +383,10 @@ impl Paragraph {
     /// Add a page break.
     pub fn add_page_break(&mut self) {
         self.inlines.push(InlineElement::PageBreak);
+    }
+
+    pub fn add_column_break(&mut self) {
+        self.inlines.push(InlineElement::ColumnBreak);
     }
 
     /// Add a tab character.

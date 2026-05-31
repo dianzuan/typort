@@ -907,6 +907,9 @@ fn write_paragraph<W: Write>(
                 InlineElement::PageBreak => {
                     write_page_break(w)?;
                 }
+                InlineElement::ColumnBreak => {
+                    write_column_break(w)?;
+                }
                 InlineElement::FieldToc { max_depth } => {
                     write_toc_field(w, *max_depth)?;
                 }
@@ -1733,6 +1736,16 @@ fn write_page_break<W: Write>(writer: &mut Writer<W>) -> io::Result<()> {
     writer.create_element("w:r").write_inner_content(|w| {
         w.create_element("w:br")
             .with_attribute(("w:type", "page"))
+            .write_empty()?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
+fn write_column_break<W: Write>(writer: &mut Writer<W>) -> io::Result<()> {
+    writer.create_element("w:r").write_inner_content(|w| {
+        w.create_element("w:br")
+            .with_attribute(("w:type", "column"))
             .write_empty()?;
         Ok(())
     })?;

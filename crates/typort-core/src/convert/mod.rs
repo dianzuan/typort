@@ -188,6 +188,12 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
     // 12c. Post-processing: detect small caps from source text
     apply_smallcaps_from_source(world, &mut doc);
 
+    // 12c-bis. Post-processing: insert column breaks from source text.
+    // ColbreakElem is consumed during compilation (queryable in neither the
+    // HtmlDocument nor PagedDocument), so detect `#colbreak()` in the source AST
+    // and re-insert it after the paragraph it followed.
+    apply_column_breaks_from_source(world, &mut doc);
+
     // 12d. Build element→page mapping from block tag locations for precise
     //       section break and horizontal rule placement.
     let element_page_map: Vec<usize> = if let Some(paged) = &paged_doc {
@@ -2128,6 +2134,80 @@ fn apply_smallcaps_from_source(world: &TyportWorld, doc: &mut Document) {
             }
         }
     }
+}
+
+/// Insert a column break after the paragraph each `#colbreak()` followed.
+///
+/// `ColbreakElem` is consumed during compilation and is queryable in neither
+/// the `HtmlDocument` nor the `PagedDocument`, so it is recovered from the
+/// source AST: for each `#colbreak()` we take the text of the markup node
+/// immediately before it as an anchor, then insert a column-break paragraph
+/// after the matching body paragraph. Anchors are consumed in order, so
+/// repeated text is handled left-to-right.
+fn apply_column_breaks_from_source(world: &TyportWorld, doc: &mut Document) {
+    let anchors = extract_colbreak_anchors(world.main_source().text());
+
+    for anchor in anchors {
+        // Find the first body paragraph whose text ends with the anchor, and
+        // insert a column-break paragraph after it.
+        let pos = doc.body.elements.iter().position(|el| {
+            if let BlockElement::Paragraph(p) = el {
+                let t = p.text_content();
+                let t = t.trim();
+                !t.is_empty() && (t == anchor || t.ends_with(anchor.as_str()))
+            } else {
+                false
+            }
+        });
+        if let Some(idx) = pos {
+            let mut br = Paragraph::new();
+            br.add_column_break();
+            doc.body
+                .elements
+                .insert(idx + 1, BlockElement::Paragraph(br));
+        }
+    }
+}
+
+/// Is this AST node a `#colbreak()` function call?
+fn is_colbreak_call(node: &typst_syntax::SyntaxNode) -> bool {
+    node.kind() == typst_syntax::SyntaxKind::FuncCall
+        && node
+            .cast::<typst_syntax::ast::FuncCall<'_>>()
+            .is_some_and(|fc| {
+                matches!(fc.callee(), typst_syntax::ast::Expr::Ident(i) if i.as_str() == "colbreak")
+            })
+}
+
+/// Walk the AST; for each `#colbreak()`, record the trimmed text of the markup
+/// node immediately before it (its anchor paragraph).
+fn collect_colbreak_anchors(node: &typst_syntax::SyntaxNode, out: &mut Vec<String>) {
+    // Within each node's direct children, track the most recent Text node so a
+    // following colbreak call can use it as the anchor.
+    let mut last_text: Option<String> = None;
+    for child in node.children() {
+        if child.kind() == typst_syntax::SyntaxKind::Text {
+            let t = child.text().trim().to_string();
+            if !t.is_empty() {
+                last_text = Some(t);
+            }
+        } else if is_colbreak_call(child)
+            && let Some(t) = last_text.take()
+        {
+            out.push(t);
+        }
+        // Recurse for nested markup (e.g. inside #page(columns: 2)[...]).
+        collect_colbreak_anchors(child, out);
+    }
+}
+
+/// Collect, for each `#colbreak()` call in the source, the trimmed text of the
+/// markup node immediately preceding it (the anchor paragraph).
+fn extract_colbreak_anchors(source: &str) -> Vec<String> {
+    let root = typst_syntax::parse(source);
+    let mut anchors = Vec::new();
+    collect_colbreak_anchors(&root, &mut anchors);
+    anchors
 }
 
 /// Extract text content from all `smallcaps` function calls in the source AST.

@@ -4660,7 +4660,19 @@ fn issue_column_break() {
         xml.contains("Second column"),
         "second column content present"
     );
-    assert!(xml.contains("column"), "should reference column layout");
+    // #colbreak() must become a real column break, not be dropped.
+    assert!(
+        xml.contains(r#"<w:br w:type="column"/>"#),
+        "colbreak should emit <w:br w:type=\"column\"/>, got: {xml}"
+    );
+    // It sits after the first column's content and before the second's.
+    let br = xml.find(r#"<w:br w:type="column"/>"#).unwrap();
+    let first = xml.find("More first column text").unwrap();
+    let second = xml.find("Second column content").unwrap();
+    assert!(
+        first < br && br < second,
+        "column break should fall between the first and second column content"
+    );
 }
 
 #[test]
