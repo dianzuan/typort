@@ -241,9 +241,12 @@ pub(super) fn extract_lines_from_all_pages(paged: &PagedDocument) -> Vec<FrameLi
         for item in &items {
             *sizes.entry((item.size_pt * 10.0) as i32).or_default() += item.text.len();
         }
+        // Tie-break on the smaller size so the detected body size is
+        // deterministic (a bare `max_by_key` would pick whichever size the
+        // HashMap iterated first when two tie on glyph count).
         sizes
             .into_iter()
-            .max_by_key(|(_, c)| *c)
+            .max_by_key(|(s, c)| (*c, std::cmp::Reverse(*s)))
             .map_or(10.5, |(s, _)| f64::from(s) / 10.0)
     });
 

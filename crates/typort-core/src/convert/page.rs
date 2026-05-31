@@ -41,21 +41,28 @@ pub fn extract_document_style(paged: &PagedDocument) -> DocumentStyle {
         );
     }
 
-    // Detect body font (most common per script)
+    // Detect body font (most common per script). On a count tie, fall back to
+    // the alphabetically-first name so the choice is deterministic across runs
+    // (a bare `max_by_key` on count would pick whichever the HashMap happened to
+    // iterate first).
     let body_font_ascii = ascii_font_counts
         .iter()
-        .max_by_key(|(_, c)| *c)
+        .max_by_key(|(f, c)| (**c, std::cmp::Reverse((**f).clone())))
         .map_or_else(|| "Times New Roman".to_string(), |(f, _)| f.clone());
 
     let body_font_east_asia = cjk_font_counts
         .iter()
-        .max_by_key(|(_, c)| *c)
+        .max_by_key(|(f, c)| (**c, std::cmp::Reverse((**f).clone())))
         .map_or_else(|| body_font_ascii.clone(), |(f, _)| f.clone());
 
-    // Detect body size (most common)
+    // Detect body size (most common). On a count tie, prefer the smaller size:
+    // body text is the baseline, and emphasis/headings are larger. The
+    // `Reverse(size)` tie-break also makes the result deterministic — without it
+    // a single heading line tying the body line (e.g. a one-line document) would
+    // flip the detected body size between runs (HashMap iteration order).
     let body_size_half_pt = size_counts
         .iter()
-        .max_by_key(|(_, count)| *count)
+        .max_by_key(|(size, count)| (**count, std::cmp::Reverse(**size)))
         .map_or(21, |(size, _)| *size);
 
     let body_pt = f64::from(body_size_half_pt) / 2.0;
@@ -84,7 +91,7 @@ pub fn extract_document_style(paged: &PagedDocument) -> DocumentStyle {
                 || fl.contains("source code"))
                 && f.as_str() != body_font_ascii
         })
-        .max_by_key(|(_, c)| *c)
+        .max_by_key(|(f, c)| (**c, std::cmp::Reverse((**f).clone())))
         .map_or_else(|| "Courier New".to_string(), |(f, _)| f.clone());
 
     // Detect sizes for code, footnotes, headings from actual rendered data
@@ -232,7 +239,7 @@ fn detect_line_spacing(y_positions: &[(f64, u32)], body_size_half_pt: u32) -> u3
     }
     let mode_key = gap_counts
         .into_iter()
-        .max_by_key(|(_, count)| *count)
+        .max_by_key(|(key, count)| (*count, std::cmp::Reverse(*key)))
         .map_or(0, |(key, _)| key);
     let mode_pitch = f64::from(mode_key) / 2.0;
     let spacing = pt_to_twips(mode_pitch);
@@ -365,7 +372,7 @@ fn detect_code_size(size_counts: &HashMap<u32, usize>, body_size: u32) -> u32 {
     size_counts
         .iter()
         .filter(|(sz, _)| **sz < body_size && **sz >= 12)
-        .max_by_key(|(_, c)| *c)
+        .max_by_key(|(sz, c)| (**c, std::cmp::Reverse(**sz)))
         .map_or(body_size.saturating_sub(3).max(14), |(sz, _)| *sz)
 }
 
@@ -1632,17 +1639,21 @@ fn detect_rendered_body_style(styles: &[PagedRunStyle]) -> (String, String, u32)
         }
     }
 
+    // Tie-breaks (alphabetically-first name, smaller size) keep this detection
+    // deterministic and consistent with `extract_document_style`; otherwise a
+    // one-line-each document would flip body size between runs (HashMap order)
+    // and shuffle which runs receive an explicit size override.
     let body_font_ascii = ascii_font_counts
         .into_iter()
-        .max_by_key(|(_, c)| *c)
+        .max_by_key(|(f, c)| (*c, std::cmp::Reverse(*f)))
         .map_or_else(|| "Times New Roman".to_string(), |(f, _)| f.to_string());
     let body_font_cjk = cjk_font_counts
         .into_iter()
-        .max_by_key(|(_, c)| *c)
+        .max_by_key(|(f, c)| (*c, std::cmp::Reverse(*f)))
         .map_or_else(|| body_font_ascii.clone(), |(f, _)| f.to_string());
     let body_size = size_counts
         .into_iter()
-        .max_by_key(|(_, c)| *c)
+        .max_by_key(|(s, c)| (*c, std::cmp::Reverse(*s)))
         .map_or(21, |(s, _)| s);
 
     (body_font_ascii, body_font_cjk, body_size)

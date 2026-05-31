@@ -2993,6 +2993,34 @@ fn fixture_doc_xml(fixture: &str) -> String {
     std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap()
 }
 
+/// Regression: font/size detection must be deterministic.
+///
+/// `doc_title` has one heading line and one body line of equal glyph count,
+/// producing a 1:1 tie in the size-frequency map. A bare `max_by_key` over that
+/// `HashMap` resolved the tie by iteration order, so the detected body size
+/// (and the derived line pitch, and which runs carry an explicit `w:sz`) flipped
+/// between runs. The detection now breaks ties deterministically — preferring
+/// the smaller size as the body baseline — so output is byte-identical run to
+/// run. (Rust's `HashMap` reseeds per instance within a process, so repeated
+/// conversion in one test genuinely exercises different iteration orders.)
+#[test]
+fn doc_title_conversion_is_deterministic() {
+    let first = fixture_doc_xml("doc_title");
+    for _ in 0..8 {
+        assert_eq!(
+            fixture_doc_xml("doc_title"),
+            first,
+            "doc_title output must be byte-identical across runs"
+        );
+    }
+    // Pin the semantically-correct settled value: an 11pt body (line pitch 288),
+    // not the 15.5pt heading size (which would yield line pitch 405).
+    assert!(
+        first.contains("w:linePitch=\"288\""),
+        "body should be detected as 11pt (line pitch 288): {first}"
+    );
+}
+
 #[test]
 fn issue_cjk_linebreak_no_spurious_spaces() {
     let xml = fixture_doc_xml("issue_cjk_linebreak");
