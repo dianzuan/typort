@@ -29,6 +29,17 @@ should convert to an editable `.docx`. For how it works, read
    back to Paged geometry only for things HTML cannot express. Geometry inference
    is the lossy path we exist to avoid — keep it contained.
 
+4. **Before declaring something impossible, check all three sources.** If Typst
+   renders it correctly, the information exists *somewhere* — a "can't" almost
+   always means "not in the representation I happened to look at." Elements consumed
+   during compilation are queryable in neither the HtmlDocument nor the
+   PagedDocument (introspector hits = 0), yet are still present in the **source AST**:
+   `#colbreak()`, `smallcaps`, `#set text(lang:)`, and `datetime.today()`'s inputs
+   are all recovered from source, not from the compiled output. Probe (compile +
+   query/parse) before concluding, and look for a precedent — smallcaps' source-AST
+   recovery was the template for colbreak. Say "I haven't found a way" rather than
+   "there is no way" until you have proof there is no principled rule.
+
 ## Architecture in one paragraph
 
 typort compiles the same source to **`HtmlDocument`** (semantics + document order
