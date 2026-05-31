@@ -86,11 +86,6 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
     if let Some(paged) = &paged_doc {
         doc.style = page::extract_document_style(paged);
         page::extract_page_settings(paged, &mut doc.page_settings);
-
-        // 3a. Detect columns from page layout (heuristic fallback)
-        if let Some(cols) = page::detect_columns(paged) {
-            doc.page_settings.columns = Some(cols);
-        }
     }
 
     // 3b. Override with authoritative values from source AST
@@ -107,6 +102,13 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
         }
     }
     apply_source_overrides(&source_overrides, &mut doc);
+
+    // Note: page column count comes solely from the source AST
+    // (`#set page(columns:)` / `#page(columns:)`, parsed above). There is no
+    // geometric fallback — left-edge clustering cannot distinguish a real
+    // multi-column page from a wide table or aligned equations, and measurement
+    // showed it misread ~17 single-column fixtures as multi-column while the
+    // genuine three column documents are all covered by the source parse.
 
     // 4. First pass: extract footnote content from <section role="doc-endnotes">
     let body = find_body(&html_doc.root).unwrap_or(&html_doc.root);

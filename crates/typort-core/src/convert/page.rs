@@ -748,6 +748,15 @@ fn collect_set_rules(node: &typst_syntax::SyntaxNode, ovr: &mut SourceStyleOverr
         }
     }
 
+    // Also honor the `#page(...)` function-call form (e.g. `#page(columns: 2)[…]`),
+    // not just `#set page(...)`. Its named args carry the same page settings.
+    if node.kind() == SyntaxKind::FuncCall
+        && let Some(call) = node.cast::<typst_syntax::ast::FuncCall<'_>>()
+        && matches!(call.callee(), typst_syntax::ast::Expr::Ident(i) if i.as_str() == "page")
+    {
+        parse_page_args(call.args(), ovr);
+    }
+
     for child in node.children() {
         collect_set_rules(child, ovr);
     }
@@ -1521,109 +1530,6 @@ fn roman_value(s: &str, uppercase: bool) -> u32 {
         }
     }
     total
-}
-
-// ---------------------------------------------------------------------------
-// Column detection
-// ---------------------------------------------------------------------------
-
-/// Detect the number of columns from the text layout of the first page.
-///
-/// Analyzes left-edge x-positions of text items to find distinct column groups.
-/// In a multi-column layout, text items cluster at distinct x positions — one
-/// per column's left margin. We detect columns by grouping these left edges.
-/// Returns `None` if single-column (the default), or `Some(n)` for n columns.
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::cast_precision_loss,
-    clippy::missing_panics_doc
-)]
-pub fn detect_columns(paged: &PagedDocument) -> Option<u32> {
-    let page = paged.pages.first()?;
-    let page_width = page.frame.width().to_pt();
-    let page_height = page.frame.height().to_pt();
-
-    // Collect all text fragments with positions
-    let mut fragments = Vec::new();
-    collect_text_fragments(&page.frame, Point::zero(), &mut fragments);
-
-    // Filter to body-area text only (exclude headers/footers using margin-based zones)
-    let (body_top, body_bottom) = find_body_zone(page_width, page_height, None, None);
-    let body_frags: Vec<&TextFragment> = fragments
-        .iter()
-        .filter(|f| f.y >= body_top && f.y <= body_bottom)
-        .collect();
-
-    if body_frags.len() < 4 {
-        return None;
-    }
-
-    // Collect the left-edge x-positions of all body text fragments.
-    // In a multi-column layout, most text items start at one of N distinct
-    // x-positions (one per column's left margin). Some items (headings, indented
-    // text) may start at different positions, but the dominant clusters reveal columns.
-    let mut x_starts: Vec<f64> = body_frags.iter().map(|f| f.x).collect();
-    x_starts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-
-    // Group x-positions into clusters using a tolerance of 5pt.
-    // Each cluster represents a potential column left margin.
-    let cluster_tol = 5.0;
-    let mut clusters: Vec<(f64, usize)> = Vec::new(); // (center_x, count)
-    for &x in &x_starts {
-        let found = clusters
-            .iter_mut()
-            .find(|(cx, _)| (x - *cx).abs() < cluster_tol);
-        if let Some((cx, count)) = found {
-            // Update running average
-            *cx = (*cx * (*count as f64) + x) / (*count as f64 + 1.0);
-            *count += 1;
-        } else {
-            clusters.push((x, 1));
-        }
-    }
-
-    // Sort clusters by x-position
-    clusters.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-
-    // Filter to significant clusters (at least 3 text items)
-    let significant: Vec<(f64, usize)> = clusters
-        .into_iter()
-        .filter(|(_, count)| *count >= 3)
-        .collect();
-
-    if significant.len() < 2 {
-        return None;
-    }
-
-    // Check if the significant clusters are separated by a substantial gap.
-    // In a 2-column layout, the gap between the first cluster (left column)
-    // and the second cluster (right column) should be at least 20% of page width.
-    // For 3 columns, we'd see 3 evenly spaced clusters.
-    let min_gap = page_width * 0.15; // at least 15% of page width
-
-    // Find clusters that are well-separated
-    let mut column_clusters: Vec<f64> = vec![significant[0].0];
-    for &(cx, _) in &significant[1..] {
-        let last = *column_clusters.last().unwrap();
-        if cx - last >= min_gap {
-            column_clusters.push(cx);
-        }
-    }
-
-    let n_cols = column_clusters.len();
-    if (2..=4).contains(&n_cols) {
-        // Verify: each column cluster should be roughly evenly spaced
-        // and columns should span the page width reasonably
-        let first_col = column_clusters[0];
-        let last_col = *column_clusters.last().unwrap();
-        let span = last_col - first_col;
-        if span > page_width * 0.3 {
-            return Some(n_cols as u32);
-        }
-    }
-
-    None
 }
 
 // ---------------------------------------------------------------------------

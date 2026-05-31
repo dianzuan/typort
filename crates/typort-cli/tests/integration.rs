@@ -1544,6 +1544,36 @@ fn columns_detected_in_document_model() {
 }
 
 #[test]
+fn wide_table_is_not_misread_as_page_columns() {
+    // business_report has a 4-column #table but no page-level columns. The page
+    // column count comes only from the source AST, so a wide table's aligned
+    // cell edges must not be mistaken for a multi-column page layout.
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/business_report.typ"))
+            .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+    assert_eq!(
+        doc.page_settings.columns, None,
+        "a document whose only `columns:` is on a #table must stay single-column"
+    );
+}
+
+#[test]
+fn page_columns_func_call_form_detected() {
+    // The `#page(columns: 2)[…]` function-call form (not just `#set page(...)`)
+    // must be recognized from the source AST.
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/issue_column_break.typ"))
+            .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+    assert_eq!(
+        doc.page_settings.columns,
+        Some(2),
+        "#page(columns: 2)[…] should yield 2 columns"
+    );
+}
+
+#[test]
 fn columns_produces_w_cols_in_xml() {
     let doc_xml = fixture_doc_xml("columns_test");
 
