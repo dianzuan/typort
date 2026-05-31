@@ -146,6 +146,14 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
                     }
                 })
                 .count();
+            // Treat the line as already-present when a majority of significant
+            // words are found elsewhere. This majority rule (not all-or-nothing)
+            // is required for math-interleaved lines: a theorem/proof/footnote
+            // line whose prose is already in the DOM as an OMML paragraph will
+            // have its math tokens (𝑓, [𝑎,𝑏], 𝛼) fail to byte-match the OMML, so
+            // an `== sig_count` rule would re-insert it as a flat-text duplicate.
+            // An empirical before/after scan over all fixtures confirmed the
+            // stricter rule duplicated content in 21 documents.
             if sig_count >= 2 && matched * 2 > sig_count {
                 continue;
             }
@@ -526,6 +534,9 @@ fn insert_missing_at_position(
     for line in missing_lines {
         let mut para = Paragraph::new();
         para.suppress_indent = true;
+        // Remember the real page this line came from (1-based), so the
+        // element→page map uses it directly instead of interpolating.
+        para.page_from_paged = Some(line.page_idx + 1);
 
         let has_large_gap = if line.x_clusters.len() >= 2 {
             // Estimate the font size for this line to determine gap threshold
@@ -709,11 +720,17 @@ fn find_element_by_text(doc: &Document, text: &str) -> Option<usize> {
 }
 
 /// Build a mapping from document body element index to page number.
+///
+/// Recovered paragraphs carry their real page in `page_from_paged` and use it
+/// directly. Remaining elements (the ones that came from HTML block tags) are
+/// mapped from those tags' introspector pages; only as a last resort — when tag
+/// count and element count disagree — is a proportional interpolation used.
 pub(super) fn build_element_page_map(
+    doc: &Document,
     children: &[HtmlNode],
     paged: &PagedDocument,
-    total_elements: usize,
 ) -> Vec<usize> {
+    let total_elements = doc.body.elements.len();
     if total_elements == 0 || paged.pages.is_empty() {
         return Vec::new();
     }
@@ -722,7 +739,16 @@ pub(super) fn build_element_page_map(
     collect_block_tag_locations(children, &mut locs);
 
     if locs.is_empty() {
-        return vec![1; total_elements];
+        // No tag positions at all: use recovered pages where known, else page 1.
+        return doc
+            .body
+            .elements
+            .iter()
+            .map(|el| match el {
+                BlockElement::Paragraph(p) => p.page_from_paged.unwrap_or(1),
+                _ => 1,
+            })
+            .collect();
     }
 
     let tag_pages: Vec<usize> = locs
@@ -730,16 +756,25 @@ pub(super) fn build_element_page_map(
         .map(|loc| paged.introspector.page(*loc).get())
         .collect();
 
-    let mut result = vec![1_usize; total_elements];
     let n_tags = tag_pages.len();
-
+    let mut result = vec![1_usize; total_elements];
+    // Walk tag-derived pages and recovered pages in parallel: elements with a
+    // known recovered page take it; the rest consume the next tag page in order.
+    let mut tag_cursor = 0;
     for (elem_idx, slot) in result.iter_mut().enumerate() {
+        if let BlockElement::Paragraph(p) = &doc.body.elements[elem_idx]
+            && let Some(page) = p.page_from_paged
+        {
+            *slot = page;
+            continue;
+        }
         let tag_idx = if n_tags >= total_elements {
             elem_idx.min(n_tags - 1)
         } else {
-            (elem_idx * n_tags / total_elements).min(n_tags - 1)
+            tag_cursor.min(n_tags - 1)
         };
         *slot = tag_pages[tag_idx];
+        tag_cursor += 1;
     }
 
     result

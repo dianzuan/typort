@@ -247,6 +247,11 @@ pub struct Paragraph {
     /// Override the paragraph's `w:before` spacing (twips).
     /// Used to suppress heading above-spacing at the start of a page/document.
     pub spacing_before: Option<u32>,
+    /// 1-based page number this paragraph was recovered from (from the paged
+    /// frame it was scraped out of). `Some` only for content reinserted by the
+    /// recovery pass; lets the element→page map use the real page instead of a
+    /// proportional guess. Not emitted to OOXML.
+    pub page_from_paged: Option<usize>,
 }
 
 impl Paragraph {

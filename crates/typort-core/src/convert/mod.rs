@@ -199,7 +199,7 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
     // 12d. Build element→page mapping from block tag locations for precise
     //       section break and horizontal rule placement.
     let element_page_map: Vec<usize> = if let Some(paged) = &paged_doc {
-        recovery::build_element_page_map(&body.children, paged, doc.body.elements.len())
+        recovery::build_element_page_map(&doc, &body.children, paged)
     } else {
         Vec::new()
     };
