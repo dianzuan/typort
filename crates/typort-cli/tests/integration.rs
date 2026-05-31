@@ -4736,6 +4736,17 @@ fn lang_chinese_eastasia_is_zh_cn() {
     );
 }
 
+#[test]
+fn code_block_style_has_background_shading() {
+    // The CodeBlock paragraph style carries a light-gray background (w:shd),
+    // the Word convention for code blocks.
+    let styles = fixture_styles_xml("style_code_blocks");
+    assert!(
+        styles.contains(r#"<w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/>"#),
+        "CodeBlock style should include w:shd background shading, got: {styles}"
+    );
+}
+
 // ── Smoke tests: style / general / edge fixtures convert without panic ──
 
 macro_rules! smoke_test {

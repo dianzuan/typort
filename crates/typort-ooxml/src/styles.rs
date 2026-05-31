@@ -220,6 +220,14 @@ fn write_style_code_block<W: Write>(w: &mut Writer<W>, style: &DocumentStyle) ->
                     .with_attribute(("w:before", "0"))
                     .with_attribute(("w:after", "0"))
                     .write_empty()?;
+                // Light-gray background. This is a Word convention for code
+                // blocks, not a property Typst exposes (raw blocks carry no fill
+                // in the AST/PagedDocument), so it is a fixed style default.
+                ppr.create_element("w:shd")
+                    .with_attribute(("w:val", "clear"))
+                    .with_attribute(("w:color", "auto"))
+                    .with_attribute(("w:fill", "F2F2F2"))
+                    .write_empty()?;
                 Ok(())
             })?;
             s.create_element("w:rPr").write_inner_content(|rpr| {
