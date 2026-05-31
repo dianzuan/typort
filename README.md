@@ -40,10 +40,11 @@ input.typ ──► Typst compiler ──► HtmlDocument (structure)
 | Lists | Ordered/unordered, nested up to 5+ levels, contextual spacing |
 | Footnotes | Including inside table cells, with formatting and circled numbers |
 | Images | PNG, JPG embedded; SVG rasterized via resvg |
-| Code blocks | Detected monospace font |
+| Code blocks | Detected monospace font, light-gray background shading |
 | Cross-references | `@label` to bookmarks + REF field codes |
 | Hyperlinks | With preserved formatting (bold links, etc.) |
 | Page breaks | Detected via Introspector page boundaries |
+| Column breaks | `#colbreak()` to `w:br type="column"` (recovered from source) |
 | Section breaks | Auto-detected from page setting changes |
 | Headers & footers | Extracted from page margin zones |
 | Page numbering | `#set page(numbering: "1")` to PAGE field code |
@@ -97,8 +98,6 @@ cargo fmt --all -- --check
 - **OMML** does not support math coloring, extensible arrows, or strikethrough/cancel
 - **Word** forces Cambria Math font in math zones
 - **Ruby annotations** (`w:ruby`) — Typst 0.14.2 has no native ruby support
-- **Column breaks** — `#colbreak()` is not yet emitted as `w:br type="column"`
-- **Code block shading** — code uses a monospace font but no background shading
 
 ## License
 
