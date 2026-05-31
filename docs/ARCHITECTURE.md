@@ -194,6 +194,13 @@ aligned equations (`m:eqArr`), accents (`m:acc`), bars (`m:bar`), group characte
 / over-under braces (`m:groupChr`), named functions (`m:func`), limits
 (`m:limLow`/`m:limUpp`), phantoms (`m:phant`), and boxes (`m:box`).
 
+An n-ary operator's operand (the integrand/summand) is bound into its `<m:e>`
+body rather than left as detached siblings: Typst stores the operand as flat
+content following the operator, so the sequence walker consumes following items
+into the operand until a **Relation-class** symbol (`=`, `<`, `→`, …) — using the
+same `unicode-math-class` table Typst uses, so the boundary matches Typst's own
+classification (e.g. in `sum_i a_i = S`, the `= S` stays outside the n-ary).
+
 **Hard limits** (OMML / Word constraints, not bugs):
 
 - No color inside math zones.
@@ -224,19 +231,22 @@ negatives (real content skipped) and false positives (content duplicated) are
 possible. Most of the project's known edge-case bugs live here. **Anyone touching
 this file should add a fixture-based regression test for the specific case.**
 
-## Known philosophy debt
+## Language neutrality (how it stays universal)
 
-typort's stated goal is a **universal** Typst→Word converter — it should not bake
-in assumptions about a document's language or genre. Two places currently violate
-this and are tracked as cleanup work:
+typort's stated goal is a **universal** Typst→Word converter — it must not bake
+in assumptions about a document's language or genre. Earlier versions did, in
+three places; all now derive from semantics instead, and they stand as the
+pattern to follow:
 
-1. **Bibliography-heading detection** (`convert/mod.rs`, ~line 2298) matches the
-   literal strings `参考文献` / `REFERENCES` / `References` / `Bibliography` to
-   apply hanging indent. `convert/bibliography.rs` shows the correct,
-   semantic alternative (`BibliographyElem`).
-2. **Caption-prefix matching** (`convert/recovery.rs`, ~lines 83–85, 113) matches
-   `表 ` / `图 ` / `Table ` / `Figure ` to skip caption lines during recovery.
-   This should be driven by `FigureElem` / caption supplement metadata instead.
+1. **Bibliographies** are detected via the semantic `doc-bibliography` role from
+   `#bibliography(...)`, not by matching a `参考文献`/`References` heading. A
+   hand-written reference list is, to Typst, ordinary text — and is converted as
+   such.
+2. **Figure/table captions** are deduplicated during recovery against the text
+   the semantic figure path already emitted, not by matching `表 `/`图 `/`Table `/
+   `Figure ` prefixes.
+3. **Document language** (`w:lang`) is derived from `#set text(lang:, region:)`,
+   not guessed from the presence of CJK glyphs.
 
-These are documented so they are fixed deliberately, not copied as a pattern.
-See `CLAUDE.md` for the rule.
+If a future change reintroduces `if text.contains("<word>")` to drive layout,
+it regresses this principle. See `CLAUDE.md`.

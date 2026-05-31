@@ -15,10 +15,9 @@ should convert to an editable `.docx`. For how it works, read
    no "this is a Chinese social-science paper" logic, no matching natural-language
    keywords (`参考文献`, `表`, `图`, `References`, `Abstract`, …) to drive behavior.
    When you need to identify a construct, use the **semantic Typst element**
-   (`BibliographyElem`, `FigureElem`, `FootnoteElem`, caption supplement metadata),
-   not rendered text. `convert/bibliography.rs` is the model to copy.
-   *(Known violations exist today — see "Known debt" below. They are debt to
-   remove, not patterns to follow.)*
+   (`BibliographyElem`, `FigureElem`, `FootnoteElem`, caption supplement metadata)
+   or a declared source value (`#set text(lang: ...)`), not rendered text.
+   `convert/bibliography.rs` is the model to copy.
 
 2. **Detect, don't assume.** Styling (fonts, sizes, colors, spacing, alignment,
    margins) is read from the actual rendering or the source AST — never
@@ -36,8 +35,8 @@ typort compiles the same source to **`HtmlDocument`** (semantics + document orde
 + introspector) *and* **`PagedDocument`** (fonts, geometry, images, layout-only
 content), and additionally **re-parses the source AST** for authoritative `set`
 rules. HTML is the skeleton; Paged paints and patches it; the AST overrides both
-when the author declared a value. This is **three** sources, not two — README's
-"dual-compilation" wording undercounts it. Full detail in
+when the author declared a value. This is **three** sources, not two — don't let
+anyone "simplify" it back to a dual-compilation description. Full detail in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Rust conventions
@@ -109,13 +108,20 @@ counts drift and become lies. Let `cargo test` report the number.
   OMML coverage of "6/17" that is now near-complete). Verify memory against code
   before relying on it.
 
-## Known debt (fix deliberately; do not imitate)
+## Hardcoded-language cleanup (done — kept as precedent)
 
-These violate Philosophy rule #1 and are tracked for removal:
+The P1 violations that prompted this rule have been removed. Recorded here so
+the *approach* is reused, not re-introduced:
 
-1. `convert/mod.rs` (~line 2298): bibliography-heading detection string-matches
-   `参考文献` / `REFERENCES` / `References` / `Bibliography`. Replace with
-   `BibliographyElem`-driven detection.
-2. `convert/recovery.rs` (~lines 83–85, 113): caption skipping string-matches
-   `表 ` / `图 ` / `Table ` / `Figure `. Replace with `FigureElem` / caption
-   supplement metadata.
+1. Bibliography hanging indent no longer string-matches `参考文献` / `References`
+   in `apply_paragraph_formatting`; it is driven by the semantic
+   `doc-bibliography` role during the HTML walk (a hand-written `= 参考文献`
+   heading is just text to Typst, so typort treats it as text).
+2. Caption skipping in `convert/recovery.rs` no longer matches `表 ` / `图 ` /
+   `Table ` / `Figure `; captions are deduplicated by the semantic text the
+   figure path already emitted.
+3. Document language is derived from `#set text(lang:, region:)`
+   (`apply_language_override`), not guessed from CJK-glyph presence.
+
+If you find a remaining `if text.contains("<some word>")` driving layout, it is
+a regression of this rule — fix it the same way.

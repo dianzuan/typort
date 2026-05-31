@@ -35,16 +35,15 @@ input.typ ──► Typst compiler ──► HtmlDocument (structure)
 |---------|--------|
 | Headings (h1–h6) | Heading styles with detected font sizes |
 | Bold, italic, underline, strikethrough, highlight, superscript, subscript, small caps | Full formatting |
-| Math (inline & display) | OMML: fractions, scripts, roots, sums, integrals, matrices, accents, cases, aligned equations, overbrace/underbrace |
+| Math (inline & display) | OMML: fractions, scripts, pre-scripts, roots, n-ary operators (sum/integral/…) with operands, named functions, limits, matrices, vectors, accents, bars, cases, aligned equations, over/under braces & brackets |
 | Tables | colspan, rowspan, multi-paragraph cells, nested tables, cell shading, dashed borders |
 | Lists | Ordered/unordered, nested up to 5+ levels, contextual spacing |
 | Footnotes | Including inside table cells, with formatting and circled numbers |
 | Images | PNG, JPG embedded; SVG rasterized via resvg |
-| Code blocks | Detected monospace font, shading |
+| Code blocks | Detected monospace font |
 | Cross-references | `@label` to bookmarks + REF field codes |
 | Hyperlinks | With preserved formatting (bold links, etc.) |
 | Page breaks | Detected via Introspector page boundaries |
-| Column breaks | `#colbreak()` to `w:br type="column"` |
 | Section breaks | Auto-detected from page setting changes |
 | Headers & footers | Extracted from page margin zones |
 | Page numbering | `#set page(numbering: "1")` to PAGE field code |
@@ -61,7 +60,7 @@ input.typ ──► Typst compiler ──► HtmlDocument (structure)
 
 ## How it works
 
-typort uses a **dual-compilation strategy**:
+typort reads the document from **three sources**:
 
 1. **HtmlDocument** — Typst's HTML export gives us semantic structure: which text is a heading, which is a footnote, where tables begin and end.
 
@@ -89,7 +88,8 @@ crates/
 ```bash
 cargo build --workspace
 cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --workspace -- -D warnings
+cargo fmt --all -- --check
 ```
 
 ## Known limitations
@@ -97,6 +97,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 - **OMML** does not support math coloring, extensible arrows, or strikethrough/cancel
 - **Word** forces Cambria Math font in math zones
 - **Ruby annotations** (`w:ruby`) — Typst 0.14.2 has no native ruby support
+- **Column breaks** — `#colbreak()` is not yet emitted as `w:br type="column"`
+- **Code block shading** — code uses a monospace font but no background shading
 
 ## License
 
