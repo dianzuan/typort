@@ -57,6 +57,18 @@ fn par_wrapped_inline_math_keeps_prose_with_math() {
 }
 
 #[test]
+fn long_left_heading_not_misclassified_as_centered() {
+    // Regression: a long left-aligned heading whose text spans most of the line
+    // has a text-center near the page center and was wrongly marked centered. See
+    // tests/fixtures/edge_long_left_heading.typ.
+    let doc_xml = fixture_doc_xml("edge_long_left_heading");
+    assert!(
+        !doc_xml.contains(r#"<w:jc w:val="center"/>"#),
+        "long left-aligned headings must not be misclassified as centered:\n{doc_xml}"
+    );
+}
+
+#[test]
 fn recovery_does_not_inject_citation_or_duplicate_orphans() {
     // Regression for recover_missing_content (recovery.rs): paged body lines whose
     // prose is broken up by OMML math and superscript citations used to be misjudged
@@ -4371,6 +4383,31 @@ fn issue_cjk_heading_numbering_content() {
     assert!(xml.contains("绪论"), "CJK heading text should be present");
     assert!(xml.contains("研究背景"), "CJK subheading should be present");
     assert!(xml.contains("Heading1"), "Heading1 style should be present");
+    // The synthesized heading number ("一、") must be emitted in the heading
+    // paragraph itself (not merely recovered elsewhere in the document).
+    let heading_para = paragraph_containing(&xml, "绪论");
+    assert!(
+        heading_para.contains("一、"),
+        "heading numbering '一、' should be part of the heading paragraph"
+    );
+}
+
+#[test]
+fn heading_smart_quotes_are_resolved() {
+    // Regression: smart quotes in a heading were dropped (only body text kept them).
+    // See tests/fixtures/edge_heading_smartquotes.typ.
+    let doc_xml = fixture_doc_xml("edge_heading_smartquotes");
+    let h1 = paragraph_containing(&doc_xml, "投资于人");
+    // Curly opening/closing double quotes (U+201C / U+201D) around the phrase.
+    assert!(
+        h1.contains('\u{201C}') && h1.contains('\u{201D}'),
+        "heading should keep its curly quotes around 投资于人"
+    );
+    let h2 = paragraph_containing(&doc_xml, "quoted");
+    assert!(
+        h2.contains('\u{201C}') && h2.contains('\u{201D}'),
+        "English quoted heading should keep its curly quotes"
+    );
 }
 
 #[test]

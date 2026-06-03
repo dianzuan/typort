@@ -1990,6 +1990,15 @@ fn apply_paragraph_alignment(
         return;
     }
 
+    // The left text margin is the leftmost x of any rendered run: body text starts
+    // at the left margin, while centered/right content starts further in. A heading
+    // that starts at this margin is left-aligned even if its text happens to be
+    // wide enough that its midpoint lands near the page center.
+    let left_margin = paged_styles
+        .iter()
+        .map(|i| i.x)
+        .fold(f64::INFINITY, f64::min);
+
     for element in &mut doc.body.elements {
         let typort_ooxml::document::BlockElement::Paragraph(p) = element else {
             continue;
@@ -2038,7 +2047,12 @@ fn apply_paragraph_alignment(
         let page_center = page_width / 2.0;
         let tolerance = page_width * 0.05;
 
-        if (text_center - page_center).abs() < tolerance {
+        // A line that begins at the left margin is left-aligned, regardless of where
+        // its midpoint falls — this is what tells a wide left heading apart from a
+        // genuinely centered one (which is inset from the margin on both sides).
+        let starts_at_left_margin = (min_x - left_margin).abs() <= tolerance;
+
+        if !starts_at_left_margin && (text_center - page_center).abs() < tolerance {
             p.alignment = Some(Alignment::Center);
         } else if min_x > page_center {
             p.alignment = Some(Alignment::Right);

@@ -399,7 +399,11 @@ fn count_title_lines(paged_lines: &[FrameLine], doc: &Document) -> usize {
             if let BlockElement::Paragraph(p) = e
                 && matches!(p.style, Some(ParagraphStyle::Heading(_)))
             {
-                p.text_runs().any(|r| line.text.contains(&r.text))
+                // Match on substantive heading text only. A heading's number prefix
+                // ("A ", "1 ") is now a separate one-char run; matching on it would
+                // misclassify any title-page line that merely starts with "A"/"1".
+                p.text_runs()
+                    .any(|r| r.text.trim().chars().count() >= 2 && line.text.contains(&r.text))
             } else {
                 false
             }
