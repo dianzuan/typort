@@ -1558,6 +1558,29 @@ fn convert_cell_paragraphs(
     is_header: bool,
     html_doc: &HtmlDocument,
 ) -> Vec<Paragraph> {
+    // Typst's HTML export drops every equation, leaving inline math as `equation`
+    // Tag siblings between the cell's <p> text fragments. The per-<p> path below
+    // would consume only the <p>s — dropping those equation siblings and stacking
+    // a single math-bearing line into several paragraphs. When the cell carries
+    // inline math, collect the whole cell as one paragraph instead, so the
+    // equations are spliced back in document order. collect_html_inlines_with_doc
+    // already turns an `equation` Tag into OMML and recurses through <p> wrappers
+    // to pick up the surrounding text.
+    let has_inline_equation =
+        (0..td.children.len()).any(|i| is_inline_equation_at(&td.children, i, html_doc));
+    if has_inline_equation {
+        let mut para = Paragraph::new();
+        collect_html_inlines_with_doc(
+            &td.children,
+            &mut para,
+            is_header,
+            false,
+            false,
+            Some(html_doc),
+        );
+        return vec![para];
+    }
+
     // Check if any direct children are <p> elements
     let has_p_children = td.children.iter().any(|c| {
         if let HtmlNode::Element(el) = c {

@@ -3,10 +3,11 @@
 
 use std::io::Write;
 
+use codex::styling::{MathStyle, MathVariant, to_style};
 use quick_xml::Writer;
 use quick_xml::events::BytesText;
 use typst::foundations::Content;
-use typst_library::foundations::{SequenceElem, SymbolElem};
+use typst_library::foundations::{SequenceElem, StyleChain, StyledElem, SymbolElem};
 use typst_library::math::{
     AccentElem, AlignPointElem, AttachElem, CasesElem, EquationElem, FracElem, LrElem, MatElem,
     OpElem, OverbraceElem, OverbracketElem, OverlineElem, OverparenElem, OvershellElem, RootElem,
@@ -204,11 +205,97 @@ fn convert_content<W: Write>(writer: &mut Writer<W>, content: &Content) -> std::
         write_math_run(writer, &sym.text)?;
     } else if let Some(text) = content.to_packed::<TextElem>() {
         write_math_run(writer, &text.text)?;
+    } else if let Some(styled) = content.to_packed::<StyledElem>() {
+        // Math style wrappers — bold(), bb(), cal(), upright(), dif, etc. — apply
+        // an EquationElem variant/bold/italic to their child. Typst keeps the
+        // inner SymbolElem unstyled and records the variant on this StyledElem, so
+        // we resolve it here and re-emit the child's glyphs styled. Without this
+        // the wrapper fell into the silent skip below, dropping the glyph entirely
+        // (and leaving an empty <m:e> when it was a sub/superscript base).
+        let chain = StyleChain::new(&styled.styles);
+        convert_styled(
+            writer,
+            &styled.child,
+            chain.get(EquationElem::variant),
+            chain.get(EquationElem::bold),
+            chain.get(EquationElem::italic),
+        )?;
     } else if content.to_packed::<SpaceElem>().is_some() {
         // OMML handles inter-element spacing automatically — don't emit explicit spaces
     } else {
-        // For unknown elements, skip silently (styled wrappers, etc.)
+        // For unknown elements, skip silently.
     }
+    Ok(())
+}
+
+/// Walk a styled math subtree, applying a resolved `(variant, bold, italic)` to
+/// every text run it emits. Handles the nesting `bold(bb(x))` produces (each
+/// wrapper sets one property) and falls back to plain [`convert_content`] for a
+/// structural child (e.g. a fraction inside `bold(...)`) — rare, and that only
+/// loses the wrapper styling inside the structure, never the content itself.
+fn convert_styled<W: Write>(
+    writer: &mut Writer<W>,
+    content: &Content,
+    variant: Option<MathVariant>,
+    bold: bool,
+    italic: Option<bool>,
+) -> std::io::Result<()> {
+    if let Some(seq) = content.to_packed::<SequenceElem>() {
+        for child in &seq.children {
+            convert_styled(writer, child, variant, bold, italic)?;
+        }
+    } else if let Some(styled) = content.to_packed::<StyledElem>() {
+        // Nested wrapper: overlay its one property on the inherited style.
+        let chain = StyleChain::new(&styled.styles);
+        convert_styled(
+            writer,
+            &styled.child,
+            chain.get(EquationElem::variant).or(variant),
+            bold || chain.get(EquationElem::bold),
+            chain.get(EquationElem::italic).or(italic),
+        )?;
+    } else if let Some(sym) = content.to_packed::<SymbolElem>() {
+        write_styled_run(writer, &sym.text, variant, bold, italic)?;
+    } else if let Some(text) = content.to_packed::<TextElem>() {
+        write_styled_run(writer, &text.text, variant, bold, italic)?;
+    } else if content.to_packed::<SpaceElem>().is_some() {
+        // No explicit spaces in OMML.
+    } else {
+        convert_content(writer, content)?;
+    }
+    Ok(())
+}
+
+/// Emit a styled text run: map each char to its styled Unicode glyph via the
+/// same `codex` logic Typst uses (`R` + double-struck -> ℝ, `e` + bold -> 𝒆).
+/// An explicit upright request (`upright`/`dif`) leaves the glyph a plain ASCII
+/// letter, which Word auto-italicizes, so that one case forces roman with an
+/// `m:sty` of `"p"`; every other variant is encoded in the glyph itself.
+fn write_styled_run<W: Write>(
+    writer: &mut Writer<W>,
+    text: &str,
+    variant: Option<MathVariant>,
+    bold: bool,
+    italic: Option<bool>,
+) -> std::io::Result<()> {
+    let styled: String = text
+        .chars()
+        .flat_map(|c| to_style(c, MathStyle::select(c, variant, bold, italic)))
+        .collect();
+    let force_upright = italic == Some(false) && !bold;
+    writer.create_element("m:r").write_inner_content(|w| {
+        if force_upright {
+            w.create_element("m:rPr").write_inner_content(|pr| {
+                pr.create_element("m:sty")
+                    .with_attribute(("m:val", "p"))
+                    .write_empty()?;
+                Ok(())
+            })?;
+        }
+        w.create_element("m:t")
+            .write_text_content(BytesText::new(&styled))?;
+        Ok(())
+    })?;
     Ok(())
 }
 

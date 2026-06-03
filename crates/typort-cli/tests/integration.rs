@@ -2,6 +2,54 @@ use std::io::Cursor;
 use std::path::Path;
 
 #[test]
+fn table_cell_inline_math_is_spliced_not_dropped() {
+    // Regression: inline equations inside table cells are `equation` Tag siblings
+    // between the cell's <p> text fragments. convert_cell_paragraphs only consumed
+    // the <p>s, dropping the math and stacking mixed text+math cells into separate
+    // paragraphs. See tests/fixtures/table_cell_math.typ.
+    let doc_xml = fixture_doc_xml("table_cell_math");
+
+    // The only math in the fixture lives inside the table, so its OMML must show
+    // up within the <w:tbl> block.
+    let tbl_start = doc_xml
+        .find("<w:tbl>")
+        .expect("document should contain a table");
+    let tbl_end = doc_xml[tbl_start..]
+        .find("</w:tbl>")
+        .map(|e| tbl_start + e)
+        .expect("table should be closed");
+    let table_xml = &doc_xml[tbl_start..tbl_end];
+
+    // The fixture has 4 inline equations in cells: bold(e)_1, M, times, v*(M).
+    // The math-only cell already worked; the regression is the mixed text+math
+    // cell, whose equation siblings were dropped — so require all 4.
+    let omml_count = table_xml.matches("<m:oMath>").count();
+    assert!(
+        omml_count >= 4,
+        "all 4 cell equations should be spliced as OMML, got {omml_count}"
+    );
+    // bold(e)_1 -> 𝒆 (U+1D486) must survive inside the table.
+    assert!(
+        table_xml.contains('\u{1D486}'),
+        "bold(e)_1 in a cell should render as 𝒆"
+    );
+    // The mixed text+math cell ($M$分布 $times$ $v^*(M)$) must keep its math in the
+    // same cell/paragraph as the text "分布", not drop it.
+    let mixed_cell = table_xml
+        .match_indices("分布")
+        .find_map(|(pos, _)| {
+            let start = table_xml[..pos].rfind("<w:tc>")?;
+            let end = table_xml[pos..].find("</w:tc>").map(|e| pos + e)?;
+            Some(&table_xml[start..end])
+        })
+        .expect("a cell containing 分布 should exist");
+    assert!(
+        mixed_cell.contains("<m:oMath>"),
+        "the mixed text+math cell must keep its inline math, not drop it"
+    );
+}
+
+#[test]
 fn complex_paper_has_table_structure() {
     let doc_xml = fixture_doc_xml("complex_paper");
 
@@ -295,6 +343,41 @@ fn math_test_produces_omml() {
     assert!(
         doc_xml.contains("<m:t>2</m:t>"),
         "document.xml should contain math text '2'"
+    );
+}
+
+#[test]
+fn math_styled_wrappers_and_dif_are_not_dropped() {
+    // Regression: bold()/bb()/cal() and the upright differential `dif` used to
+    // fall into convert_content's silent "unknown element" skip, producing empty
+    // <m:e> bases and vanishing glyphs. See tests/fixtures/math_styled_and_dif.typ.
+    let doc_xml = fixture_doc_xml("math_styled_and_dif");
+    let packed: String = doc_xml.chars().filter(|c| !c.is_whitespace()).collect();
+
+    // bb(R) -> blackboard-bold ℝ (U+211D), used twice in the fixture.
+    assert!(
+        doc_xml.contains('\u{211D}'),
+        "bb(R) should render as blackboard-bold ℝ, not be dropped"
+    );
+    // bold(e) -> mathematical bold-italic 𝒆 (U+1D486).
+    assert!(
+        doc_xml.contains('\u{1D486}'),
+        "bold(e) should render as bold 𝒆, not be dropped"
+    );
+    // bold(s) -> 𝒔 (U+1D494, mathematical bold-italic small s).
+    assert!(
+        doc_xml.contains('\u{1D494}'),
+        "bold(s) should render as bold 𝒔, not be dropped"
+    );
+    // No styled atom may leave an empty math base behind.
+    assert!(
+        !packed.contains("<m:e></m:e>"),
+        "styled math atoms must not leave empty <m:e> bases"
+    );
+    // dif = upright(d): forced non-italic via an explicit m:sty value "p".
+    assert!(
+        doc_xml.contains("<m:sty m:val=\"p\"/>"),
+        "upright(d) (dif) should force an upright run via m:sty p"
     );
 }
 

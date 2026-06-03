@@ -47,6 +47,11 @@ time = { version = "0.3", features = ["local-offset"] }
 # operand boundary (stop at a Relation-class symbol) matches Typst's own model.
 unicode-math-class = "0.1"
 
+# Math glyph styling — the same crate Typst uses to map a base letter + variant
+# (bold/bb/cal/upright) to its styled Unicode codepoint (R -> ℝ, e -> 𝒆). Pinned
+# to the version typst-library 0.14.2 depends on so no duplicate is resolved.
+codex = "0.2"
+
 # CLI
 clap = { version = "4", features = ["derive"] }
 

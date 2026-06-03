@@ -2668,6 +2668,7 @@ dependencies = [
 name = "typort-math"
 version = "0.1.1"
 dependencies = [
+ "codex",
  "quick-xml 0.37.5",
  "typst",
  "typst-library",
