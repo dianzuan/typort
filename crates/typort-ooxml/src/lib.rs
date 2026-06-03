@@ -429,6 +429,7 @@ mod tests {
             rows: vec![row],
             width_pct: None,
             border_size: None,
+            borders: None,
         };
         doc.add_table(table);
 

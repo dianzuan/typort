@@ -57,6 +57,43 @@ fn par_wrapped_inline_math_keeps_prose_with_math() {
 }
 
 #[test]
+fn three_line_table_is_not_a_boxed_grid() {
+    // Regression: a three-line table was emitted as a full grid. See
+    // tests/fixtures/edge_three_line_table.typ.
+    let doc_xml = fixture_doc_xml("edge_three_line_table");
+    let tbl_start = doc_xml.find("<w:tbl>").expect("table present");
+    let tbl_end = doc_xml[tbl_start..]
+        .find("</w:tbl>")
+        .map(|e| tbl_start + e)
+        .expect("table closed");
+    let table = &doc_xml[tbl_start..tbl_end];
+
+    // No vertical, inner-horizontal, or side grid lines.
+    assert!(
+        table.contains(r#"<w:insideV w:val="nil"/>"#),
+        "three-line table must suppress vertical rules"
+    );
+    assert!(
+        table.contains(r#"<w:insideH w:val="nil"/>"#),
+        "three-line table must suppress inner-row rules"
+    );
+    assert!(
+        table.contains(r#"<w:left w:val="nil"/>"#) && table.contains(r#"<w:right w:val="nil"/>"#),
+        "three-line table must have no left/right rules"
+    );
+    // Top and bottom rules are present.
+    assert!(
+        table.contains(r#"<w:top w:val="single""#) && table.contains(r#"<w:bottom w:val="single""#),
+        "three-line table must keep top and bottom rules"
+    );
+    // Header separator: a bottom border on the header row's cells.
+    assert!(
+        table.contains("<w:tcBorders>"),
+        "three-line table must draw a separator under the header row"
+    );
+}
+
+#[test]
 fn long_left_heading_not_misclassified_as_centered() {
     // Regression: a long left-aligned heading whose text spans most of the line
     // has a text-center near the page center and was wrongly marked centered. See
@@ -772,6 +809,7 @@ fn merged_cell_emits_grid_span_and_vmerge() {
         ],
         width_pct: None,
         border_size: None,
+        borders: None,
     };
     doc.add_table(table);
 

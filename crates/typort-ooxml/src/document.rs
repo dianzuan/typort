@@ -448,6 +448,29 @@ pub struct TableRow {
     pub cells: Vec<TableCell>,
 }
 
+/// Per-side table border thicknesses in eighths of a point (`None` = no border).
+///
+/// Captures both full grids (every side plus `inside_h`/`inside_v`) and
+/// three-line tables (`top`/`bottom` plus `header_sep`, everything else `None`).
+/// Derived by reading the rules actually drawn in the `PagedDocument`, so it is
+/// not tied to any particular table style.
+#[derive(Debug, Clone, Default)]
+pub struct TableBorders {
+    pub top: Option<u32>,
+    pub bottom: Option<u32>,
+    pub left: Option<u32>,
+    pub right: Option<u32>,
+    /// Rule between body rows.
+    pub inside_h: Option<u32>,
+    /// Rule between columns.
+    pub inside_v: Option<u32>,
+    /// Separator drawn after the header row(s); emitted as the header row's
+    /// bottom border so it appears under the header only (three-line style).
+    pub header_sep: Option<u32>,
+    /// Number of leading header rows the separator follows (usually 1).
+    pub header_rows: usize,
+}
+
 /// A table with rows and cells.
 #[derive(Debug, Clone)]
 pub struct Table {
@@ -458,6 +481,10 @@ pub struct Table {
     /// Border size in eighths of a point (e.g. 4 = 0.5pt).
     /// `None` defaults to 4 (0.5pt solid).
     pub border_size: Option<u32>,
+    /// Per-side borders detected from the rendered geometry. When `Some`, the
+    /// writer emits exactly these (so a three-line table is not boxed into a
+    /// grid); when `None`, it falls back to a uniform `border_size` grid.
+    pub borders: Option<TableBorders>,
 }
 
 #[derive(Debug, Clone)]

@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::num::NonZeroUsize;
 
 use typort_ooxml::document::{
-    Alignment, BlockElement, Document, InlineElement, Paragraph, ParagraphStyle, Run,
+    Alignment, BlockElement, Document, InlineElement, Paragraph, ParagraphStyle, Run, TableBorders,
 };
 use typst::introspection::Location;
 use typst::layout::{Frame, FrameItem, PagedDocument, Point};
@@ -1109,6 +1109,90 @@ pub(super) fn merge_same_line_paragraphs(doc: &mut Document, _paged: &PagedDocum
             // Don't increment i — check the merged paragraph against the next
         } else {
             i += 1;
+        }
+    }
+}
+
+/// Set table borders from the rules actually drawn in the `PagedDocument`.
+///
+/// Scope (a deliberate, documented heuristic — not a silent cap): this acts only
+/// when the rendered pages draw horizontal table rules but NO table vertical
+/// lines, which is the signature of three-line (三线表) tables. In that case every
+/// table is rendered three-line — top/bottom rules plus a header separator, with
+/// no vertical or inner-row rules — using the thickest/thinnest rule widths
+/// observed. If any vertical table line is present (a boxed grid), nothing is
+/// changed and the writer keeps its uniform-grid fallback. A document that mixes
+/// boxed and three-line tables therefore stays boxed (safe: never a false
+/// three-line). Per-table stroke reconstruction would need Typst's grid-line
+/// resolution (auto hline positions / `set`-rule strokes live outside the queried
+/// element), so this geometry signal is used instead.
+pub(super) fn detect_three_line_tables(paged: &PagedDocument, doc: &mut Document) {
+    let has_table = doc
+        .body
+        .elements
+        .iter()
+        .any(|e| matches!(e, BlockElement::Table(_)));
+    if !has_table {
+        return;
+    }
+
+    let mut rule_sizes: Vec<u32> = Vec::new();
+    let mut has_vertical = false;
+    for page in &paged.pages {
+        collect_table_rule_sizes(&page.frame, &mut rule_sizes, &mut has_vertical);
+    }
+    if has_vertical || rule_sizes.is_empty() {
+        return;
+    }
+
+    rule_sizes.sort_unstable();
+    let thin = *rule_sizes.first().unwrap();
+    let thick = *rule_sizes.last().unwrap();
+
+    for el in &mut doc.body.elements {
+        if let BlockElement::Table(t) = el {
+            t.borders = Some(TableBorders {
+                top: Some(thick),
+                bottom: Some(thick),
+                left: None,
+                right: None,
+                inside_h: None,
+                inside_v: None,
+                header_sep: Some(thin),
+                header_rows: 1,
+            });
+        }
+    }
+}
+
+/// Collect horizontal rule thicknesses (in eighths of a point) and flag whether
+/// any table-height vertical line is drawn, walking nested frame groups.
+fn collect_table_rule_sizes(frame: &Frame, sizes: &mut Vec<u32>, has_vertical: &mut bool) {
+    for (_pos, item) in frame.items() {
+        match item {
+            FrameItem::Shape(shape, _) => {
+                if let typst::visualize::Geometry::Line(end) = &shape.geometry {
+                    let dx = end.x.to_pt().abs();
+                    let dy = end.y.to_pt().abs();
+                    let thickness_pt = shape.stroke.as_ref().map_or(0.0, |s| s.thickness.to_pt());
+                    if thickness_pt <= 0.0 {
+                        continue;
+                    }
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                    let sz = ((thickness_pt * 8.0).round() as u32).max(2);
+                    if dy < 0.5 && dx >= 40.0 {
+                        // A wide, flat rule — a horizontal table line.
+                        sizes.push(sz);
+                    } else if dx < 0.5 && dy >= 8.0 {
+                        // A vertical line tall enough to be a cell border → boxed grid.
+                        *has_vertical = true;
+                    }
+                }
+            }
+            FrameItem::Group(group) => {
+                collect_table_rule_sizes(&group.frame, sizes, has_vertical);
+            }
+            _ => {}
         }
     }
 }

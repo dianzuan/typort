@@ -1063,7 +1063,6 @@ fn write_table<W: Write>(writer: &mut Writer<W>, table: &Table, ctx: &WriteCtx) 
     writer.create_element("w:tbl").write_inner_content(|w| {
         // Table properties with borders
         let tbl_width = table.width_pct.unwrap_or(5000).to_string();
-        let border_sz = table.border_size.unwrap_or(4).to_string();
         w.create_element("w:tblPr").write_inner_content(|tpr| {
             tpr.create_element("w:tblW")
                 .with_attribute(("w:w", tbl_width.as_str()))
@@ -1071,26 +1070,45 @@ fn write_table<W: Write>(writer: &mut Writer<W>, table: &Table, ctx: &WriteCtx) 
                 .write_empty()?;
             tpr.create_element("w:tblBorders")
                 .write_inner_content(|bdr| {
-                    for side in [
-                        "w:top",
-                        "w:left",
-                        "w:bottom",
-                        "w:right",
-                        "w:insideH",
-                        "w:insideV",
-                    ] {
-                        bdr.create_element(side)
-                            .with_attribute(("w:val", "single"))
-                            .with_attribute(("w:sz", border_sz.as_str()))
-                            .with_attribute(("w:space", "0"))
-                            .write_empty()?;
+                    // Per-side thicknesses: from detected `borders` when present
+                    // (so a three-line table stays three-line), else a uniform grid.
+                    let uniform = Some(table.border_size.unwrap_or(4));
+                    let sides: [(&str, Option<u32>); 6] = match &table.borders {
+                        Some(tb) => [
+                            ("w:top", tb.top),
+                            ("w:bottom", tb.bottom),
+                            ("w:left", tb.left),
+                            ("w:right", tb.right),
+                            ("w:insideH", tb.inside_h),
+                            ("w:insideV", tb.inside_v),
+                        ],
+                        None => [
+                            ("w:top", uniform),
+                            ("w:bottom", uniform),
+                            ("w:left", uniform),
+                            ("w:right", uniform),
+                            ("w:insideH", uniform),
+                            ("w:insideV", uniform),
+                        ],
+                    };
+                    for (name, sz) in sides {
+                        let el = bdr.create_element(name);
+                        if let Some(sz) = sz {
+                            let s = sz.to_string();
+                            el.with_attribute(("w:val", "single"))
+                                .with_attribute(("w:sz", s.as_str()))
+                                .with_attribute(("w:space", "0"))
+                                .write_empty()?;
+                        } else {
+                            el.with_attribute(("w:val", "nil")).write_empty()?;
+                        }
                     }
                     Ok(())
                 })?;
             Ok(())
         })?;
         // Table rows
-        for row in &table.rows {
+        for (row_idx, row) in table.rows.iter().enumerate() {
             w.create_element("w:tr").write_inner_content(|tr_w| {
                 for cell in &row.cells {
                     tr_w.create_element("w:tc").write_inner_content(|tc_w| {
@@ -1126,6 +1144,25 @@ fn write_table<W: Write>(writer: &mut Writer<W>, table: &Table, ctx: &WriteCtx) 
                                     }
                                     crate::document::VMerge::None => {}
                                 }
+                            }
+                            // Three-line header separator: a bottom rule on the
+                            // cells of the last header row (insideH is off, so the
+                            // line appears under the header only).
+                            if let Some(tb) = &table.borders
+                                && let Some(sep) = tb.header_sep
+                                && tb.header_rows > 0
+                                && row_idx + 1 == tb.header_rows
+                            {
+                                let s = sep.to_string();
+                                tcpr.create_element("w:tcBorders")
+                                    .write_inner_content(|tbw| {
+                                        tbw.create_element("w:bottom")
+                                            .with_attribute(("w:val", "single"))
+                                            .with_attribute(("w:sz", s.as_str()))
+                                            .with_attribute(("w:space", "0"))
+                                            .write_empty()?;
+                                        Ok(())
+                                    })?;
                             }
                             Ok(())
                         })?;

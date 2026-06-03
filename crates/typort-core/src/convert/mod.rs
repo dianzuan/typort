@@ -173,6 +173,8 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
     // 10. Recover missing content from PagedDocument (e.g. #align(center) blocks)
     if let Some(paged) = &paged_doc {
         recovery::recover_missing_content(paged, &mut doc);
+        // Set table borders from the rules actually drawn (three-line vs grid).
+        recovery::detect_three_line_tables(paged, &mut doc);
     }
 
     // 11. Extract title/author from document metadata, falling back to first heading
@@ -1557,6 +1559,7 @@ fn postprocess_rowspans(raw_rows: Vec<RawTableRow>) -> Table {
         rows: final_rows,
         width_pct: None,
         border_size: None,
+        borders: None,
     }
 }
 
