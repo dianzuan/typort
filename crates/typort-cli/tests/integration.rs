@@ -2080,6 +2080,18 @@ fn inline_smallcaps_text_preserved() {
 // ---------------------------------------------------------------------------
 
 #[test]
+fn auto_pagination_does_not_insert_hard_breaks() {
+    // A document with no explicit #pagebreak() must reflow in Word, not be frozen
+    // with hard page breaks at automatic page boundaries (which used to orphan tall
+    // display equations onto the next page). See edge_auto_pagination_no_break.typ.
+    let doc_xml = fixture_doc_xml("edge_auto_pagination_no_break");
+    assert!(
+        !doc_xml.contains(r#"<w:br w:type="page""#),
+        "automatic page-flow boundaries must not produce hard page breaks"
+    );
+}
+
+#[test]
 fn pagebreak_inserts_w_br_page() {
     let doc_xml = fixture_doc_xml("pagebreak_test");
 

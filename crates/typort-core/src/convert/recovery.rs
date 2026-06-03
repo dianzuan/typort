@@ -1,5 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::num::NonZeroUsize;
+use std::collections::{BTreeMap, HashMap};
 
 use typort_ooxml::document::{
     Alignment, BlockElement, Document, InlineElement, Paragraph, ParagraphStyle, Run, TableBorders,
@@ -862,92 +861,6 @@ pub(super) fn build_element_page_map(
     }
 
     result
-}
-
-/// Collect page break locations by comparing element page numbers.
-pub(super) fn collect_page_break_locations(
-    children: &[HtmlNode],
-    paged: &PagedDocument,
-) -> HashSet<Location> {
-    let mut locs: Vec<Location> = Vec::new();
-    collect_block_tag_locations(children, &mut locs);
-
-    if locs.is_empty() || paged.pages.len() < 2 {
-        return HashSet::new();
-    }
-
-    let page_nums: Vec<NonZeroUsize> = locs
-        .iter()
-        .map(|loc| paged.introspector.page(*loc))
-        .collect();
-
-    let explicit_break_pages: HashSet<usize> = {
-        use typst::foundations::{NativeElement, Selector};
-        let selector = Selector::Elem(typst_library::layout::PagebreakElem::ELEM, None);
-        let pagebreaks = paged.introspector.query(&selector);
-        pagebreaks
-            .iter()
-            .filter_map(typst::foundations::Content::location)
-            .map(|loc| paged.introspector.page(loc).get())
-            .collect()
-    };
-    let has_any_pagebreak_elems = !explicit_break_pages.is_empty();
-
-    let mut result = HashSet::new();
-    for i in 1..locs.len() {
-        if page_nums[i] > page_nums[i - 1] {
-            let prev_page_num = page_nums[i - 1].get();
-            if has_any_pagebreak_elems {
-                let has_explicit =
-                    (prev_page_num..page_nums[i].get()).any(|p| explicit_break_pages.contains(&p));
-                if !has_explicit {
-                    continue;
-                }
-            } else {
-                let prev_page_idx = prev_page_num - 1;
-                if prev_page_idx < paged.pages.len() {
-                    let page = &paged.pages[prev_page_idx];
-                    let page_height = page.frame.height().to_pt();
-                    let content_y = find_max_content_y_in_frame(&page.frame, Point::zero());
-                    if page_height > 0.0 && content_y >= page_height * 0.95 {
-                        continue;
-                    }
-                }
-            }
-            result.insert(locs[i]);
-        }
-    }
-    result
-}
-
-fn find_max_content_y_in_frame(frame: &Frame, offset: Point) -> f64 {
-    let mut max_y: f64 = 0.0;
-    for (pos, item) in frame.items() {
-        let abs_y = offset.y + pos.y;
-        match item {
-            FrameItem::Text(text_item) => {
-                let y = abs_y.to_pt() + text_item.size.to_pt();
-                if y > max_y {
-                    max_y = y;
-                }
-            }
-            FrameItem::Group(group) => {
-                let new_offset = Point::new(offset.x + pos.x, abs_y);
-                let group_max = find_max_content_y_in_frame(&group.frame, new_offset);
-                if group_max > max_y {
-                    max_y = group_max;
-                }
-            }
-            FrameItem::Image(_, size, _) => {
-                let y = abs_y.to_pt() + size.y.to_pt();
-                if y > max_y {
-                    max_y = y;
-                }
-            }
-            _ => {}
-        }
-    }
-    max_y
 }
 
 /// Detect horizontal line shapes and insert horizontal rule paragraphs.

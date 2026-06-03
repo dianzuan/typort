@@ -52,7 +52,6 @@ struct EquationState {
 /// is `Copy`, so this severs the borrow tie at zero cost.
 struct WalkCtx<'a> {
     html_doc: &'a HtmlDocument,
-    page_breaks: &'a HashSet<Location>,
     doc: &'a mut Document,
     eq_state: &'a mut EquationState,
     image_queue: &'a mut VecDeque<ImageData>,
@@ -127,21 +126,14 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
         VecDeque::new()
     };
 
-    // 6. Pre-compute page break locations from PagedDocument introspector
-    let page_breaks: HashSet<Location> = if let Some(paged) = &paged_doc {
-        recovery::collect_page_break_locations(&body.children, paged)
-    } else {
-        HashSet::new()
-    };
-
-    // 7. Walk the HTML tree's Tag sequence (page breaks are inserted inline
-    //    based on the pre-computed page_breaks set from step 6).
+    // 7. Walk the HTML tree's Tag sequence. Explicit `#pagebreak()` breaks are
+    //    recovered from the source AST afterwards (step 12b); automatic page-flow
+    //    boundaries deliberately reflow in Word rather than become hard breaks.
     let mut eq_state = EquationState::default();
     let mut bookmarks: HashSet<String> = HashSet::new();
     {
         let mut ctx = WalkCtx {
             html_doc: &html_doc,
-            page_breaks: &page_breaks,
             doc: &mut doc,
             eq_state: &mut eq_state,
             image_queue: &mut image_queue,
@@ -200,6 +192,11 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
     // HtmlDocument nor PagedDocument), so detect `#colbreak()` in the source AST
     // and re-insert it after the paragraph it followed.
     apply_column_breaks_from_source(world, &mut doc);
+
+    // 12c. Recover explicit `#pagebreak()` from the source AST (same reason as
+    //       colbreak: it is consumed during compilation). Automatic page-flow
+    //       boundaries are intentionally not turned into hard breaks.
+    apply_page_breaks_from_source(world, &mut doc);
 
     // 12d. Build element→page mapping from block tag locations for precise
     //       section break and horizontal rule placement.
@@ -392,13 +389,6 @@ fn walk_tags(children: &[HtmlNode], ctx: &mut WalkCtx) {
         match &children[i] {
             HtmlNode::Tag(tag) => {
                 if let Tag::Start(content, _) = tag {
-                    // Insert a page break before this element if the
-                    // introspector-based pre-pass determined there is one.
-                    if ctx.page_breaks.contains(&tag.location()) {
-                        let mut pb_para = Paragraph::new();
-                        pb_para.add_page_break();
-                        ctx.doc.add_paragraph(pb_para);
-                    }
                     let elem_name = content.elem().name();
                     match elem_name {
                         "heading" => {
@@ -2264,6 +2254,74 @@ fn apply_column_breaks_from_source(world: &TyportWorld, doc: &mut Document) {
                 .insert(idx + 1, BlockElement::Paragraph(br));
         }
     }
+}
+
+/// Insert a page break after the paragraph each `#pagebreak()` followed.
+///
+/// Like `ColbreakElem`, `PagebreakElem` is consumed during compilation and is
+/// queryable in neither the `HtmlDocument` nor the `PagedDocument`, so explicit
+/// page breaks are recovered from the source AST. Automatic page-flow boundaries
+/// (a paragraph or a tall block that simply did not fit and spilled to the next
+/// page) are deliberately NOT turned into hard breaks — they reflow in Word.
+fn apply_page_breaks_from_source(world: &TyportWorld, doc: &mut Document) {
+    let anchors = extract_pagebreak_anchors(world.main_source().text());
+
+    for anchor in anchors {
+        let pos = doc.body.elements.iter().position(|el| {
+            if let BlockElement::Paragraph(p) = el {
+                let t = p.text_content();
+                let t = t.trim();
+                !t.is_empty() && (t == anchor || t.ends_with(anchor.as_str()))
+            } else {
+                false
+            }
+        });
+        if let Some(idx) = pos {
+            let mut br = Paragraph::new();
+            br.add_page_break();
+            doc.body
+                .elements
+                .insert(idx + 1, BlockElement::Paragraph(br));
+        }
+    }
+}
+
+/// Is this AST node a `#pagebreak()` function call?
+fn is_pagebreak_call(node: &typst_syntax::SyntaxNode) -> bool {
+    node.kind() == typst_syntax::SyntaxKind::FuncCall
+        && node
+            .cast::<typst_syntax::ast::FuncCall<'_>>()
+            .is_some_and(|fc| {
+                matches!(fc.callee(), typst_syntax::ast::Expr::Ident(i) if i.as_str() == "pagebreak")
+            })
+}
+
+/// Walk the AST; for each `#pagebreak()`, record the trimmed text of the markup
+/// node immediately before it (its anchor paragraph).
+fn collect_pagebreak_anchors(node: &typst_syntax::SyntaxNode, out: &mut Vec<String>) {
+    let mut last_text: Option<String> = None;
+    for child in node.children() {
+        if child.kind() == typst_syntax::SyntaxKind::Text {
+            let t = child.text().trim().to_string();
+            if !t.is_empty() {
+                last_text = Some(t);
+            }
+        } else if is_pagebreak_call(child)
+            && let Some(t) = last_text.take()
+        {
+            out.push(t);
+        }
+        collect_pagebreak_anchors(child, out);
+    }
+}
+
+/// Collect, for each `#pagebreak()` call in the source, the trimmed text of the
+/// markup node immediately preceding it (the anchor paragraph).
+fn extract_pagebreak_anchors(source: &str) -> Vec<String> {
+    let root = typst_syntax::parse(source);
+    let mut anchors = Vec::new();
+    collect_pagebreak_anchors(&root, &mut anchors);
+    anchors
 }
 
 /// Is this AST node a `#colbreak()` function call?
