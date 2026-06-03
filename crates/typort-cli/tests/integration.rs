@@ -687,15 +687,25 @@ fn numbered_equation_has_right_aligned_number() {
         doc_xml.contains("(2)"),
         "document.xml should contain equation number (2)"
     );
-    // Verify right-aligned tab stop is present
+    // Word-native numbered equation: a center tab centers the math and a right tab
+    // holds the number, around inline <m:oMath> (not a standalone block oMathPara,
+    // which cannot share a line with the trailing number).
     assert!(
-        doc_xml.contains("w:tab") && doc_xml.contains("right"),
-        "document.xml should have a right-aligned tab stop for equation numbering"
+        doc_xml.contains(r#"<w:tab w:val="center""#),
+        "numbered equation should be centered with a center tab stop"
     );
-    // Verify the OMML equation is still present
     assert!(
-        doc_xml.contains("<m:oMathPara>"),
-        "document.xml should still contain the block equation"
+        doc_xml.contains(r#"<w:tab w:val="right""#),
+        "numbered equation should hold the number at a right tab stop"
+    );
+    assert!(
+        doc_xml.contains("<m:oMath>"),
+        "document.xml should contain the equation as inline OMML"
+    );
+    // All equations here are numbered, so none should be a standalone block.
+    assert!(
+        !doc_xml.contains("<m:oMathPara>"),
+        "a numbered equation must not be a standalone block oMathPara"
     );
 }
 
@@ -4677,7 +4687,7 @@ fn issue_crossref_field_code_bookmarks() {
         "labeled elements should produce bookmarks"
     );
     assert!(
-        xml.contains("<m:oMathPara>"),
+        xml.contains("<m:oMath>"),
         "display equations should be present"
     );
 }

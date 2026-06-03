@@ -797,13 +797,20 @@ fn write_paragraph<W: Write>(
                 // Emit tab stops for numbered equations (right-aligned at page width)
                 // or for recovered grid/multi-column layouts
                 if has_eq_number {
+                    // Word's own numbered-equation layout: a center tab at the middle
+                    // of the text area centers the equation, and a right tab at the
+                    // right margin holds the number. (This is what `#`-numbering in
+                    // Word's equation editor produces.)
+                    let center_pos = (ctx.parts.content_width_twips / 2).to_string();
+                    let right_pos = ctx.parts.content_width_twips.to_string();
                     ppr.create_element("w:tabs").write_inner_content(|tabs| {
                         tabs.create_element("w:tab")
+                            .with_attribute(("w:val", "center"))
+                            .with_attribute(("w:pos", center_pos.as_str()))
+                            .write_empty()?;
+                        tabs.create_element("w:tab")
                             .with_attribute(("w:val", "right"))
-                            .with_attribute((
-                                "w:pos",
-                                ctx.parts.content_width_twips.to_string().as_str(),
-                            ))
+                            .with_attribute(("w:pos", right_pos.as_str()))
                             .write_empty()?;
                         Ok(())
                     })?;
@@ -878,9 +885,17 @@ fn write_paragraph<W: Write>(
                     omml_xml,
                     equation_number,
                 } => {
-                    write_math_inline(w, omml_xml)?;
                     if let Some(num) = equation_number {
+                        // Word-native numbered display equation: a leading tab moves
+                        // to the center tab (centering the math), the math is emitted
+                        // as inline <m:oMath> (a block <m:oMathPara> does not coexist
+                        // with trailing runs on the same line), then a trailing tab
+                        // moves to the right tab and the number is written there.
+                        write_tab(w)?;
+                        write_math_inline(w, strip_math_para(omml_xml))?;
                         write_equation_number(w, num)?;
+                    } else {
+                        write_math_inline(w, omml_xml)?;
                     }
                 }
                 InlineElement::Image(img) => {
@@ -1376,6 +1391,18 @@ fn write_math_inline<W: Write>(writer: &mut Writer<W>, omml_xml: &str) -> io::Re
     // Write the pre-serialized OMML XML directly into the stream
     writer.get_mut().write_all(omml_xml.as_bytes())?;
     Ok(())
+}
+
+/// Extract the inner `<m:oMath>…</m:oMath>` from a block `<m:oMathPara>` wrapper so
+/// a numbered equation can be written as inline math sitting between tab stops —
+/// the structure Word itself uses for numbered equations. A block `<m:oMathPara>`
+/// is a standalone centered paragraph and does not coexist with the trailing tab +
+/// number on the same line. Returns the input unchanged if it is already inline.
+fn strip_math_para(omml: &str) -> &str {
+    match (omml.find("<m:oMath>"), omml.rfind("</m:oMath>")) {
+        (Some(start), Some(end)) => &omml[start..end + "</m:oMath>".len()],
+        _ => omml,
+    }
 }
 
 /// Write a right-aligned equation number after an OMML block equation.
