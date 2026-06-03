@@ -46,6 +46,14 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
     let title_line_count = count_title_lines(&all_page_lines, doc);
     let full_doc_text = extract_doc_text(doc);
     let full_doc_text_nospace = strip_math_italic(&full_doc_text).replace(' ', "");
+    // CJK-only projection of the whole document, used to recognize paged lines
+    // whose prose is already present but broken up by interleaved OMML math,
+    // superscript citation marks, or heading numbers (which defeat the byte-level
+    // substring/word/fragment checks below).
+    let doc_cjk: String = full_doc_text
+        .chars()
+        .filter(|c| is_cjk_ideograph(*c))
+        .collect();
 
     let mut exclude_text = extract_header_footer_text(doc);
     for footnote in &doc.footnotes {
@@ -186,6 +194,27 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
                 .filter(|f| full_doc_text.contains(f.as_str()))
                 .count();
             if frag_matched * 2 > short_frags.len() {
+                continue;
+            }
+        }
+        // A line that is only citation/footnote markers (e.g. "[1][2][5]") holds
+        // no recoverable prose — those marks are already emitted as citations.
+        if strip_citation_markers(&line.text).trim().is_empty() {
+            continue;
+        }
+        // CJK-projection match: strip citation markers and a leading heading
+        // number, then project to CJK ideographs and treat the line as already
+        // present when that projection is a contiguous substring of the document.
+        // This catches body lines the checks above miss because their prose is
+        // split by OMML math / superscript citations (which never byte-match).
+        {
+            let norm = strip_leading_heading_number(&strip_citation_markers(&line.text));
+            let line_cjk: String = norm.chars().filter(|c| is_cjk_ideograph(*c)).collect();
+            let cjk_len = line_cjk.chars().count();
+            let has_math = line.text.chars().any(|c| {
+                ('\u{1D400}'..='\u{1D7FF}').contains(&c) || ('\u{2200}'..='\u{22FF}').contains(&c)
+            });
+            if (cjk_len >= 6 || (cjk_len >= 2 && has_math)) && doc_cjk.contains(&line_cjk) {
                 continue;
             }
         }
@@ -450,6 +479,57 @@ fn strip_heading_numbering(text: &str) -> String {
         }
     }
     String::new()
+}
+
+/// Whether `c` is a CJK ideograph (the ranges used for projection/fragments).
+fn is_cjk_ideograph(c: char) -> bool {
+    matches!(c, '\u{4E00}'..='\u{9FFF}' | '\u{3400}'..='\u{4DBF}')
+}
+
+/// Remove inline citation/footnote markers like `[12]`, `[1,2]` or `[1-3]` from a
+/// line. Such marks are already emitted as citations/footnote refs, so a paged
+/// line is not "missing" merely because it carries (or is made entirely of) them.
+fn strip_citation_markers(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '['
+            && let Some(rel) = chars[i + 1..].iter().position(|c| *c == ']')
+        {
+            let inner = &chars[i + 1..i + 1 + rel];
+            if !inner.is_empty()
+                && inner
+                    .iter()
+                    .all(|c| c.is_ascii_digit() || matches!(c, ',' | '，' | ' ' | '-' | '–'))
+            {
+                i = i + 1 + rel + 1;
+                continue;
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
+/// Strip a leading heading-number prefix ("三、", "(三)" or "（三）"), returning the
+/// remainder. Unlike [`strip_heading_numbering`], the input is returned unchanged
+/// (not emptied) when there is no such prefix, so it is safe on ordinary prose.
+fn strip_leading_heading_number(text: &str) -> String {
+    const CN_NUMS: [&str; 15] = [
+        "一", "二", "三", "四", "五", "六", "七", "八", "九", "十", "十一", "十二", "十三", "十四",
+        "十五",
+    ];
+    let t = text.trim_start();
+    for num in CN_NUMS {
+        for prefix in [format!("{num}、"), format!("({num})"), format!("（{num}）")] {
+            if let Some(rest) = t.strip_prefix(&prefix) {
+                return rest.trim_start().to_string();
+            }
+        }
+    }
+    t.to_string()
 }
 
 /// Extract contiguous CJK ideograph runs of at least `min_len` characters.

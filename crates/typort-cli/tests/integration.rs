@@ -1,6 +1,128 @@
 use std::io::Cursor;
 use std::path::Path;
 
+/// Return the single `<w:p>...</w:p>` block that contains `needle`.
+fn paragraph_containing<'a>(doc_xml: &'a str, needle: &str) -> &'a str {
+    let pos = doc_xml
+        .find(needle)
+        .unwrap_or_else(|| panic!("document should contain {needle:?}"));
+    let start = doc_xml[..pos]
+        .rfind("<w:p>")
+        .or_else(|| doc_xml[..pos].rfind("<w:p "))
+        .expect("paragraph start");
+    let end = doc_xml[pos..]
+        .find("</w:p>")
+        .map(|e| pos + e)
+        .expect("paragraph end");
+    &doc_xml[start..end]
+}
+
+#[test]
+fn par_wrapped_inline_math_keeps_prose_with_math() {
+    // Regression: prose inside an author par()[...] wrapper around inline math was
+    // dropped (only the equations survived as an orphan math paragraph). See
+    // tests/fixtures/edge_par_wraps_inline_math.typ.
+    let doc_xml = fixture_doc_xml("edge_par_wraps_inline_math");
+
+    // The prose around the inline math must survive — especially the text AFTER
+    // the last equation, which the skip dropped entirely.
+    assert!(
+        doc_xml.contains("Lead") && doc_xml.contains("matters here"),
+        "wrapped-par prose must not be dropped"
+    );
+    // The prose must sit in the SAME paragraph as its OMML, not be split off into
+    // an orphan math-only paragraph.
+    let lead_para = paragraph_containing(&doc_xml, "Lead");
+    assert!(
+        lead_para.contains("<m:oMath>"),
+        "wrapped-par prose and its inline math must share one paragraph"
+    );
+    assert!(
+        lead_para.contains("matters here"),
+        "prose after the last inline equation must stay in the same paragraph"
+    );
+    // No recovery-injected duplicate of the prose.
+    assert_eq!(
+        doc_xml.matches("matters here").count(),
+        1,
+        "wrapped-par prose must appear exactly once"
+    );
+    // No-regression: a flat body paragraph with inline math also interleaves prose
+    // and OMML in one paragraph (the existing merge path must be unaffected).
+    let body_para = paragraph_containing(&doc_xml, "Flat body paragraph");
+    assert!(
+        body_para.contains("<m:oMath>"),
+        "flat body paragraph must keep prose and inline math together"
+    );
+}
+
+#[test]
+fn recovery_does_not_inject_citation_or_duplicate_orphans() {
+    // Regression for recover_missing_content (recovery.rs): paged body lines whose
+    // prose is broken up by OMML math and superscript citations used to be misjudged
+    // as "missing" and prepended at body index 0, injecting citation-number strings
+    // and duplicated body sentences as orphans above the abstract. See
+    // tests/fixtures/edge_recovery_no_orphans.typ.
+    let doc_xml = fixture_doc_xml("edge_recovery_no_orphans");
+
+    // Collect each paragraph's plain text (w:t only).
+    let para_texts: Vec<String> = doc_xml
+        .match_indices("<w:p>")
+        .map(|(start, _)| {
+            let end = doc_xml[start..]
+                .find("</w:p>")
+                .map_or(doc_xml.len(), |e| start + e);
+            let block = &doc_xml[start..end];
+            let mut t = String::new();
+            let mut rest = block;
+            while let Some(o) = rest.find("<w:t") {
+                let after = &rest[o..];
+                if let Some(gt) = after.find('>') {
+                    let content = &after[gt + 1..];
+                    if let Some(close) = content.find("</w:t>") {
+                        t.push_str(&content[..close]);
+                        rest = &content[close..];
+                        continue;
+                    }
+                }
+                break;
+            }
+            t
+        })
+        .collect();
+
+    // No paragraph may consist solely of citation/footnote markers like "[1]".
+    let is_marker_only = |t: &str| {
+        let t = t.trim();
+        !t.is_empty()
+            && t.chars()
+                .all(|c| c.is_ascii_digit() || matches!(c, '[' | ']' | ',' | ' '))
+            && t.contains('[')
+    };
+    assert!(
+        !para_texts.iter().any(|t| is_marker_only(t)),
+        "recovery must not inject citation-marker-only orphan paragraphs: {para_texts:?}"
+    );
+
+    // The abstract must sit right after the title block, not be pushed below
+    // injected orphans.
+    let abstract_idx = para_texts
+        .iter()
+        .position(|t| t.contains("摘要"))
+        .expect("abstract present");
+    assert!(
+        abstract_idx <= 2,
+        "abstract should stay near the top (after title block), found at {abstract_idx}"
+    );
+
+    // Body sentences must appear exactly once (no recovery-injected duplicate).
+    assert_eq!(
+        doc_xml.matches("正文第一段").count(),
+        1,
+        "body sentence must not be duplicated by recovery"
+    );
+}
+
 #[test]
 fn table_cell_inline_math_is_spliced_not_dropped() {
     // Regression: inline equations inside table cells are `equation` Tag siblings

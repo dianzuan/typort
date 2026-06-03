@@ -1061,6 +1061,19 @@ fn handle_inline_tag(
             }
             end
         }
+        "par" => {
+            // A nested `par` reached in an inline context — e.g. an author-written
+            // `par()[...]` wrapping inline math, as journal templates do for the
+            // abstract. Typst emits it as Start(par) … End with the prose held in an
+            // `Element<p>` inside that range, interleaved with `equation` markers.
+            // The default `_ =>` arm below would `find_tag_end` straight past the
+            // inner nodes, dropping the prose and leaving only the equations as an
+            // orphan math paragraph. Descend instead, so prose and equations are
+            // collected into this same paragraph in document order.
+            let end = find_tag_end(children, i, tag.location());
+            collect_par_inlines(&children[i + 1..end], ctx, para);
+            end
+        }
         _ => {
             // Skip unknown or non-inline tags
             find_tag_end(children, i, tag.location())
