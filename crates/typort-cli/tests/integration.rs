@@ -5186,6 +5186,42 @@ fn bibliography_produces_citation_field_refs() {
 }
 
 #[test]
+fn bibliography_entries_are_not_a_bulleted_list() {
+    // Regression: bibliography entries arrive as a Typst <ul>, so each kept a
+    // bullet-list numPr on top of its "[n]" label — a double marker. The "[n]" is
+    // the marker; entries should carry only a hanging indent, no list numbering.
+    let doc_xml = fixture_doc_xml("bibliography_basic");
+    let entry = paragraph_containing(&doc_xml, "An Example Article");
+    assert!(
+        !entry.contains("<w:numPr>"),
+        "bibliography entries must not be a bulleted/numbered list:\n{entry}"
+    );
+    assert!(
+        entry.contains("w:hanging"),
+        "bibliography entries should keep a hanging indent"
+    );
+}
+
+#[test]
+fn bibliography_style_is_defined() {
+    // The reference field-code paragraph carries the "Bibliography" style; it must
+    // be defined in styles.xml, not left as a dangling reference relying on Word's
+    // built-in (which WPS/LibreOffice may not have).
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/bibliography_basic.typ"))
+            .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let styles = std::io::read_to_string(reader.by_name("word/styles.xml").unwrap()).unwrap();
+    assert!(
+        styles.contains(r#"w:styleId="Bibliography""#),
+        "styles.xml should define the Bibliography style"
+    );
+}
+
+#[test]
 fn bibliography_produces_bibliography_sdt() {
     let xml = fixture_doc_xml("bibliography_basic");
     assert!(

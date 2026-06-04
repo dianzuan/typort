@@ -21,6 +21,7 @@ pub(crate) fn generate_styles(
                 write_style_heading(w, level, style)?;
             }
             write_style_code_block(w, style)?;
+            write_style_bibliography(w, style)?;
             if has_footnotes {
                 write_style_footnote_reference(w)?;
                 write_style_footnote_text(w, style)?;
@@ -190,6 +191,36 @@ fn write_style_heading<W: Write>(
                     .write_empty()?;
                 rpr.create_element("w:szCs")
                     .with_attribute(("w:val", font_size.as_str()))
+                    .write_empty()?;
+                Ok(())
+            })?;
+            Ok(())
+        })?;
+    Ok(())
+}
+
+/// Define the `Bibliography` paragraph style. The reference list's field-code
+/// paragraph carries this (built-in) style id; defining it explicitly makes the
+/// document self-contained (not reliant on a host editor's built-in definition),
+/// so it renders consistently across word processors. Based on `Normal` with a
+/// hanging indent matching the reference layout.
+fn write_style_bibliography<W: Write>(w: &mut Writer<W>, style: &DocumentStyle) -> io::Result<()> {
+    let hang = (style.body_size_half_pt * 10 * 2).to_string();
+    w.create_element("w:style")
+        .with_attribute(("w:type", "paragraph"))
+        .with_attribute(("w:styleId", "Bibliography"))
+        .write_inner_content(|s| {
+            s.create_element("w:name")
+                .with_attribute(("w:val", "Bibliography"))
+                .write_empty()?;
+            s.create_element("w:basedOn")
+                .with_attribute(("w:val", "Normal"))
+                .write_empty()?;
+            s.create_element("w:pPr").write_inner_content(|ppr| {
+                ppr.create_element("w:ind")
+                    .with_attribute(("w:left", hang.as_str()))
+                    .with_attribute(("w:hanging", hang.as_str()))
+                    .with_attribute(("w:firstLine", "0"))
                     .write_empty()?;
                 Ok(())
             })?;

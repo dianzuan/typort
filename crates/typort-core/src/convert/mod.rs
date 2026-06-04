@@ -569,6 +569,12 @@ fn handle_html_element(elem: &HtmlElement, ctx: &mut WalkCtx) {
                             } else {
                                 let mut bp = p;
                                 bp.hanging_indent = true;
+                                // Typst emits the reference list as a <ul>, so each
+                                // entry arrived tagged as a bullet list item. The
+                                // "[n]" label is already the marker — drop the list
+                                // so Word doesn't prepend a redundant bullet; the
+                                // hanging indent above gives the reference layout.
+                                bp.list_info = None;
                                 bib_paragraphs.push(bp);
                             }
                         }
