@@ -18,6 +18,27 @@ fn paragraph_containing<'a>(doc_xml: &'a str, needle: &str) -> &'a str {
 }
 
 #[test]
+fn inline_math_spacing_cjk_tight_latin_spaced() {
+    // Regression: the inline-equation merge must not insert a literal space between
+    // CJK text and an equation (Typst renders 标量M tight); it must keep the space
+    // for Latin text (Typst trims it, Word needs it back). See
+    // tests/fixtures/edge_cjk_inline_math_spacing.typ.
+    let doc_xml = fixture_doc_xml("edge_cjk_inline_math_spacing");
+    let space_run = r#"<w:t xml:space="preserve"> </w:t>"#;
+
+    let cjk = paragraph_containing(&doc_xml, "标量");
+    assert!(
+        !cjk.contains(space_run),
+        "CJK text adjacent to inline math must stay tight (no inserted space):\n{cjk}"
+    );
+    let latin = paragraph_containing(&doc_xml, "the value");
+    assert!(
+        latin.contains(space_run),
+        "Latin text around inline math must keep its space"
+    );
+}
+
+#[test]
 fn par_wrapped_inline_math_keeps_prose_with_math() {
     // Regression: prose inside an author par()[...] wrapper around inline math was
     // dropped (only the equations survived as an orphan math paragraph). See
