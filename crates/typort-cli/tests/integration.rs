@@ -3328,6 +3328,35 @@ fn doc_title_conversion_is_deterministic() {
     );
 }
 
+/// Regression (figure rasterization + recovery.rs): a vector-drawing figure
+/// (Bézier curve + an inner text label) must rasterize to a single embedded
+/// image with its label baked into the pixels — not recovered into the body as
+/// a stray paragraph (the label is absent from the HTML and would otherwise be
+/// pulled from the paged output). A sibling table figure must stay an editable
+/// table, and both captions must survive.
+#[test]
+fn drawing_figure_is_rasterized_not_leaked() {
+    let xml = fixture_doc_xml("edge_figure_rasterized");
+    assert_eq!(
+        xml.matches("<w:drawing").count(),
+        1,
+        "the curve figure should be exactly one embedded image: {xml}"
+    );
+    assert_eq!(
+        xml.matches("<w:tbl>").count(),
+        1,
+        "the table figure must stay an editable table, not be rasterized: {xml}"
+    );
+    assert!(
+        !xml.contains("ZZLABELZZ"),
+        "the canvas label must be baked into the image, not leaked as body text: {xml}"
+    );
+    assert!(
+        xml.contains("Drawn figure") && xml.contains("Real table"),
+        "both figure captions must survive: {xml}"
+    );
+}
+
 #[test]
 fn issue_cjk_linebreak_no_spurious_spaces() {
     let xml = fixture_doc_xml("issue_cjk_linebreak");

@@ -55,6 +55,10 @@ struct WalkCtx<'a> {
     doc: &'a mut Document,
     eq_state: &'a mut EquationState,
     image_queue: &'a mut VecDeque<ImageData>,
+    /// Rasterized vector-drawing canvases (`CeTZ` plots etc.), in page order.
+    /// Consumed by drawing `<figure>`s; kept separate from `image_queue` (which
+    /// serves `<img>` tags) so the two FIFOs never interleave.
+    figure_queue: &'a mut VecDeque<ImageData>,
     bookmarks: &'a mut HashSet<String>,
 }
 
@@ -119,12 +123,17 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
         doc.add_footnote(content.clone());
     }
 
-    // 5. Extract images from PagedDocument for embedding
-    let mut image_queue: VecDeque<ImageData> = if let Some(paged) = &paged_doc {
-        image::extract_images_from_paged(paged).into()
-    } else {
-        VecDeque::new()
-    };
+    // 5. Extract images from PagedDocument for embedding. Two FIFOs: raster/SVG
+    //    images (for <img>), and rasterized vector drawings (for drawing figures).
+    let (mut image_queue, mut figure_queue): (VecDeque<ImageData>, VecDeque<ImageData>) =
+        if let Some(paged) = &paged_doc {
+            (
+                image::extract_images_from_paged(paged).into(),
+                image::extract_figure_rasters_from_paged(paged).into(),
+            )
+        } else {
+            (VecDeque::new(), VecDeque::new())
+        };
 
     // 7. Walk the HTML tree's Tag sequence. Explicit `#pagebreak()` breaks are
     //    recovered from the source AST afterwards (step 12b); automatic page-flow
@@ -137,6 +146,7 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
             doc: &mut doc,
             eq_state: &mut eq_state,
             image_queue: &mut image_queue,
+            figure_queue: &mut figure_queue,
             bookmarks: &mut bookmarks,
         };
         walk_tags(&body.children, &mut ctx);
@@ -474,7 +484,25 @@ fn walk_tags(children: &[HtmlNode], ctx: &mut WalkCtx) {
                                     ctx.doc.add_paragraph(bk_para);
                                 }
                             }
-                            walk_tags(&children[i + 1..end], ctx);
+                            let inner = &children[i + 1..end];
+                            // A figure whose body is neither a <table> nor an
+                            // <image> is vector line art (e.g. a CeTZ canvas).
+                            // Its shapes carry no <img>, so walking it would leak
+                            // the canvas's text labels into the body. Emit the
+                            // rasterized canvas (page-ordered in figure_queue) and
+                            // keep only the caption.
+                            let is_drawing = elem_name == "figure"
+                                && !subtree_has_element(inner, "table")
+                                && !subtree_has_element(inner, "image");
+                            if is_drawing && let Some(img) = ctx.figure_queue.pop_front() {
+                                let mut para = Paragraph::new();
+                                para.alignment = Some(Alignment::Center);
+                                para.add_image(img);
+                                ctx.doc.add_paragraph(para);
+                                emit_figure_caption(inner, ctx);
+                            } else {
+                                walk_tags(inner, ctx);
+                            }
                             i = end;
                         }
                         "outline" => {
@@ -528,6 +556,34 @@ fn walk_tags(children: &[HtmlNode], ctx: &mut WalkCtx) {
             }
         }
         i += 1;
+    }
+}
+
+/// Whether a figure subtree contains an element with the given Typst tag name.
+/// Checks both flattened `Tag::Start` markers and nested `Element` children, so
+/// it works regardless of which HTML representation the construct took.
+fn subtree_has_element(nodes: &[HtmlNode], name: &str) -> bool {
+    nodes.iter().any(|node| match node {
+        HtmlNode::Tag(Tag::Start(content, _)) => content.elem().name() == name,
+        HtmlNode::Element(elem) => {
+            tag_name(elem).as_str() == name || subtree_has_element(&elem.children, name)
+        }
+        _ => false,
+    })
+}
+
+/// Emit only the `<figcaption>` element(s) in a figure subtree, skipping the
+/// (rasterized) canvas body. Keeps the caption for vector-drawing figures while
+/// dropping the canvas's leaked text labels.
+fn emit_figure_caption(nodes: &[HtmlNode], ctx: &mut WalkCtx) {
+    for node in nodes {
+        if let HtmlNode::Element(elem) = node {
+            if tag_name(elem).as_str() == "figcaption" {
+                handle_html_element(elem, ctx);
+            } else {
+                emit_figure_caption(&elem.children, ctx);
+            }
+        }
     }
 }
 

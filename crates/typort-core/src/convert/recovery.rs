@@ -382,7 +382,11 @@ fn collect_text_items_with_pos(frame: &Frame, offset: Point, items: &mut Vec<Fra
                     });
                 }
             }
-            FrameItem::Group(group) => {
+            // Skip drawing canvases (CeTZ plots etc.): their text labels are
+            // baked into the rasterized figure image, so recovering them as
+            // body text would duplicate them as stray paragraphs. Detected by
+            // Bézier curve content — tables and rules use only straight lines.
+            FrameItem::Group(group) if !super::image::frame_has_curve(&group.frame) => {
                 let new_offset = Point::new(abs_x, abs_y);
                 collect_text_items_with_pos(&group.frame, new_offset, items);
             }
@@ -960,7 +964,8 @@ fn collect_horizontal_lines(frame: &Frame, offset: Point, min_width: f64, lines:
                     }
                 }
             }
-            FrameItem::Group(group) => {
+            // Skip drawing canvases: a plot's axis line is not a document rule.
+            FrameItem::Group(group) if !super::image::frame_has_curve(&group.frame) => {
                 let new_offset = Point::new(abs_x, abs_y);
                 collect_horizontal_lines(&group.frame, new_offset, min_width, lines);
             }

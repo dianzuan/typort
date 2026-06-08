@@ -26,6 +26,7 @@ typst-utils = "0.14.2"
 typst-realize = "0.14.2"
 typst-html = "0.14.2"
 typst-pdf = "0.14.2"
+typst-render = "0.14.2"
 
 # SVG rasterization
 resvg = { version = "0.45", default-features = false }
