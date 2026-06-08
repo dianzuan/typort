@@ -84,7 +84,6 @@ fn write_doc_defaults<W: Write>(w: &mut Writer<W>, style: &DocumentStyle) -> io:
 
 fn write_style_normal<W: Write>(w: &mut Writer<W>, style: &DocumentStyle) -> io::Result<()> {
     let sz = style.body_size_half_pt.to_string();
-    let line_spacing = style.line_spacing.to_string();
     let indent = style.first_line_indent_twips.to_string();
     w.create_element("w:style")
         .with_attribute(("w:type", "paragraph"))
@@ -123,11 +122,14 @@ fn write_style_normal<W: Write>(w: &mut Writer<W>, style: &DocumentStyle) -> io:
                     .write_empty()?;
                 let sp_before = style.body_spacing_before.to_string();
                 let sp_after = style.body_spacing_after.to_string();
+                // No w:line/w:lineRule: Pandoc-aligned. Emitting the rendered
+                // line pitch as lineRule="atLeast" showed up in Word as
+                // 行距=最小值; instead set only paragraph before/after and let
+                // Word default to single line spacing (one click to 1.5x if the
+                // author wants it).
                 ppr.create_element("w:spacing")
                     .with_attribute(("w:before", sp_before.as_str()))
                     .with_attribute(("w:after", sp_after.as_str()))
-                    .with_attribute(("w:line", line_spacing.as_str()))
-                    .with_attribute(("w:lineRule", "atLeast"))
                     .write_empty()?;
                 ppr.create_element("w:ind")
                     .with_attribute(("w:firstLine", indent.as_str()))
@@ -162,7 +164,10 @@ fn write_style_heading<W: Write>(
                 .with_attribute(("w:val", "Normal"))
                 .write_empty()?;
             s.create_element("w:pPr").write_inner_content(|ppr| {
-                ppr.create_element("w:keepNext").write_empty()?;
+                // No w:keepNext: Typst headings are sticky, but pinning a
+                // heading to its following content makes Word push the heading
+                // onto the next page when the group doesn't fit at the bottom,
+                // leaving a gap. Let Word flow headings so the space is filled.
                 ppr.create_element("w:widowControl").write_empty()?;
                 let outline_level = (level - 1).to_string();
                 ppr.create_element("w:outlineLvl")

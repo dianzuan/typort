@@ -3311,11 +3311,20 @@ fn doc_title_conversion_is_deterministic() {
             "doc_title output must be byte-identical across runs"
         );
     }
-    // Pin the semantically-correct settled value: an 11pt body (line pitch 288),
-    // not the 15.5pt heading size (which would yield line pitch 405).
+    // Pin the semantically-correct settled value: an 11pt body (w:sz 22 in the
+    // Normal style), not the 15.5pt heading size (w:sz 31). (Line spacing is no
+    // longer emitted — Pandoc-aligned — so the body size is pinned directly.)
+    let styles = fixture_styles_xml("doc_title");
+    let normal_start = styles
+        .find(r#"w:styleId="Normal""#)
+        .expect("Normal style present");
+    let normal = &styles[normal_start
+        ..styles[normal_start..]
+            .find("</w:style>")
+            .map_or(styles.len(), |e| normal_start + e)];
     assert!(
-        first.contains("w:linePitch=\"288\""),
-        "body should be detected as 11pt (line pitch 288): {first}"
+        normal.contains(r#"w:sz w:val="22""#),
+        "body should be detected as 11pt (Normal w:sz=22): {normal}"
     );
 }
 

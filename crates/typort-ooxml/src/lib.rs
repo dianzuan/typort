@@ -593,25 +593,48 @@ mod tests {
         assert!(xml.contains(omml), "expected OMML passthrough in: {xml}");
     }
 
-    // ── 19. Document grid ────────────────────────────────────────────────
+    // ── 19. Line spacing: Pandoc-aligned (no frozen line height) ─────────
 
     #[test]
-    fn doc_grid_in_section_properties() {
+    fn line_spacing_is_pandoc_aligned_no_docgrid_no_line_rule() {
+        // Pandoc emits no w:docGrid and no w:line/w:lineRule — it sets only
+        // paragraph before/after spacing and lets Word default to single line
+        // spacing. typort follows suit: freezing the rendered line pitch as
+        // w:lineRule="atLeast" surfaced in Word as 行距=最小值, and a docGrid
+        // linePitch re-imposed a geometric grid. Neither is emitted now.
         let doc = Document::new();
         let buf = build_docx(&doc);
-        let xml = read_zip_entry(&buf, "word/document.xml");
+        let body = read_zip_entry(&buf, "word/document.xml");
+        let styles = read_zip_entry(&buf, "word/styles.xml");
         assert!(
-            xml.contains("w:docGrid"),
-            "should have docGrid in sectPr: {xml}"
+            !body.contains("w:docGrid"),
+            "should NOT emit a docGrid (Pandoc-aligned): {body}"
         );
+        // The "最小值" rule (atLeast) must be gone everywhere; a benign
+        // auto single-spacing on e.g. CodeBlock is fine and Pandoc-like.
         assert!(
-            xml.contains("w:linePitch"),
-            "should have linePitch attribute: {xml}"
+            !styles.contains(r#"w:lineRule="atLeast""#)
+                && !body.contains(r#"w:lineRule="atLeast""#),
+            "no style should pin lineRule=atLeast (shows as 行距=最小值): {styles}"
         );
+        // The Normal (body) style must not pin a line height at all.
+        let normal = normal_style(&styles);
         assert!(
-            !xml.contains(r#"w:type="lines""#),
-            "docGrid should NOT use type=lines (it adds pitch on top of paragraph spacing): {xml}"
+            !normal.contains("w:line=") && !normal.contains("w:lineRule"),
+            "Normal style should set no line spacing (Word defaults to single): {normal}"
         );
+    }
+
+    /// Extract the default `<w:style ... w:styleId="Normal"> … </w:style>` block.
+    fn normal_style(xml: &str) -> &str {
+        let start = xml
+            .find(r#"w:styleId="Normal""#)
+            .expect("Normal style present");
+        let begin = xml[..start].rfind("<w:style").expect("style open tag");
+        let end = xml[begin..]
+            .find("</w:style>")
+            .map_or(xml.len(), |e| begin + e + "</w:style>".len());
+        &xml[begin..end]
     }
 
     // ── 20. CJK properties in docDefaults ──────────────────────────────
@@ -650,18 +673,39 @@ mod tests {
     // ── 21. Heading paragraph control properties ───────────────────────
 
     #[test]
-    fn heading_styles_have_keep_next_and_widow_control() {
+    fn heading_styles_flow_freely_without_keep_next() {
         let doc = Document::new();
         let buf = build_docx(&doc);
         let xml = read_zip_entry(&buf, "word/styles.xml");
+        // Typst headings are "sticky" (keep-with-next), but replicating that as
+        // a blanket w:keepNext makes Word bump a heading — together with its
+        // following content — onto the next page even when it would fit, leaving
+        // a gap at the bottom of the page. We let Word flow headings freely so
+        // available space gets filled. keepNext is emitted nowhere else, so it
+        // must not appear in styles.xml at all.
         assert!(
-            xml.contains("<w:keepNext/>"),
-            "heading styles should have keepNext: {xml}"
+            !xml.contains("<w:keepNext/>"),
+            "heading styles must not pin headings to the next paragraph: {xml}"
         );
+        // Widow/orphan control stays — it guides Word's line breaking without
+        // freezing where a page breaks.
+        let h1 = heading1_style(&xml);
         assert!(
-            xml.contains("<w:widowControl/>"),
-            "should have widowControl: {xml}"
+            h1.contains("<w:widowControl/>"),
+            "Heading1 should still have widowControl: {h1}"
         );
+    }
+
+    /// Extract the `<w:style ... w:styleId="Heading1"> … </w:style>` block.
+    fn heading1_style(xml: &str) -> &str {
+        let start = xml
+            .find(r#"w:styleId="Heading1""#)
+            .expect("Heading1 style present");
+        let begin = xml[..start].rfind("<w:style").expect("style open tag");
+        let end = xml[begin..]
+            .find("</w:style>")
+            .map_or(xml.len(), |e| begin + e + "</w:style>".len());
+        &xml[begin..end]
     }
 
     // ── 22. Numbered equation ──────────────────────────────────────────

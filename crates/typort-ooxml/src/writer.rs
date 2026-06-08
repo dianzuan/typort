@@ -652,7 +652,7 @@ fn write_section_properties<W: Write>(
                 .with_attribute(("w:fmt", fmt_val))
                 .write_empty()?;
         }
-        write_section_page_settings(w, settings, style)?;
+        write_section_page_settings(w, settings)?;
         Ok(())
     })?;
     Ok(())
@@ -680,7 +680,6 @@ fn write_footnote_pr<W: Write>(writer: &mut Writer<W>, format: &FootnoteFormat) 
 fn write_section_page_settings<W: Write>(
     w: &mut Writer<W>,
     settings: &crate::document::PageSettings,
-    style: &crate::document::DocumentStyle,
 ) -> io::Result<()> {
     w.create_element("w:pgSz")
         .with_attribute(("w:w", settings.width_twips.to_string().as_str()))
@@ -701,13 +700,8 @@ fn write_section_page_settings<W: Write>(
             .with_attribute(("w:space", space.as_str()))
             .write_empty()?;
     }
-    // Document grid: use default (no grid) since line spacing is controlled
-    // precisely via w:lineRule="atLeast". type="lines" would add grid pitch
-    // on top of paragraph spacing, doubling the line height.
-    let line_pitch_str = style.line_spacing.to_string();
-    w.create_element("w:docGrid")
-        .with_attribute(("w:linePitch", line_pitch_str.as_str()))
-        .write_empty()?;
+    // No w:docGrid: Pandoc-aligned. A docGrid linePitch re-imposes a geometric
+    // line grid; omitting it lets Word flow text with default single spacing.
     Ok(())
 }
 
@@ -872,7 +866,7 @@ fn write_paragraph<W: Write>(
                 }
                 // Emit section break (w:sectPr inside w:pPr)
                 if let Some(section) = &para.section_break {
-                    write_section_break(ppr, section, ctx.doc_style)?;
+                    write_section_break(ppr, section)?;
                 }
                 Ok(())
             })?;
@@ -1980,11 +1974,7 @@ fn generate_footnotes_xml(writer: &mut Writer<&mut Vec<u8>>, doc: &Document) -> 
 }
 
 /// Write a `w:sectPr` element inside a paragraph's `w:pPr` for a section break.
-fn write_section_break<W: Write>(
-    writer: &mut Writer<W>,
-    section: &SectionBreak,
-    style: &crate::document::DocumentStyle,
-) -> io::Result<()> {
+fn write_section_break<W: Write>(writer: &mut Writer<W>, section: &SectionBreak) -> io::Result<()> {
     writer.create_element("w:sectPr").write_inner_content(|w| {
         let break_val = match section.break_type {
             SectionBreakType::NextPage => "nextPage",
@@ -1996,10 +1986,10 @@ fn write_section_break<W: Write>(
             .with_attribute(("w:val", break_val))
             .write_empty()?;
         if let Some(ps) = &section.page_settings {
-            write_section_page_settings(w, ps, style)?;
+            write_section_page_settings(w, ps)?;
         } else {
             // Use default page settings
-            write_section_page_settings(w, &crate::document::PageSettings::default(), style)?;
+            write_section_page_settings(w, &crate::document::PageSettings::default())?;
         }
         Ok(())
     })?;
