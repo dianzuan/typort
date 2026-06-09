@@ -5227,20 +5227,36 @@ smoke_test!(
 // ── Bibliography / Citation ────────────────────────────────────────────
 
 #[test]
-fn bibliography_produces_citation_field_refs() {
+fn bibliography_citations_are_markers_not_field_refs() {
     let xml = fixture_doc_xml("bibliography_basic");
-    // Inline citations produce REF field codes pointing at bibliography keys
+    // Citations must NOT be REF fields to bibliography keys: a REF to a
+    // non-existent bookmark renders in Word as "Error! Reference source not
+    // found". They render instead as the marker Typst produced.
+    for key in ["REF smith2020", "REF knuth1997", "REF wang2023"] {
+        assert!(
+            !xml.contains(key),
+            "citation must not be a REF field: {key}"
+        );
+    }
+    // The default style renders inline numeric markers ([1]/[2]/[3]).
     assert!(
-        xml.contains("REF smith2020"),
-        "expected REF field code for smith2020"
+        xml.contains("[1]") && xml.contains("[2]") && xml.contains("[3]"),
+        "expected inline numeric citation markers: {xml}"
+    );
+}
+
+#[test]
+fn superscript_citation_style_raises_the_marker() {
+    let xml = fixture_doc_xml("bibliography_superscript");
+    // A superscript numeric style (here "nature") must raise the in-text marker,
+    // detected from the rendered <sup> — not assumed from the style name.
+    assert!(
+        !xml.contains("REF smith2020"),
+        "citation must not be a broken REF field: {xml}"
     );
     assert!(
-        xml.contains("REF knuth1997"),
-        "expected REF field code for knuth1997"
-    );
-    assert!(
-        xml.contains("REF wang2023"),
-        "expected REF field code for wang2023"
+        xml.contains(r#"<w:vertAlign w:val="superscript"/>"#),
+        "superscript citation style must produce a raised marker: {xml}"
     );
 }
 

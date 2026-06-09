@@ -20,6 +20,7 @@ use typort_ooxml::document::{
     ParagraphStyle, Run, Table, TableCell, TableRow, VMerge,
 };
 
+use typst::comemo::Track;
 use typst::foundations::{Smart, StyleChain};
 use typst::introspection::{Location, Tag};
 use typst::layout::PagedDocument;
@@ -60,6 +61,10 @@ struct WalkCtx<'a> {
     /// serves `<img>` tags) so the two FIFOs never interleave.
     figure_queue: &'a mut VecDeque<ImageData>,
     bookmarks: &'a mut HashSet<String>,
+    /// Citation keys declared by the bibliography. A `<ref>` whose target is one
+    /// of these is a citation (rendered as a marker like `[27]`), not a
+    /// cross-reference to a bookmarked figure/equation/heading.
+    bib_keys: &'a HashSet<String>,
 }
 
 use crate::world::TyportWorld;
@@ -140,6 +145,12 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
     //    boundaries deliberately reflow in Word rather than become hard breaks.
     let mut eq_state = EquationState::default();
     let mut bookmarks: HashSet<String> = HashSet::new();
+    // Citation keys, so the <ref> handler can tell a citation from a cross-ref.
+    let bib_keys: HashSet<String> =
+        typst_library::model::BibliographyElem::keys(html_doc.introspector.track())
+            .into_iter()
+            .map(|(label, _)| label.resolve().to_string())
+            .collect();
     {
         let mut ctx = WalkCtx {
             html_doc: &html_doc,
@@ -148,6 +159,7 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
             image_queue: &mut image_queue,
             figure_queue: &mut figure_queue,
             bookmarks: &mut bookmarks,
+            bib_keys: &bib_keys,
         };
         walk_tags(&body.children, &mut ctx);
     }
@@ -1112,7 +1124,18 @@ fn handle_inline_tag(
             {
                 let target_label = format!("{}", ref_elem.target.resolve());
                 let display = collect_flat_text(&children[i + 1..end]);
-                para.add_field_ref(target_label, display);
+                if ctx.bib_keys.contains(&target_label) {
+                    // Citation: a REF field to a non-existent bookmark renders in
+                    // Word as "Error! Reference source not found". Emit the
+                    // marker Typst already rendered (e.g. "[27]") as a run,
+                    // superscript when the style raises it (numeric CSL) — detected
+                    // from a <sup> in the rendered ref, not assumed from the style.
+                    let mut run = Run::new(&display);
+                    run.superscript = subtree_has_element(&children[i + 1..end], "sup");
+                    para.push_run(run);
+                } else {
+                    para.add_field_ref(target_label, display);
+                }
             }
             end
         }
