@@ -2003,10 +2003,27 @@ fn build_style_override_maps(
                     .push((item.text.clone(), ovr.clone()));
             }
         }
-        text_overrides
-            .entry(item.text.clone())
-            .or_default()
-            .push(ovr.clone());
+        // A size override that SHRINKS below the body size is almost always a
+        // super/subscript or a small positional annotation (e.g. an affiliation
+        // `#super[1]` at 6.5pt). Generalizing it by TEXT pollutes same-text body
+        // runs — a reference "[1]" would inherit that 6.5pt. Keep the shrink only
+        // in the precise span map; the text-keyed map gets a size-stripped copy.
+        let text_ovr = RunStyleOverride {
+            size_half_pt: ovr.size_half_pt.filter(|&s| s >= body_size_half_pt),
+            ..ovr.clone()
+        };
+        if text_ovr.color.is_some()
+            || text_ovr.font_ascii.is_some()
+            || text_ovr.font_east_asia.is_some()
+            || text_ovr.size_half_pt.is_some()
+            || text_ovr.force_bold.is_some()
+            || text_ovr.force_italic.is_some()
+        {
+            text_overrides
+                .entry(item.text.clone())
+                .or_default()
+                .push(text_ovr);
+        }
     }
 
     (span_overrides, text_overrides)

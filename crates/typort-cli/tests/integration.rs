@@ -5833,3 +5833,41 @@ fn first_line_indent_all_indents_paragraph_after_heading() {
         "paragraph after a heading must NOT be indent-suppressed under all:true:\n{para}"
     );
 }
+
+#[test]
+fn superscript_marker_size_does_not_leak_to_body_reference() {
+    // A `#super[1]` affiliation marker renders small; its size must not be
+    // generalized (by same-text matching) onto a body "[1]" reference marker.
+    // The reference paragraph is entirely body-sized, so it carries no <w:sz>
+    // override at all. See tests/fixtures/edge_super_marker_size.typ.
+    let doc_xml = fixture_doc_xml("edge_super_marker_size");
+    let reference = paragraph_containing(&doc_xml, "first reference entry");
+    assert!(
+        !reference.contains("<w:sz "),
+        "body reference marker must stay body-sized (no shrunk <w:sz>):\n{reference}"
+    );
+    // The real superscript marker keeps its vertAlign somewhere in the document.
+    assert!(
+        doc_xml.contains(r#"<w:vertAlign w:val="superscript"/>"#),
+        "the affiliation #super[1] must remain a superscript"
+    );
+}
+
+#[test]
+fn table_cells_do_not_inherit_body_first_line_indent() {
+    // Table cells are their own context — they must not take the body's
+    // first-line indent (which they would inherit from the Normal style).
+    let doc_xml = fixture_doc_xml("complex_paper");
+    let tbl_start = doc_xml.find("<w:tbl>").expect("table present");
+    let tbl_end = doc_xml[tbl_start..]
+        .find("</w:tbl>")
+        .map_or(doc_xml.len(), |e| tbl_start + e);
+    let table = &doc_xml[tbl_start..tbl_end];
+    // Every cell paragraph suppresses the indent (firstLine="0").
+    let cell_paras = table.matches("<w:p>").count();
+    let suppressed = table.matches(r#"<w:ind w:firstLine="0"/>"#).count();
+    assert!(
+        suppressed >= cell_paras && cell_paras > 0,
+        "all {cell_paras} cell paragraphs must suppress first-line indent, got {suppressed}"
+    );
+}

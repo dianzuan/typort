@@ -29,6 +29,9 @@
             <w:gridSpan w:val="2"/>
           </w:tcPr>
           <w:p>
+            <w:pPr>
+              <w:ind w:firstLine="0"/>
+            </w:pPr>
             <w:r>
               <w:t xml:space="preserve">Header A-B</w:t>
             </w:r>
@@ -40,6 +43,9 @@
             <w:gridSpan w:val="2"/>
           </w:tcPr>
           <w:p>
+            <w:pPr>
+              <w:ind w:firstLine="0"/>
+            </w:pPr>
             <w:r>
               <w:t xml:space="preserve">Header C-D</w:t>
             </w:r>
@@ -53,6 +59,9 @@
             <w:vMerge w:val="restart"/>
           </w:tcPr>
           <w:p>
+            <w:pPr>
+              <w:ind w:firstLine="0"/>
+            </w:pPr>
             <w:r>
               <w:t xml:space="preserve">Row 1-2, Col A</w:t>
             </w:r>
@@ -63,6 +72,9 @@
             <w:tcW w:w="1250" w:type="pct"/>
           </w:tcPr>
           <w:p>
+            <w:pPr>
+              <w:ind w:firstLine="0"/>
+            </w:pPr>
             <w:r>
               <w:t xml:space="preserve">B1</w:t>
             </w:r>
@@ -73,6 +85,9 @@
             <w:tcW w:w="1250" w:type="pct"/>
           </w:tcPr>
           <w:p>
+            <w:pPr>
+              <w:ind w:firstLine="0"/>
+            </w:pPr>
             <w:r>
               <w:t xml:space="preserve">C1</w:t>
             </w:r>
@@ -84,6 +99,9 @@
             <w:vMerge w:val="restart"/>
           </w:tcPr>
           <w:p>
+            <w:pPr>
+              <w:ind w:firstLine="0"/>
+            </w:pPr>
             <w:r>
               <w:t xml:space="preserve">Row 1-2, Col D</w:t>
             </w:r>
@@ -97,6 +115,9 @@
             <w:vMerge/>
           </w:tcPr>
           <w:p>
+            <w:pPr>
+              <w:ind w:firstLine="0"/>
+            </w:pPr>
           </w:p>
         </w:tc>
         <w:tc>
@@ -104,6 +125,9 @@
             <w:tcW w:w="1250" w:type="pct"/>
           </w:tcPr>
           <w:p>
+            <w:pPr>
+              <w:ind w:firstLine="0"/>
+            </w:pPr>
             <w:r>
               <w:t xml:space="preserve">B2</w:t>
             </w:r>
@@ -114,6 +138,9 @@
             <w:tcW w:w="1250" w:type="pct"/>
           </w:tcPr>
           <w:p>
+            <w:pPr>
+              <w:ind w:firstLine="0"/>
+            </w:pPr>
             <w:r>
               <w:t xml:space="preserve">C2</w:t>
             </w:r>
@@ -125,6 +152,9 @@
             <w:vMerge/>
           </w:tcPr>
           <w:p>
+            <w:pPr>
+              <w:ind w:firstLine="0"/>
+            </w:pPr>
           </w:p>
         </w:tc>
       </w:tr>
@@ -135,6 +165,9 @@
             <w:gridSpan w:val="4"/>
           </w:tcPr>
           <w:p>
+            <w:pPr>
+              <w:ind w:firstLine="0"/>
+            </w:pPr>
             <w:r>
               <w:t xml:space="preserve">Full width footer row</w:t>
             </w:r>

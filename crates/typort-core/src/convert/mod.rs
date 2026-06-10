@@ -2337,6 +2337,28 @@ fn apply_paragraph_formatting(doc: &mut Document) {
                 }
             }
             is_first_element = false;
+        } else if let BlockElement::Table(t) = element {
+            // Table cells never take the body first-line indent (the cell is its
+            // own context). Without this they inherit the Normal style's indent.
+            suppress_table_cell_indents(t);
+        }
+    }
+}
+
+/// Suppress the first-line indent on every paragraph inside a table's cells,
+/// recursing into nested tables.
+fn suppress_table_cell_indents(table: &mut Table) {
+    for row in &mut table.rows {
+        for cell in &mut row.cells {
+            for para in &mut cell.paragraphs {
+                para.suppress_indent = true;
+            }
+            for content in &mut cell.content {
+                match content {
+                    CellContent::Paragraph(p) => p.suppress_indent = true,
+                    CellContent::Table(nested) => suppress_table_cell_indents(nested),
+                }
+            }
         }
     }
 }
