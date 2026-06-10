@@ -116,6 +116,7 @@ pub fn extract_document_style(paged: &PagedDocument) -> DocumentStyle {
         body_size_half_pt,
         line_spacing,
         first_line_indent_twips,
+        first_line_indent_all: false,
         footnote_format: FootnoteFormat::default(),
         code_font,
         body_spacing_before,
@@ -656,6 +657,9 @@ pub struct SourceStyleOverrides {
     // Values in twips for absolute units, or as em*1000 (milliem) for em units.
     pub first_line_indent_twips: Option<u32>,
     pub first_line_indent_em: Option<f64>,
+    // #set par(first-line-indent: (amount: ..., all: true)) — indent every
+    // paragraph, including the first after a heading.
+    pub first_line_indent_all: Option<bool>,
     pub par_leading_twips: Option<u32>,
     pub par_leading_em: Option<f64>,
     pub par_spacing_twips: Option<u32>,
@@ -685,6 +689,7 @@ impl SourceStyleOverrides {
         fill!(text_region);
         fill!(first_line_indent_twips);
         fill!(first_line_indent_em);
+        fill!(first_line_indent_all);
         fill!(par_leading_twips);
         fill!(par_leading_em);
         fill!(par_spacing_twips);
@@ -973,6 +978,16 @@ fn parse_text_args(args: typst_syntax::ast::Args<'_>, ovr: &mut SourceStyleOverr
     }
 }
 
+/// Record a first-line-indent amount (em or absolute) onto the overrides.
+fn set_first_line_indent_amount(n: typst_syntax::ast::Numeric<'_>, ovr: &mut SourceStyleOverrides) {
+    let (value, unit) = n.get();
+    if unit == typst_syntax::ast::Unit::Em {
+        ovr.first_line_indent_em = Some(value);
+    } else {
+        ovr.first_line_indent_twips = Some(numeric_to_twips(n));
+    }
+}
+
 fn parse_par_args(args: typst_syntax::ast::Args<'_>, ovr: &mut SourceStyleOverrides) {
     for arg in args.items() {
         let typst_syntax::ast::Arg::Named(named) = arg else {
@@ -980,15 +995,32 @@ fn parse_par_args(args: typst_syntax::ast::Args<'_>, ovr: &mut SourceStyleOverri
         };
         match named.name().as_str() {
             "first-line-indent" => {
-                if ovr.first_line_indent_twips.is_none()
-                    && ovr.first_line_indent_em.is_none()
-                    && let typst_syntax::ast::Expr::Numeric(n) = named.expr()
-                {
-                    let (value, unit) = n.get();
-                    if unit == typst_syntax::ast::Unit::Em {
-                        ovr.first_line_indent_em = Some(value);
-                    } else {
-                        ovr.first_line_indent_twips = Some(numeric_to_twips(n));
+                if ovr.first_line_indent_twips.is_none() && ovr.first_line_indent_em.is_none() {
+                    match named.expr() {
+                        typst_syntax::ast::Expr::Numeric(n) => set_first_line_indent_amount(n, ovr),
+                        // `(amount: 2em, all: true)`: indent every paragraph,
+                        // including the first one after a heading.
+                        typst_syntax::ast::Expr::Dict(dict) => {
+                            for item in dict.items() {
+                                let typst_syntax::ast::DictItem::Named(entry) = item else {
+                                    continue;
+                                };
+                                match entry.name().as_str() {
+                                    "amount" => {
+                                        if let typst_syntax::ast::Expr::Numeric(n) = entry.expr() {
+                                            set_first_line_indent_amount(n, ovr);
+                                        }
+                                    }
+                                    "all" => {
+                                        if let typst_syntax::ast::Expr::Bool(b) = entry.expr() {
+                                            ovr.first_line_indent_all = Some(b.get());
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }

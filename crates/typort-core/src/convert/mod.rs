@@ -321,6 +321,9 @@ fn apply_source_overrides(ovr: &page::SourceStyleOverrides, doc: &mut Document) 
         };
         doc.style.first_line_indent_twips = indent.unwrap_or(0);
     }
+    if let Some(all) = ovr.first_line_indent_all {
+        doc.style.first_line_indent_all = all;
+    }
 
     // Leading (in pt) — needed below for paragraph spacing calculation.
     let leading_pt = if let Some(em) = ovr.par_leading_em {
@@ -2312,6 +2315,10 @@ fn find_body(root: &HtmlElement) -> Option<&HtmlElement> {
 fn apply_paragraph_formatting(doc: &mut Document) {
     let mut after_heading = false;
     let mut is_first_element = true;
+    // When the source declared `first-line-indent: (.., all: true)`, EVERY
+    // paragraph is indented — including the first after a heading — so we must
+    // not suppress it (the Typst default `all: false` does suppress it).
+    let indent_all = doc.style.first_line_indent_all;
 
     for element in &mut doc.body.elements {
         if let BlockElement::Paragraph(p) = element {
@@ -2325,7 +2332,7 @@ fn apply_paragraph_formatting(doc: &mut Document) {
             } else {
                 // Normal paragraph
                 if after_heading {
-                    p.suppress_indent = true;
+                    p.suppress_indent = !indent_all;
                     after_heading = false;
                 }
             }

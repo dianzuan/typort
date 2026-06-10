@@ -1,6 +1,6 @@
 #set page(margin: (top: 2.54cm, bottom: 2.54cm, left: 3.17cm, right: 3.17cm))
 #set text(font: ("New Computer Modern", "Noto Serif SC"), size: 10.5pt)
-#set par(leading: 1.5em, first-line-indent: 2em)
+#set par(leading: 1.5em, first-line-indent: (amount: 2em, all: true))
 
 = 数字经济对区域创新效率的影响研究
 == ——基于长三角城市群的实证分析

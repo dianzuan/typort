@@ -600,6 +600,11 @@ pub struct DocumentStyle {
     pub body_size_half_pt: u32,
     pub line_spacing: u32,
     pub first_line_indent_twips: u32,
+    /// Whether `#set par(first-line-indent: (amount: …, all: true))` was declared,
+    /// i.e. indent EVERY paragraph including the first one after a heading (the
+    /// Chinese-typography convention). `false` (the Typst default) suppresses the
+    /// first-line indent on the paragraph that follows a heading.
+    pub first_line_indent_all: bool,
     pub footnote_format: FootnoteFormat,
     /// Font used for code/raw blocks (detected from Typst rendering).
     pub code_font: String,
@@ -643,6 +648,7 @@ impl Default for DocumentStyle {
             body_size_half_pt: 22,      // Typst default: 11pt = 22 half-points
             line_spacing: 276,          // ~13.8pt: typical rendered line pitch for 11pt body
             first_line_indent_twips: 0, // Typst default: no indent
+            first_line_indent_all: false,
             footnote_format: FootnoteFormat::default(),
             code_font: "Courier New".to_string(),
             code_size_half_pt: 22, // Typst raw text uses body size by default

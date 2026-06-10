@@ -96,9 +96,6 @@
       </w:r>
     </w:p>
     <w:p>
-      <w:pPr>
-        <w:ind w:firstLine="0"/>
-      </w:pPr>
       <w:r>
         <w:t xml:space="preserve">随着新一轮科技革命和产业变革的加速推进，数字经济已成为推动经济高质量发展的重要引擎</w:t>
       </w:r>
@@ -148,9 +145,6 @@
       </w:r>
     </w:p>
     <w:p>
-      <w:pPr>
-        <w:ind w:firstLine="0"/>
-      </w:pPr>
       <w:r>
         <w:t xml:space="preserve">数字经济通过以下机制促进本地区域创新效率提升：</w:t>
       </w:r>
@@ -234,9 +228,6 @@
       </w:r>
     </w:p>
     <w:p>
-      <w:pPr>
-        <w:ind w:firstLine="0"/>
-      </w:pPr>
       <w:r>
         <w:t xml:space="preserve">数字经济的空间溢出效应主要通过三条路径实现</w:t>
       </w:r>
@@ -323,9 +314,6 @@
       </w:r>
     </w:p>
     <w:p>
-      <w:pPr>
-        <w:ind w:firstLine="0"/>
-      </w:pPr>
       <w:r>
         <w:t xml:space="preserve">本文构建如下空间杜宾模型：</w:t>
       </w:r>
@@ -871,9 +859,6 @@
       </w:r>
     </w:p>
     <w:p>
-      <w:pPr>
-        <w:ind w:firstLine="0"/>
-      </w:pPr>
       <w:r>
         <w:t xml:space="preserve">本文数据来源于2012—2022年《中国城市统计年鉴》《中国区域创新能力评价报告》以及各省市统计公报。样本覆盖长三角城市群41个城市，共451个观测值。</w:t>
       </w:r>
@@ -895,9 +880,6 @@
       </w:r>
     </w:p>
     <w:p>
-      <w:pPr>
-        <w:ind w:firstLine="0"/>
-      </w:pPr>
       <w:r>
         <w:t xml:space="preserve">基准回归结果如表2所示。模型（1）为普通面板固定效应回归，模型（2）为空间杜宾模型。</w:t>
       </w:r>
@@ -1014,9 +996,6 @@
       </w:r>
     </w:p>
     <w:p>
-      <w:pPr>
-        <w:ind w:firstLine="0"/>
-      </w:pPr>
       <w:r>
         <w:t xml:space="preserve">根据LeSage和Pace（2009）提出的偏微分方法，将空间杜宾模型的总效应分解为直接效应和间接效应：</w:t>
       </w:r>
@@ -1187,9 +1166,6 @@
       </w:r>
     </w:p>
     <w:p>
-      <w:pPr>
-        <w:ind w:firstLine="0"/>
-      </w:pPr>
       <w:r>
         <w:t xml:space="preserve">本文基于2012—2022年长三角城市群面板数据的实证研究表明，数字经济不仅显著提升本地创新效率，还具有正向空间溢出效应。研究结论的政策启示如下：</w:t>
       </w:r>

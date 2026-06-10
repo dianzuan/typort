@@ -5806,3 +5806,30 @@ fn wrapped_table_row_not_recovered_as_orphan() {
         "table cell text must appear once (in the table), not duplicated as a recovered orphan"
     );
 }
+
+#[test]
+fn first_line_indent_all_indents_paragraph_after_heading() {
+    // `first-line-indent: (amount: 2em, all: true)` must indent the paragraph
+    // that follows a heading (no firstLine="0" suppression), while the Normal
+    // style carries the declared indent for it to inherit.
+    // See tests/fixtures/edge_first_line_indent_all.typ.
+    let doc_xml = fixture_doc_xml("edge_first_line_indent_all");
+    let styles_xml = fixture_styles_xml("edge_first_line_indent_all");
+    // Isolate the Normal style block (heading styles legitimately carry firstLine=0).
+    let normal_start = styles_xml
+        .find(r#"w:styleId="Normal""#)
+        .expect("Normal style present");
+    let normal = &styles_xml[normal_start
+        ..styles_xml[normal_start..]
+            .find("</w:style>")
+            .map_or(styles_xml.len(), |e| normal_start + e)];
+    assert!(
+        normal.contains("w:firstLine=") && !normal.contains(r#"w:firstLine="0""#),
+        "Normal style must declare a non-zero first-line indent:\n{normal}"
+    );
+    let para = paragraph_containing(&doc_xml, "right after the heading");
+    assert!(
+        !para.contains(r#"w:firstLine="0""#),
+        "paragraph after a heading must NOT be indent-suppressed under all:true:\n{para}"
+    );
+}
