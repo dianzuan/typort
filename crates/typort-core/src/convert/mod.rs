@@ -12,6 +12,7 @@ mod image;
 pub mod inline;
 pub mod page;
 mod recovery;
+mod table_width;
 
 use std::collections::{HashSet, VecDeque};
 
@@ -28,7 +29,7 @@ use typst::layout::PagedDocument;
 use typst::model::Numbering;
 use typst_html::{HtmlDocument, HtmlElement, HtmlNode};
 use typst_library::math::EquationElem;
-use typst_library::model::{CiteGroup, HeadingElem, OutlineElem, RefElem};
+use typst_library::model::{CiteGroup, HeadingElem, OutlineElem, RefElem, TableElem};
 use typst_library::text::{Lang, Region, SmartQuoteElem, SmartQuoter, SmartQuotes};
 
 /// Tracks equation numbering state across the document.
@@ -459,7 +460,7 @@ fn walk_tags(children: &[HtmlNode], ctx: &mut WalkCtx) {
                         }
                         "table" => {
                             let end = find_tag_end(children, i, tag.location());
-                            handle_table(&children[i..=end], ctx);
+                            handle_table(&children[i..=end], Some(tag.location()), ctx);
                             i = end;
                         }
                         "list" => {
@@ -618,7 +619,7 @@ fn handle_html_element(elem: &HtmlElement, ctx: &mut WalkCtx) {
         "dl" => convert_term_list(elem, ctx.doc),
         "ol" => convert_html_list(elem, ctx.doc, true),
         "ul" => convert_html_list(elem, ctx.doc, false),
-        "table" => convert_html_table(elem, ctx.doc, html),
+        "table" => convert_html_table(elem, None, ctx.doc, html),
         "figcaption" => {
             // Collect all figcaption content into a single paragraph
             let mut para = Paragraph::new();
@@ -1458,18 +1459,18 @@ fn handle_block_footnote(
 }
 
 /// Handle a `table` Tag: find the HTML `<table>` element in the inner children and parse it.
-fn handle_table(slice: &[HtmlNode], ctx: &mut WalkCtx) {
+fn handle_table(slice: &[HtmlNode], table_loc: Option<Location>, ctx: &mut WalkCtx) {
     let html = ctx.html_doc;
     // Look for an HTML <table> element within the tag range
     for node in slice {
         if let HtmlNode::Element(elem) = node {
             let tag = tag_name(elem);
             if tag == "table" {
-                convert_html_table(elem, ctx.doc, html);
+                convert_html_table(elem, table_loc, ctx.doc, html);
                 return;
             }
             // Recurse into child elements to find the table
-            if find_and_convert_table_in_elem(elem, ctx.doc, html) {
+            if find_and_convert_table_in_elem(elem, table_loc, ctx.doc, html) {
                 return;
             }
         }
@@ -1482,6 +1483,7 @@ fn handle_table(slice: &[HtmlNode], ctx: &mut WalkCtx) {
 /// Recursively search for a `<table>` element within an HTML element tree.
 fn find_and_convert_table_in_elem(
     elem: &HtmlElement,
+    table_loc: Option<Location>,
     doc: &mut Document,
     html_doc: &HtmlDocument,
 ) -> bool {
@@ -1489,10 +1491,10 @@ fn find_and_convert_table_in_elem(
         if let HtmlNode::Element(inner) = child {
             let tag = tag_name(inner);
             if tag == "table" {
-                convert_html_table(inner, doc, html_doc);
+                convert_html_table(inner, table_loc, doc, html_doc);
                 return true;
             }
-            if find_and_convert_table_in_elem(inner, doc, html_doc) {
+            if find_and_convert_table_in_elem(inner, table_loc, doc, html_doc) {
                 return true;
             }
         }
@@ -1540,7 +1542,12 @@ fn find_and_convert_list_in_elem(elem: &HtmlElement, doc: &mut Document, ordered
 }
 
 /// Convert an HTML `<table>` element into the document model.
-fn convert_html_table(elem: &HtmlElement, doc: &mut Document, html_doc: &HtmlDocument) {
+fn convert_html_table(
+    elem: &HtmlElement,
+    table_loc: Option<Location>,
+    doc: &mut Document,
+    html_doc: &HtmlDocument,
+) {
     let mut raw_rows: Vec<RawTableRow> = Vec::new();
     for child in &elem.children {
         if let HtmlNode::Element(row_or_section) = child {
@@ -1567,7 +1574,34 @@ fn convert_html_table(elem: &HtmlElement, doc: &mut Document, html_doc: &HtmlDoc
     }
 
     // Post-process: insert vMerge::Continue cells where rowspans require them
-    let table = postprocess_rowspans(raw_rows);
+    let mut table = postprocess_rowspans(raw_rows);
+
+    // Semantic column widths: read the declared track sizes off the TableElem
+    // and turn them into per-cell percentages. Degrades to equal distribution
+    // (cells left at width_pct = None) when the spec is all-`Auto`/`columns: N`,
+    // or when the element is not queryable (e.g. nested tables with no location).
+    if let Some(loc) = table_loc
+        && let Some(table_elem) = html_doc
+            .introspector
+            .query_first(&typst::foundations::Selector::Location(loc))
+            .and_then(|c| c.to_packed::<TableElem>().cloned())
+    {
+        let tracks = table_elem.columns.get_ref(StyleChain::default());
+        let content_pt = f64::from(
+            doc.page_settings
+                .width_twips
+                .saturating_sub(doc.page_settings.margin_left)
+                .saturating_sub(doc.page_settings.margin_right),
+        ) / 20.0;
+        let wctx = table_width::TableWidthCtx {
+            content_pt,
+            body_font_pt: f64::from(doc.style.body_size_half_pt) / 2.0,
+        };
+        if let Some(col_pct) = table_width::track_widths_pct(&tracks.0, wctx) {
+            table_width::assign_cell_widths(&mut table, &col_pct);
+        }
+    }
+
     doc.add_table(table);
 }
 

@@ -5497,3 +5497,56 @@ fn no_math_fallback_font_on_plain_digit_or_whitespace() {
         }
     }
 }
+
+#[test]
+fn fr_column_tracks_produce_proportional_widths() {
+    // Regression: `columns: (1fr, 2fr, 3fr)` must yield a 1:2:3 width split, not
+    // three equal columns. The writer falls back to equal distribution unless
+    // cell.width_pct is populated from the Typst column track sizes.
+    // See tests/fixtures/edge_table_fr_columns.typ.
+    let doc_xml = fixture_doc_xml("edge_table_fr_columns");
+    let tbl_start = doc_xml.find("<w:tbl>").expect("table present");
+    let tbl_end = doc_xml[tbl_start..]
+        .find("</w:tbl>")
+        .map(|e| tbl_start + e)
+        .expect("table closed");
+    let table = &doc_xml[tbl_start..tbl_end];
+
+    // Parse the first row's three w:tcW percentages.
+    let row_end = table.find("</w:tr>").expect("first row closed");
+    let first_row = &table[..row_end];
+    let widths: Vec<u32> = first_row
+        .match_indices("<w:tcW w:w=\"")
+        .filter_map(|(pos, m)| {
+            let after = &first_row[pos + m.len()..];
+            let end = after.find('"')?;
+            after[..end].parse::<u32>().ok()
+        })
+        .collect();
+
+    assert_eq!(
+        widths.len(),
+        3,
+        "expected three column widths, got {widths:?}"
+    );
+    // NOT the equal-distribution bug (1666 / 1666 / 1666).
+    assert!(
+        widths[0] < widths[1] && widths[1] < widths[2],
+        "1fr:2fr:3fr widths must strictly increase, got {widths:?}"
+    );
+    assert!(
+        (790..=880).contains(&widths[0]),
+        "col0 ~833, got {}",
+        widths[0]
+    );
+    assert!(
+        (1600..=1730).contains(&widths[1]),
+        "col1 ~1666, got {}",
+        widths[1]
+    );
+    assert!(
+        (2420..=2580).contains(&widths[2]),
+        "col2 ~2500, got {}",
+        widths[2]
+    );
+}
