@@ -1759,6 +1759,56 @@ pub fn apply_styles_from_paged(paged: &PagedDocument, doc: &mut typort_ooxml::do
 
     // Apply paragraph alignment from x-positions
     apply_paragraph_alignment(paged, &paged_styles, doc);
+
+    // Drop per-run bold/size that merely restate the Heading style's own values:
+    // the Heading{n} pStyle already supplies `<w:b/>` and the detected per-level
+    // size, so repeating them on every run is noise that fights a user's Word
+    // template. Only values that EQUAL the style are removed (extends commit
+    // 9c458ca's "let Word own heading flow" to per-run bold/size).
+    suppress_redundant_heading_run_props(doc);
+}
+
+/// Remove per-run `bold` / `size_half_pt` from runs inside heading paragraphs
+/// when they exactly equal what the paragraph's `Heading{n}` style already
+/// defines (`<w:b/>` plus the detected per-level size). Leaving them in place
+/// fights a user's Word template and is pure noise; stripping only the values
+/// that *equal* the style keeps genuinely-distinct inline styling intact (a
+/// coloured or italic span, or a super/subscript whose `vertAlign` stays).
+///
+/// Conservative by construction: `heading_sizes[idx]` and a run's `size_half_pt`
+/// are both derived from the same paged rendering, so a plain heading run's size
+/// equals the style size and is dropped, while a span the author resized to
+/// something else keeps its `size_half_pt`.
+fn suppress_redundant_heading_run_props(doc: &mut typort_ooxml::document::Document) {
+    let heading_sizes = doc.style.heading_sizes;
+    for element in &mut doc.body.elements {
+        let typort_ooxml::document::BlockElement::Paragraph(p) = element else {
+            continue;
+        };
+        let Some(ParagraphStyle::Heading(level)) = p.style else {
+            continue;
+        };
+        let idx = usize::from(level).saturating_sub(1).min(4);
+        let style_size = heading_sizes[idx];
+        for inline in &mut p.inlines {
+            if let InlineElement::Text(run) = inline {
+                strip_redundant_heading_run(run, style_size);
+            }
+        }
+    }
+}
+
+/// Strip a single heading run's overrides that merely duplicate the style.
+///
+/// `bold` is cleared (the `Heading{n}` style always supplies `<w:b/>`).
+/// `size_half_pt` is cleared only when it equals `style_size`. A differing size,
+/// plus colour / italic / font / script overrides, are left untouched so
+/// distinct inline styling inside a heading survives.
+fn strip_redundant_heading_run(run: &mut Run, style_size: u32) {
+    run.bold = false;
+    if run.size_half_pt == Some(style_size) {
+        run.size_half_pt = None;
+    }
 }
 
 /// Build per-span and per-text style override maps from paged run styles.

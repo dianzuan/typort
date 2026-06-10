@@ -3159,10 +3159,12 @@ fn show_rule_heading_font_and_size() {
         "heading should use DejaVu Sans font from show rule. Got:\n{doc_xml}"
     );
 
-    // Heading size should be 18pt = 36 half-points (from show rule)
+    // Heading size 18pt = 36 half-points now lives in the Heading1 STYLE (the
+    // run inherits it), not as a redundant per-run <w:sz>.
+    let styles_xml = fixture_styles_xml("show_rule_styles");
     assert!(
-        doc_xml.contains(r#"<w:sz w:val="36"/>"#),
-        "heading should have size 36 half-points (18pt) from show rule. Got:\n{doc_xml}"
+        styles_xml.contains(r#"<w:sz w:val="36"/>"#),
+        "Heading1 style should define size 36 half-points (18pt). Got:\n{styles_xml}"
     );
 }
 
@@ -3533,9 +3535,11 @@ fn issue_show_rule_heading_styles() {
         xml.contains("Blue Subtitle"),
         "heading 2 text should be present"
     );
+    // Heading size now lives in the Heading1 style, not on the run.
+    let styles = fixture_styles_xml("issue_show_rule_heading");
     assert!(
-        xml.contains("w:val=\"36\"") || xml.contains("w:val=\"35\""),
-        "heading 1 should have ~18pt size (36 half-pts)"
+        styles.contains("w:val=\"36\"") || styles.contains("w:val=\"35\""),
+        "Heading1 style should define ~18pt size (36 half-pts). Got:\n{styles}"
     );
     assert!(
         xml.contains("Heading1"),
@@ -5548,5 +5552,43 @@ fn fr_column_tracks_produce_proportional_widths() {
         (2420..=2580).contains(&widths[2]),
         "col2 ~2500, got {}",
         widths[2]
+    );
+}
+
+#[test]
+fn heading_run_props_not_redundant_with_style() {
+    // A plain heading run must NOT repeat the Heading style's bold/size: the
+    // pStyle already carries them, and duplicating them fights a Word template.
+    // A genuinely-distinct inline span (italic) inside a heading must survive.
+    // See tests/fixtures/heading_redundant_run_props.typ.
+    let doc_xml = fixture_doc_xml("heading_redundant_run_props");
+
+    // Isolate the plain heading paragraph; its run should carry no redundant
+    // <w:b/>/<w:sz> (those live in the Heading1 style).
+    let plain = doc_xml
+        .split("<w:p>")
+        .find(|p| p.contains("Plain Heading One"))
+        .expect("plain heading paragraph present");
+    assert!(
+        plain.contains(r#"<w:pStyle w:val="Heading1"/>"#),
+        "plain heading should carry Heading1 pStyle. Got:\n{plain}"
+    );
+    assert!(
+        !plain.contains("<w:b/>"),
+        "plain heading run must not repeat the style's <w:b/>. Got:\n{plain}"
+    );
+    assert!(
+        !plain.contains("<w:sz "),
+        "plain heading run must not repeat the style's <w:sz>. Got:\n{plain}"
+    );
+
+    // The italic span inside the second heading must keep its distinct override.
+    let styled = doc_xml
+        .split("<w:p>")
+        .find(|p| p.contains("Italic"))
+        .expect("styled heading paragraph present");
+    assert!(
+        styled.contains("<w:i/>"),
+        "italic span inside a heading must keep <w:i/>. Got:\n{styled}"
     );
 }
