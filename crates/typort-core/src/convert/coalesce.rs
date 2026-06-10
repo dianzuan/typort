@@ -157,15 +157,24 @@ fn is_whitespace_run(run: &Run) -> bool {
     !run.text.is_empty() && run.text.chars().all(char::is_whitespace)
 }
 
+/// Whether a run carries styling that is visible even on a bare space. A
+/// highlight fill, an underline, and a strikethrough all draw across a space's
+/// advance width (overline maps to `underline` in this model too), so a space
+/// either carrying or adopting any of these is *not* invisible. Colour, font,
+/// size and smallcaps need a glyph and so render nothing on whitespace.
+fn renders_on_whitespace(run: &Run) -> bool {
+    run.highlight_color.is_some() || run.underline || run.strikethrough
+}
+
 /// Fold an isolated whitespace-only run into an adjacent text run when doing so
-/// changes nothing visible. A bare space cannot render colour, highlight,
-/// underline, strikethrough, smallcaps, a font swap, or a size change as a
-/// distinguishable glyph, so a space sitting between (or beside) styled text may
-/// safely adopt that neighbour's style and merge — collapsing the third run that
-/// the shattering otherwise leaves behind. We never fold a space that carries
-/// its own highlight (a highlighted space IS visible), and we only ever pull the
-/// space INTO a neighbour, never rewrite a neighbour's style. Folded space runs
-/// are left empty for the caller to drop.
+/// changes nothing visible. Colour, font, size and smallcaps need a glyph, so a
+/// bare space sitting beside text styled only in those ways may safely adopt the
+/// neighbour's style and merge — collapsing the third run the shattering leaves
+/// behind. We never fold when a *highlight*, *underline* or *strikethrough* is
+/// involved (on the space itself or on the destination run), because those DO
+/// draw across a space and folding would extend or erase a visible line. We only
+/// ever pull the space INTO a neighbour, never rewrite a neighbour's style;
+/// folded space runs are left empty for the caller to drop.
 fn fold_whitespace_runs(inlines: &mut [InlineElement]) {
     let mut i = 0;
     while i < inlines.len() {
@@ -173,7 +182,7 @@ fn fold_whitespace_runs(inlines: &mut [InlineElement]) {
         let space_is_plain = matches!(
             &inlines[i],
             InlineElement::Text(run)
-                if is_whitespace_run(run) && run.highlight_color.is_none()
+                if is_whitespace_run(run) && !renders_on_whitespace(run)
         );
         if !space_is_plain {
             i += 1;
@@ -183,7 +192,7 @@ fn fold_whitespace_runs(inlines: &mut [InlineElement]) {
         // Prefer folding into the PREVIOUS text run if present.
         if i > 0
             && let InlineElement::Text(prev) = &inlines[i - 1]
-            && prev.highlight_color.is_none()
+            && !renders_on_whitespace(prev)
         {
             let space_text = run_text(&inlines[i]);
             if let InlineElement::Text(prev_mut) = &mut inlines[i - 1] {
@@ -197,7 +206,7 @@ fn fold_whitespace_runs(inlines: &mut [InlineElement]) {
         // Otherwise fold into the NEXT text run.
         if i + 1 < inlines.len()
             && let InlineElement::Text(next) = &inlines[i + 1]
-            && next.highlight_color.is_none()
+            && !renders_on_whitespace(next)
         {
             let space_text = run_text(&inlines[i]);
             if let InlineElement::Text(next_mut) = &mut inlines[i + 1] {
@@ -296,5 +305,38 @@ mod tests {
         coalesce_paragraph(&mut p);
         // A highlighted space is visible — it must survive as its own run.
         assert_eq!(run_count(&p), 3);
+    }
+
+    #[test]
+    fn space_not_folded_into_underlined_or_struck_neighbour() {
+        // `#underline[B] #underline[C]` arrives as B(u) | " "(plain) | C(u). The
+        // plain space must NOT be folded into an underlined neighbour, or the
+        // underline would extend continuously across the gap. Same for strike.
+        for decorate in [
+            |r: &mut Run| r.underline = true,
+            |r: &mut Run| r.strikethrough = true,
+        ] {
+            let mut p = Paragraph::new();
+            let (mut b, mut c) = (Run::new("B"), Run::new("C"));
+            decorate(&mut b);
+            decorate(&mut c);
+            p.inlines = vec![
+                InlineElement::Text(b),
+                text_run(" "),
+                InlineElement::Text(c),
+            ];
+            coalesce_paragraph(&mut p);
+            assert_eq!(run_count(&p), 3, "decorated spans + the gap stay 3 runs");
+            let spaces: Vec<&Run> = p.text_runs().filter(|r| r.text == " ").collect();
+            assert_eq!(
+                spaces.len(),
+                1,
+                "the inter-word space survives as its own run"
+            );
+            assert!(
+                !spaces[0].underline && !spaces[0].strikethrough,
+                "the space must not inherit the decoration"
+            );
+        }
     }
 }

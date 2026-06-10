@@ -2348,12 +2348,18 @@ fn apply_hanging_indent_from_source(world: &TyportWorld, doc: &mut Document) {
     }
     for element in &mut doc.body.elements {
         // BibliographyBlock owns its hanging indent (the doc-bibliography path);
-        // only plain body paragraphs are governed here. Headings and code blocks
-        // keep their own layout.
+        // only plain body paragraphs are governed here. List items, headings,
+        // code blocks, and rule paragraphs carry their own indent model (a list
+        // item's own list hanging indent must win, not be clobbered by this), so
+        // they are skipped.
         let BlockElement::Paragraph(p) = element else {
             continue;
         };
-        if matches!(p.style, Some(ParagraphStyle::Heading(_))) || p.code_block {
+        if p.list_info.is_some()
+            || p.code_block
+            || p.horizontal_rule
+            || matches!(p.style, Some(ParagraphStyle::Heading(_)))
+        {
             continue;
         }
         // The paragraph's source position is its earliest run that resolves into

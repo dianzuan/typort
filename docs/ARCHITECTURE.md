@@ -109,8 +109,11 @@ for the exact order.
                     │   9    headers/footers/page numbering (Paged) │
                     │   10   recover layout-only content (Paged)    │
                     │   11   title/author metadata; bibliography    │
-                    │   12   per-run styles + alignment (Paged)     │
+                    │   12   per-run styles + alignment (Paged);    │
+                    │        AST par(hanging-indent); heading-run   │
+                    │        prop strip                             │
                     │   13-15 section breaks, rules, line-merging   │
+                    │   16   coalesce adjacent equal-format runs    │
                     └───────────────┬─────────────────────────────┘
                                     ▼
                           typort_ooxml::Document   (the IR)
@@ -147,8 +150,10 @@ crates/
 |------|----------------|
 | `world.rs` | `TyportWorld`: implements Typst's `World` trait (source, system fonts, `@preview` package download, `Feature::Html`). |
 | `convert/mod.rs` | The pipeline + the HTML tag walker + most element converters. |
-| `convert/page.rs` | Reverse-engineers page settings and styles from Paged geometry; parses AST `set`-rule overrides. |
+| `convert/page.rs` | Reverse-engineers page settings and styles from Paged geometry; parses AST `set`-rule overrides (incl. `par(hanging-indent:)`); normalizes math-fallback fonts; strips redundant heading run props. |
 | `convert/recovery.rs` | Recovers layout-only content HTML dropped; page breaks; horizontal rules; same-line paragraph merging. |
+| `convert/coalesce.rs` | Final pass: merges adjacent runs with identical effective `rPr` and folds whitespace-only runs, undoing the per-text-node run shattering. |
+| `convert/table_width.rs` | Turns a `TableElem`'s declared column `TrackSizings` (fr/rel/auto) into per-cell `w:tcW` percentages. |
 | `convert/bibliography.rs` | Citation data via the semantic `BibliographyElem` (+ re-parsing `.bib`/`.yml` with hayagriva). |
 | `convert/footnote.rs` | Footnote bodies from the HTML `doc-endnotes` section. |
 | `convert/image.rs` | Embedded image bytes from Paged frames. |

@@ -103,35 +103,44 @@ fn rel_track_pct(rel: &Rel<Length>, ctx: TableWidthCtx) -> f64 {
     (ratio_share + length_share).max(0.0)
 }
 
-/// Round shares to integers, summing to at most `PCT_TOTAL`. The remainder from
-/// rounding is folded into the widest column so the row still totals ~100%.
+/// Scale per-column shares so they sum to exactly `PCT_TOTAL` (the cells fill the
+/// table width, preserving the declared column *ratio*), then fold the tiny
+/// residual rounding delta into the widest column.
+///
+/// Scaling to the actual share sum — rather than only shrinking on overflow —
+/// matters in both directions: equal `fr` tracks round *up* and would otherwise
+/// sum to 5001+, and an all-fixed-width spec narrower than the page would
+/// otherwise leave a large gap that the rounding fold dumps entirely into one
+/// column (blowing it up). Representing absolute column widths as percentages is
+/// inherently lossy; preserving the ratio at full width is the faithful choice.
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
-    reason = "shares are clamped to [0, 5000] before the f64 -> u32 cast"
+    reason = "scaled shares are clamped to [0, 5000] before the f64 -> u32 cast"
 )]
 fn normalize_to_total(shares: &[f64]) -> Vec<u32> {
     let sum: f64 = shares.iter().sum();
-    // Scale into the 5000 budget when fixed tracks overflowed it.
-    let scale = if sum > PCT_TOTAL {
-        PCT_TOTAL / sum
-    } else {
-        1.0
-    };
+    if sum <= 0.0 {
+        return vec![0; shares.len()];
+    }
+    let scale = PCT_TOTAL / sum;
     let mut out: Vec<u32> = shares
         .iter()
         .map(|s| (s * scale).round().clamp(0.0, PCT_TOTAL) as u32)
         .collect();
-    // Fold any rounding remainder into the largest column.
-    let total: u32 = out.iter().sum();
-    if total < PCT_TOTAL_U32
+
+    // Correct the residual rounding delta (now within a few fiftieths) on the
+    // widest column, in whichever direction it lands.
+    let total: i64 = out.iter().map(|&w| i64::from(w)).sum();
+    let delta = i64::from(PCT_TOTAL_U32) - total;
+    if delta != 0
         && let Some(idx) = out
             .iter()
             .enumerate()
             .max_by_key(|(_, w)| **w)
             .map(|(i, _)| i)
     {
-        out[idx] += PCT_TOTAL_U32 - total;
+        out[idx] = u32::try_from((i64::from(out[idx]) + delta).max(0)).unwrap_or(0);
     }
     out
 }
@@ -202,5 +211,59 @@ mod tests {
         assert!((560..=700).contains(&w[0]), "fixed col = {}", w[0]);
         assert!(w[1] > w[0], "fr column eats the rest: {w:?}");
         assert_eq!(w.iter().sum::<u32>(), 5000);
+    }
+
+    #[test]
+    fn equal_fr_tracks_sum_to_exactly_5000() {
+        // 1fr:1fr:1fr rounds to 1666.67 each; must total exactly 5000 (not 5001)
+        // and stay near-equal (no column inflated by the remainder fold).
+        let tracks = [
+            Sizing::Fr(Fr::new(1.0)),
+            Sizing::Fr(Fr::new(1.0)),
+            Sizing::Fr(Fr::new(1.0)),
+        ];
+        let w = track_widths_pct(&tracks, ctx()).expect("fr signal");
+        assert_eq!(
+            w.iter().sum::<u32>(),
+            5000,
+            "must total exactly 100%: {w:?}"
+        );
+        assert!(
+            w.iter().all(|&x| (1660..=1672).contains(&x)),
+            "columns stay near-equal: {w:?}"
+        );
+    }
+
+    #[test]
+    fn all_fixed_underflow_scales_to_fill_without_blowup() {
+        // Three 2cm columns are far narrower than the page; scaling to fill must
+        // keep them ~equal (1:1:1), NOT dump the whole gap into one column.
+        let two_cm = || {
+            Sizing::Rel(Rel::<Length>::from(Length {
+                abs: Abs::cm(2.0),
+                em: Em::zero(),
+            }))
+        };
+        let tracks = [two_cm(), two_cm(), two_cm()];
+        let w = track_widths_pct(&tracks, ctx()).expect("rel signal");
+        assert_eq!(w.iter().sum::<u32>(), 5000);
+        let (min, max) = (*w.iter().min().unwrap(), *w.iter().max().unwrap());
+        assert!(max - min <= 2, "equal fixed columns must stay equal: {w:?}");
+    }
+
+    #[test]
+    fn fixed_ratio_preserved_when_scaled_to_fill() {
+        // 4cm : 2cm -> the 2:1 ratio survives scaling to full width.
+        let len = |cm| {
+            Sizing::Rel(Rel::<Length>::from(Length {
+                abs: Abs::cm(cm),
+                em: Em::zero(),
+            }))
+        };
+        let tracks = [len(4.0), len(2.0)];
+        let w = track_widths_pct(&tracks, ctx()).expect("rel signal");
+        assert_eq!(w.iter().sum::<u32>(), 5000);
+        let ratio = f64::from(w[0]) / f64::from(w[1]);
+        assert!((1.9..=2.1).contains(&ratio), "2:1 ratio preserved: {w:?}");
     }
 }

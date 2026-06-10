@@ -1917,19 +1917,17 @@ fn build_style_override_maps(
             item.font_family == rendered_ascii || item.font_family == declared_ascii
         };
 
-        // Normalize per-glyph fallback artifacts back to the baseline font.
-        // Two universal, language/genre-neutral signals — both font- or
-        // glyph-class properties, never natural-language matches:
-        //   (a) the shaped face carries an OpenType MATH table (FontFlags::MATH);
-        //       math fallback faces set it and body faces don't, so an isolated
-        //       glyph that fell back to one is an artifact, not authorial intent.
-        //   (b) the run text is entirely non-letter (digits/punctuation) AND its
-        //       font differs from the baseline; a one-character bracketed digit
-        //       shaped in a different face than its neighbours is fallback noise.
-        //       Letters are excluded so a genuine inline font run (a word set in
-        //       a display face) still produces an override.
-        let run_has_letters = item.text.chars().any(char::is_alphabetic);
-        let is_font_artifact = item.is_math_font || (!run_has_letters && !is_baseline_font);
+        // Normalize per-glyph math-fallback artifacts back to the baseline font.
+        // The signal is universal and language/genre-neutral: the shaped face
+        // carries an OpenType MATH table (FontFlags::MATH). Typst's automatic
+        // per-glyph fallback shapes a stray glyph (e.g. the digit `7` in "[7]")
+        // with such a face; math faces lack general text coverage, so a run that
+        // landed on one is a layout artifact, not authorial intent — body text
+        // never falls back to a math face. We deliberately do NOT also normalize
+        // "any non-letter run whose font differs from baseline": that dropped a
+        // deliberate `#text(font: …)[12345]` override, and the MATH flag already
+        // catches the only real artifact.
+        let is_font_artifact = item.is_math_font;
 
         let (font_ascii, font_east_asia) = if is_baseline_font || is_font_artifact {
             (None, None)

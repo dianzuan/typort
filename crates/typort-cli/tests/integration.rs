@@ -5733,3 +5733,35 @@ mod golden {
     golden_test!(golden_bibliography_basic, "bibliography_basic");
     golden_test!(golden_edge_theorem_proof, "edge_theorem_proof");
 }
+
+#[test]
+fn deliberate_digit_run_font_override_is_kept() {
+    // A digits-only run the author explicitly set in a non-body font must keep
+    // its w:rFonts — only a true OpenType MATH-table fallback is normalized away.
+    // See tests/fixtures/edge_digit_run_font.typ.
+    let xml = fixture_doc_xml("edge_digit_run_font");
+    // The run "12345" must survive carrying its declared monospace face.
+    let para = paragraph_containing(&xml, "12345");
+    assert!(
+        para.contains("DejaVu Sans Mono"),
+        "deliberate per-run font on a digit run must be preserved:\n{para}"
+    );
+}
+
+#[test]
+fn hanging_indent_does_not_clobber_list_items() {
+    // A `#set par(hanging-indent: 2em)` rule must not override a list item's own
+    // indent. List items keep the list hanging indent (left 2em / hanging 1em =
+    // 440/220 at the 11pt default), never the bibliography 2em/2em (440/440).
+    // See tests/fixtures/edge_hanging_indent_list.typ.
+    let doc_xml = fixture_doc_xml("edge_hanging_indent_list");
+    let item = paragraph_containing(&doc_xml, "list item with");
+    assert!(
+        item.contains(r#"w:hanging="220""#),
+        "list item must keep its list hanging indent (220):\n{item}"
+    );
+    assert!(
+        !item.contains(r#"w:hanging="440""#),
+        "the hanging-indent rule must not clobber the list indent with 440:\n{item}"
+    );
+}
