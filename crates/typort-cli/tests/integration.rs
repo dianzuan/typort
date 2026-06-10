@@ -5765,3 +5765,31 @@ fn hanging_indent_does_not_clobber_list_items() {
         "the hanging-indent rule must not clobber the list indent with 440:\n{item}"
     );
 }
+
+#[test]
+fn footnote_and_table_not_recovered_as_body_orphans() {
+    // The footnote body must live in the footnote zone, not be scraped into the
+    // document body; and no horizontal rule may be invented from the footnote
+    // separator or the table's border lines (the source declares no #line()).
+    // See tests/fixtures/edge_footnote_table_no_orphan.typ.
+    let doc_xml = fixture_doc_xml("edge_footnote_table_no_orphan");
+    assert!(
+        !doc_xml.contains("must stay in the footnote zone"),
+        "footnote body must not be duplicated into the document body:\n{doc_xml}"
+    );
+    assert!(
+        !doc_xml.contains("<w:pBdr>"),
+        "no horizontal rule should be invented without a source #line():\n{doc_xml}"
+    );
+}
+
+#[test]
+fn source_line_call_still_produces_a_rule() {
+    // Guard the gate: a document that DOES declare `#line()` must still get its
+    // horizontal rule (the gate only suppresses invented ones).
+    let doc_xml = fixture_doc_xml("hrule_test");
+    assert!(
+        doc_xml.contains("<w:pBdr>"),
+        "a real #line() must still render as a horizontal rule:\n{doc_xml}"
+    );
+}

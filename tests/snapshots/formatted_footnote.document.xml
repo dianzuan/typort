@@ -23,40 +23,6 @@
         <w:t xml:space="preserve">.</w:t>
       </w:r>
     </w:p>
-    <w:p>
-      <w:pPr>
-        <w:ind w:firstLine="0"/>
-        <w:jc w:val="center"/>
-      </w:pPr>
-      <w:r>
-        <w:rPr>
-          <w:sz w:val="22"/>
-          <w:szCs w:val="22"/>
-        </w:rPr>
-        <w:t xml:space="preserve">1</w:t>
-      </w:r>
-      <w:r>
-        <w:t xml:space="preserve">This is </w:t>
-      </w:r>
-      <w:r>
-        <w:rPr>
-          <w:b/>
-        </w:rPr>
-        <w:t xml:space="preserve">bold</w:t>
-      </w:r>
-      <w:r>
-        <w:t xml:space="preserve"> and </w:t>
-      </w:r>
-      <w:r>
-        <w:rPr>
-          <w:i/>
-        </w:rPr>
-        <w:t xml:space="preserve">italic</w:t>
-      </w:r>
-      <w:r>
-        <w:t xml:space="preserve"> content in the footnote.</w:t>
-      </w:r>
-    </w:p>
     <w:sectPr>
       <w:footnotePr>
         <w:numRestart w:val="eachPage"/>

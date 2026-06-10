@@ -67,49 +67,6 @@
     </w:p>
     <w:p>
       <w:pPr>
-        <w:ind w:firstLine="0"/>
-        <w:jc w:val="center"/>
-      </w:pPr>
-      <w:r>
-        <w:rPr>
-          <w:sz w:val="15"/>
-          <w:szCs w:val="15"/>
-          <w:vertAlign w:val="superscript"/>
-        </w:rPr>
-        <w:t xml:space="preserve">1</w:t>
-      </w:r>
-      <w:r>
-        <w:rPr>
-          <w:sz w:val="18"/>
-          <w:szCs w:val="18"/>
-        </w:rPr>
-        <w:t xml:space="preserve">习近平：《不断做强做优做大我国数字经济》，《求是》 2022年第2期。</w:t>
-      </w:r>
-      <w:r>
-        <w:rPr>
-          <w:sz w:val="18"/>
-          <w:szCs w:val="18"/>
-          <w:vertAlign w:val="superscript"/>
-        </w:rPr>
-        <w:t xml:space="preserve">2</w:t>
-      </w:r>
-      <w:r>
-        <w:rPr>
-          <w:sz w:val="18"/>
-          <w:szCs w:val="18"/>
-        </w:rPr>
-        <w:t xml:space="preserve">参见Schumpeter J A. The Theory of Economic Development. Cambridge: Harvard University Press, </w:t>
-      </w:r>
-    </w:p>
-    <w:p>
-      <w:pPr>
-        <w:pBdr>
-          <w:bottom w:val="single" w:sz="6" w:space="1" w:color="auto"/>
-        </w:pBdr>
-      </w:pPr>
-    </w:p>
-    <w:p>
-      <w:pPr>
         <w:tabs>
           <w:tab w:val="right" w:pos="8205"/>
         </w:tabs>
@@ -1218,13 +1175,6 @@
     </m:d>
   </m:oMath>
 </m:oMathPara>
-    </w:p>
-    <w:p>
-      <w:pPr>
-        <w:pBdr>
-          <w:bottom w:val="single" w:sz="6" w:space="1" w:color="auto"/>
-        </w:pBdr>
-      </w:pPr>
     </w:p>
     <w:p>
       <w:r>

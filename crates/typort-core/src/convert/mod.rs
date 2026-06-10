@@ -244,9 +244,11 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
         }
     }
 
-    // 14. Detect horizontal rules from PagedDocument and insert them
+    // 14. Insert horizontal rules from geometry (internally gated on a source
+    //     `#line()`, so table borders / footnote separators aren't invented).
+    let main_src = world.main_source().text();
     if let Some(paged) = &paged_doc {
-        recovery::insert_horizontal_rules_from_paged(paged, &mut doc, &element_page_map);
+        recovery::insert_horizontal_rules_from_paged(paged, &mut doc, &element_page_map, main_src);
     }
 
     // 15. Merge consecutive paragraphs that belong to the same visual line

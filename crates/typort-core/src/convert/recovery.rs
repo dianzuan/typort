@@ -43,7 +43,18 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
     }
 
     let title_line_count = count_title_lines(&all_page_lines, doc);
-    let full_doc_text = extract_doc_text(doc);
+    let mut full_doc_text = extract_doc_text(doc);
+    // Footnote bodies are real footnotes in the model (in footnotes.xml), not body
+    // content. Fold their text into the dedup corpus so the page-bottom footnote
+    // zone is never re-scraped into orphan body paragraphs. (They are also kept in
+    // `exclude_text` below for the exact-line path.)
+    for footnote in &doc.footnotes {
+        for inline in &footnote.content {
+            if let InlineElement::Text(run) = inline {
+                full_doc_text.push_str(&run.text);
+            }
+        }
+    }
     let full_doc_text_nospace = strip_math_italic(&full_doc_text).replace(' ', "");
     // CJK-only projection of the whole document, used to recognize paged lines
     // whose prose is already present but broken up by interleaved OMML math,
@@ -867,6 +878,28 @@ pub(super) fn build_element_page_map(
     result
 }
 
+/// Whether the source AST contains a `#line(...)` call — the only construct that
+/// should become a body horizontal rule. `#line()` has no HTML element and is
+/// consumed during layout, so it is recovered from geometry; but a table's
+/// border rules and a footnote separator are *also* wide horizontal lines in the
+/// geometry. Gating rule recovery on a real `line()` call stops those from being
+/// invented as body rules (the same source-AST-authority rule as colbreak).
+pub(super) fn source_declares_line_rule(source: &str) -> bool {
+    fn has_line_call(node: &typst_syntax::SyntaxNode) -> bool {
+        if node.kind() == typst_syntax::SyntaxKind::FuncCall
+            && node
+                .cast::<typst_syntax::ast::FuncCall<'_>>()
+                .is_some_and(|fc| {
+                    matches!(fc.callee(), typst_syntax::ast::Expr::Ident(i) if i.as_str() == "line")
+                })
+        {
+            return true;
+        }
+        node.children().any(has_line_call)
+    }
+    has_line_call(&typst_syntax::parse(source))
+}
+
 /// Detect horizontal line shapes and insert horizontal rule paragraphs.
 #[allow(
     clippy::cast_possible_truncation,
@@ -877,7 +910,13 @@ pub(super) fn insert_horizontal_rules_from_paged(
     paged: &PagedDocument,
     doc: &mut Document,
     element_page_map: &[usize],
+    source: &str,
 ) {
+    // Only recover rules the source actually declares with `#line()`; without one,
+    // a wide line in the geometry is a table border or a footnote separator.
+    if !source_declares_line_rule(source) {
+        return;
+    }
     let total_pages = paged.pages.len();
     if total_pages == 0 {
         return;
