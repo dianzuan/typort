@@ -202,6 +202,12 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
     // 12. Post-processing: suppress indent after headings, bibliography hanging indent
     apply_paragraph_formatting(&mut doc);
 
+    // 12-bis. Honor `#set par(hanging-indent: …)` from the source AST. A declared
+    //         hanging indent (common before a hand-written reference list) governs
+    //         the paragraphs that follow it; this honors an author-stated value,
+    //         not a genre heuristic.
+    apply_hanging_indent_from_source(world, &mut doc);
+
     // 12a. Post-processing: apply per-run styles (color, font, size, bold,
     //       italic) and heading alignment from PagedDocument
     if let Some(paged) = &paged_doc {
@@ -2329,6 +2335,51 @@ fn apply_paragraph_formatting(doc: &mut Document) {
 /// Set the document title from the first heading's text.
 /// Extract document metadata (title, author) from `#set document(...)` if present,
 /// falling back to the first heading text for the title.
+/// Apply `#set par(hanging-indent: …)` from the source AST to the paragraphs it
+/// governs. Each rule applies from its byte offset onward; a paragraph adopts a
+/// hanging indent when the last rule at or before its earliest run is non-zero.
+/// Runs whose spans don't resolve into the main source (imported templates,
+/// detached) are skipped automatically (`Source::range` returns `None`).
+fn apply_hanging_indent_from_source(world: &TyportWorld, doc: &mut Document) {
+    let source = world.main_source();
+    let rules = page::collect_par_hanging_indent_rules(source);
+    if rules.is_empty() {
+        return;
+    }
+    for element in &mut doc.body.elements {
+        // BibliographyBlock owns its hanging indent (the doc-bibliography path);
+        // only plain body paragraphs are governed here. Headings and code blocks
+        // keep their own layout.
+        let BlockElement::Paragraph(p) = element else {
+            continue;
+        };
+        if matches!(p.style, Some(ParagraphStyle::Heading(_))) || p.code_block {
+            continue;
+        }
+        // The paragraph's source position is its earliest run that resolves into
+        // the main source.
+        let Some(offset) = p
+            .inlines
+            .iter()
+            .filter_map(|inline| match inline {
+                InlineElement::Text(run) => run.span,
+                _ => None,
+            })
+            .filter_map(|span| source.range(span).map(|r| r.start))
+            .min()
+        else {
+            continue;
+        };
+        // The active rule is the last one at or before this paragraph. Only turn
+        // the indent ON (a reset rule leaves it off); never clear one set
+        // elsewhere.
+        let active = rules.partition_point(|r| r.offset <= offset);
+        if active > 0 && rules[active - 1].nonzero {
+            p.hanging_indent = true;
+        }
+    }
+}
+
 fn apply_smallcaps_from_source(world: &TyportWorld, doc: &mut Document) {
     // SmallcapsElem is consumed during Typst realization — it doesn't survive
     // in the compiled Content AST. Detect it by walking the source AST for

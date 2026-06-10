@@ -705,6 +705,68 @@ pub fn extract_source_style_overrides(source: &str) -> SourceStyleOverrides {
     ovr
 }
 
+/// A `#set par(hanging-indent: …)` rule recovered from the source: the byte
+/// offset at which it takes effect, and whether it sets a non-zero indent (vs a
+/// reset to `0pt`/`0em`).
+pub struct ParHangingRule {
+    pub offset: usize,
+    pub nonzero: bool,
+}
+
+/// Collect every `#set par(hanging-indent: …)` rule from the source, in document
+/// order, with the byte offset at which it takes effect.
+///
+/// Unlike [`extract_source_style_overrides`] (which collapses to a single
+/// document-wide value), a hanging-indent set-rule applies from its position
+/// onward, so each occurrence *and* its byte position matter — a rule before a
+/// hand-written reference list governs only the paragraphs that follow it. This
+/// honors a value the author literally declared; it is not genre/keyword
+/// matching. Spans are read off the real `Source` tree so byte offsets line up
+/// with the run spans used to locate each paragraph.
+#[must_use]
+pub fn collect_par_hanging_indent_rules(source: &typst_syntax::Source) -> Vec<ParHangingRule> {
+    let mut rules = Vec::new();
+    collect_hanging_rules(source, source.root(), &mut rules);
+    rules.sort_by_key(|r| r.offset);
+    rules
+}
+
+fn collect_hanging_rules(
+    source: &typst_syntax::Source,
+    node: &typst_syntax::SyntaxNode,
+    out: &mut Vec<ParHangingRule>,
+) {
+    use typst_syntax::SyntaxKind;
+
+    // Set-rules nested inside a show-rule are element-scoped, not global.
+    if node.kind() == SyntaxKind::ShowRule {
+        return;
+    }
+
+    if node.kind() == SyntaxKind::SetRule
+        && let Some(set) = node.cast::<typst_syntax::ast::SetRule<'_>>()
+        && matches!(set.target(), typst_syntax::ast::Expr::Ident(i) if i.as_str() == "par")
+    {
+        for arg in set.args().items() {
+            if let typst_syntax::ast::Arg::Named(named) = arg
+                && named.name().as_str() == "hanging-indent"
+                && let typst_syntax::ast::Expr::Numeric(n) = named.expr()
+                && let Some(range) = source.range(node.span())
+            {
+                let (value, _unit) = n.get();
+                out.push(ParHangingRule {
+                    offset: range.start,
+                    nonzero: value.abs() > f64::EPSILON,
+                });
+            }
+        }
+    }
+
+    for child in node.children() {
+        collect_hanging_rules(source, child, out);
+    }
+}
+
 /// Extract file paths from `#import "path"` statements in Typst source.
 ///
 /// Returns relative paths as written in the source (e.g. `"lib.typ"`).
@@ -2157,6 +2219,31 @@ fn apply_paragraph_alignment(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn collect_hanging_indent_rules_records_set_and_reset() {
+        // A non-zero rule then a reset (0em) rule are both recorded, in source
+        // order, with the reset flagged `nonzero == false`.
+        let src = typst_syntax::Source::detached(
+            "Body.\n#set par(hanging-indent: 2em)\nRef one.\n\
+             #set par(hanging-indent: 0em)\nBody again.\n",
+        );
+        let rules = collect_par_hanging_indent_rules(&src);
+        assert_eq!(rules.len(), 2, "two par(hanging-indent) rules expected");
+        assert!(rules[0].nonzero, "first rule (2em) is a non-zero indent");
+        assert!(!rules[1].nonzero, "second rule (0em) is a reset");
+        assert!(
+            rules[0].offset < rules[1].offset,
+            "rules are ordered by source position"
+        );
+    }
+
+    #[test]
+    fn collect_hanging_indent_rules_ignores_unrelated_par_args() {
+        // first-line-indent is not a hanging indent; no rule is recorded.
+        let src = typst_syntax::Source::detached("#set par(first-line-indent: 2em)\nText.\n");
+        assert!(collect_par_hanging_indent_rules(&src).is_empty());
+    }
 
     #[test]
     fn classify_decimal() {

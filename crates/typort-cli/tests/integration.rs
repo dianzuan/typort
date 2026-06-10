@@ -5592,3 +5592,40 @@ fn heading_run_props_not_redundant_with_style() {
         "italic span inside a heading must keep <w:i/>. Got:\n{styled}"
     );
 }
+
+#[test]
+fn hanging_indent_par_set_rule_is_honored() {
+    // `#set par(hanging-indent: 2em)` is a declared value recovered from the
+    // source AST: paragraphs after it get a hanging indent, the one before stays
+    // flush. No genre/keyword matching. See tests/fixtures/edge_hanging_indent_par.typ.
+    let doc_xml = fixture_doc_xml("edge_hanging_indent_par");
+    let before = paragraph_containing(&doc_xml, "before the rule");
+    let after = paragraph_containing(&doc_xml, "after the rule should carry");
+    assert!(
+        !before.contains("w:hanging"),
+        "paragraph before the set-rule must stay flush:\n{before}"
+    );
+    assert!(
+        after.contains("w:hanging"),
+        "paragraph after #set par(hanging-indent: 2em) must get a hanging indent:\n{after}"
+    );
+}
+
+#[test]
+fn complex_paper_handwritten_refs_get_hanging_indent() {
+    // complex_paper writes `#set par(hanging-indent: 2em)` before its hand-typed
+    // reference list (NOT a #bibliography()). Honoring that declared value gives
+    // those reference paragraphs a hanging indent, while body paragraphs before
+    // the rule stay flush.
+    let doc_xml = fixture_doc_xml("complex_paper");
+    let reference = paragraph_containing(&doc_xml, "创业活跃度");
+    assert!(
+        reference.contains("w:hanging"),
+        "hand-written reference paragraph should get a hanging indent:\n{reference}"
+    );
+    let body = paragraph_containing(&doc_xml, "本文利用");
+    assert!(
+        !body.contains("w:hanging"),
+        "body paragraph before the set-rule must stay flush:\n{body}"
+    );
+}
