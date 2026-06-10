@@ -5793,3 +5793,16 @@ fn source_line_call_still_produces_a_rule() {
         "a real #line() must still render as a horizontal rule:\n{doc_xml}"
     );
 }
+
+#[test]
+fn wrapped_table_row_not_recovered_as_orphan() {
+    // A table cell that wraps in a narrow column must not be re-scraped into the
+    // body as a tab-stop orphan row (the wrap truncates the cell so text-dedup
+    // misses it). "主成分分析法" lives only in complex_paper's measurement table.
+    let doc_xml = fixture_doc_xml("complex_paper");
+    assert_eq!(
+        doc_xml.matches("主成分分析法").count(),
+        1,
+        "table cell text must appear once (in the table), not duplicated as a recovered orphan"
+    );
+}

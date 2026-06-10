@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, HashMap};
 
 use typort_ooxml::document::{
-    Alignment, BlockElement, Document, InlineElement, Paragraph, ParagraphStyle, Run, TableBorders,
+    Alignment, BlockElement, CellContent, Document, InlineElement, Paragraph, ParagraphStyle, Run,
+    Table, TableBorders,
 };
 use typst::introspection::Location;
 use typst::layout::{Frame, FrameItem, PagedDocument, Point};
@@ -64,6 +65,11 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
         .chars()
         .filter(|c| is_cjk_ideograph(*c))
         .collect();
+    // Whitespace-stripped cell texts of every real table. A recovered
+    // multi-column line whose columns are substrings of these is a re-scraped
+    // table row that text-dedup can miss when a narrow column wrapped a cell
+    // (the wrap truncates the cell so it no longer substring-matches the model).
+    let table_cell_texts = collect_table_cell_texts(doc);
 
     let mut exclude_text = extract_header_footer_text(doc);
     for footnote in &doc.footnotes {
@@ -227,6 +233,18 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
             if (cjk_len >= 6 || (cjk_len >= 2 && has_math)) && doc_cjk.contains(&line_cjk) {
                 continue;
             }
+        }
+        // A recovered *multi-column* line whose columns are each (a substring of)
+        // a real table cell is a re-scraped table row. This catches the case the
+        // text checks above miss: a narrow column wraps a cell, truncating it so
+        // it no longer substring-matches the model. Scoped to lines with ≥2 x
+        // clusters and only when the model actually has a table, so genuine grid
+        // content (no `BlockElement::Table`) is still recovered.
+        if !table_cell_texts.is_empty()
+            && line.x_clusters.len() >= 2
+            && line_matches_table_cells(line, &table_cell_texts)
+        {
+            continue;
         }
         missing.push(line.clone());
     }
@@ -569,6 +587,73 @@ fn extract_cjk_fragments(text: &str, min_len: usize) -> Vec<String> {
         fragments.push(current);
     }
     fragments
+}
+
+/// Whitespace/math-stripped text of every cell in every real table in the body.
+/// Used to recognize a recovered multi-column line as a re-scraped table row.
+fn collect_table_cell_texts(doc: &Document) -> Vec<String> {
+    let mut cells = Vec::new();
+    for elem in &doc.body.elements {
+        if let BlockElement::Table(t) = elem {
+            collect_cells_from_table(t, &mut cells);
+        }
+    }
+    cells
+}
+
+fn collect_cells_from_table(table: &Table, out: &mut Vec<String>) {
+    for row in &table.rows {
+        for cell in &row.cells {
+            if cell.content.is_empty() {
+                for para in &cell.paragraphs {
+                    push_cell_text(para, out);
+                }
+            } else {
+                for content in &cell.content {
+                    match content {
+                        CellContent::Paragraph(p) => push_cell_text(p, out),
+                        CellContent::Table(nested) => collect_cells_from_table(nested, out),
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn push_cell_text(para: &Paragraph, out: &mut Vec<String>) {
+    let text: String = strip_math_italic(&para.full_text_content())
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    if text.chars().count() >= 2 {
+        out.push(text);
+    }
+}
+
+/// Whether a recovered multi-column line's columns are each (a substring of) some
+/// real table cell — a majority match — i.e. the line is a re-scraped table row.
+/// `cell.contains(col)` tolerates a column that wrapped (the recovered column is
+/// then a prefix/suffix of the full cell text).
+fn line_matches_table_cells(line: &FrameLine, cells: &[String]) -> bool {
+    let cols: Vec<String> = line
+        .x_clusters
+        .iter()
+        .map(|c| {
+            strip_math_italic(&c.runs.iter().map(|r| r.text.as_str()).collect::<String>())
+                .chars()
+                .filter(|ch| !ch.is_whitespace())
+                .collect::<String>()
+        })
+        .filter(|t| t.chars().count() >= 3)
+        .collect();
+    if cols.is_empty() {
+        return false;
+    }
+    let matched = cols
+        .iter()
+        .filter(|col| cells.iter().any(|cell| cell.contains(col.as_str())))
+        .count();
+    matched * 2 >= cols.len()
 }
 
 pub(super) fn extract_doc_text(doc: &Document) -> String {

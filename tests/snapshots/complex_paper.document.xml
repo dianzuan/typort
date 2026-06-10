@@ -66,35 +66,6 @@
       </w:r>
     </w:p>
     <w:p>
-      <w:pPr>
-        <w:tabs>
-          <w:tab w:val="right" w:pos="8205"/>
-        </w:tabs>
-        <w:ind w:firstLine="0"/>
-      </w:pPr>
-      <w:r>
-        <w:t xml:space="preserve">核心解释变</w:t>
-      </w:r>
-      <w:r>
-        <w:tab/>
-      </w:r>
-      <w:r>
-        <w:t xml:space="preserve">数字经济发展指数</w:t>
-      </w:r>
-      <w:r>
-        <w:tab/>
-      </w:r>
-      <w:r>
-        <w:t xml:space="preserve">主成分分析法（四维度</w:t>
-      </w:r>
-      <w:r>
-        <w:tab/>
-      </w:r>
-      <w:r>
-        <w:t xml:space="preserve">18指标）</w:t>
-      </w:r>
-    </w:p>
-    <w:p>
       <w:r>
         <w:rPr>
           <w:b/>
