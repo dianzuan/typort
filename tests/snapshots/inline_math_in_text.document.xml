@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">
+  <w:body>
+    <w:p>
+      <w:r>
+        <w:t xml:space="preserve">Where </w:t>
+      </w:r><m:oMath>
+  <m:r>
+    <m:t>y</m:t>
+  </m:r>
+</m:oMath>
+      <w:r>
+        <w:t xml:space="preserve"> is the dependent variable and </w:t>
+      </w:r><m:oMath>
+  <m:r>
+    <m:t>x</m:t>
+  </m:r>
+</m:oMath>
+      <w:r>
+        <w:t xml:space="preserve"> is the explanatory variable.</w:t>
+      </w:r>
+    </w:p>
+    <w:sectPr>
+      <w:footnotePr>
+        <w:numRestart w:val="eachPage"/>
+      </w:footnotePr>
+      <w:pgSz w:w="11906" w:h="16838"/>
+      <w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417"/>
+    </w:sectPr>
+  </w:body>
+</w:document>

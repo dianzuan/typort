@@ -1,0 +1,249 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">
+  <w:body>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+        <w:spacing w:before="0"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">Aligned Equations</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading2"/>
+      </w:pPr>
+      <w:r>
+        <w:rPr>
+          <w:sz w:val="26"/>
+          <w:szCs w:val="26"/>
+        </w:rPr>
+        <w:t xml:space="preserve">Simple alignment</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:ind w:firstLine="0"/>
+      </w:pPr><m:oMathPara>
+  <m:oMath>
+    <m:eqArr>
+      <m:e>
+        <m:r>
+          <m:t>x</m:t>
+        </m:r>
+        <m:r>
+          <m:t>&amp;</m:t>
+        </m:r>
+        <m:r>
+          <m:t>=</m:t>
+        </m:r>
+        <m:r>
+          <m:t>1</m:t>
+        </m:r>
+        <m:r>
+          <m:t>+</m:t>
+        </m:r>
+        <m:r>
+          <m:t>2</m:t>
+        </m:r>
+      </m:e>
+      <m:e>
+        <m:r>
+          <m:t>&amp;</m:t>
+        </m:r>
+        <m:r>
+          <m:t>=</m:t>
+        </m:r>
+        <m:r>
+          <m:t>3</m:t>
+        </m:r>
+      </m:e>
+    </m:eqArr>
+  </m:oMath>
+</m:oMathPara>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading2"/>
+      </w:pPr>
+      <w:r>
+        <w:rPr>
+          <w:sz w:val="26"/>
+          <w:szCs w:val="26"/>
+        </w:rPr>
+        <w:t xml:space="preserve">Multi-line with expressions</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:ind w:firstLine="0"/>
+      </w:pPr><m:oMathPara>
+  <m:oMath>
+    <m:eqArr>
+      <m:e>
+        <m:r>
+          <m:t>f</m:t>
+        </m:r>
+        <m:d>
+          <m:dPr>
+            <m:begChr m:val="("/>
+            <m:endChr m:val=")"/>
+          </m:dPr>
+          <m:e>
+            <m:r>
+              <m:t>x</m:t>
+            </m:r>
+          </m:e>
+        </m:d>
+        <m:r>
+          <m:t>&amp;</m:t>
+        </m:r>
+        <m:r>
+          <m:t>=</m:t>
+        </m:r>
+        <m:sSup>
+          <m:e>
+            <m:r>
+              <m:t>x</m:t>
+            </m:r>
+          </m:e>
+          <m:sup>
+            <m:r>
+              <m:t>2</m:t>
+            </m:r>
+          </m:sup>
+        </m:sSup>
+        <m:r>
+          <m:t>+</m:t>
+        </m:r>
+        <m:r>
+          <m:t>2</m:t>
+        </m:r>
+        <m:r>
+          <m:t>x</m:t>
+        </m:r>
+        <m:r>
+          <m:t>+</m:t>
+        </m:r>
+        <m:r>
+          <m:t>1</m:t>
+        </m:r>
+      </m:e>
+      <m:e>
+        <m:r>
+          <m:t>&amp;</m:t>
+        </m:r>
+        <m:r>
+          <m:t>=</m:t>
+        </m:r>
+        <m:sSup>
+          <m:e>
+            <m:d>
+              <m:dPr>
+                <m:begChr m:val="("/>
+                <m:endChr m:val=")"/>
+              </m:dPr>
+              <m:e>
+                <m:r>
+                  <m:t>x</m:t>
+                </m:r>
+                <m:r>
+                  <m:t>+</m:t>
+                </m:r>
+                <m:r>
+                  <m:t>1</m:t>
+                </m:r>
+              </m:e>
+            </m:d>
+          </m:e>
+          <m:sup>
+            <m:r>
+              <m:t>2</m:t>
+            </m:r>
+          </m:sup>
+        </m:sSup>
+      </m:e>
+    </m:eqArr>
+  </m:oMath>
+</m:oMathPara>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading2"/>
+      </w:pPr>
+      <w:r>
+        <w:rPr>
+          <w:sz w:val="26"/>
+          <w:szCs w:val="26"/>
+        </w:rPr>
+        <w:t xml:space="preserve">Three lines</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:ind w:firstLine="0"/>
+      </w:pPr><m:oMathPara>
+  <m:oMath>
+    <m:eqArr>
+      <m:e>
+        <m:r>
+          <m:t>a</m:t>
+        </m:r>
+        <m:r>
+          <m:t>&amp;</m:t>
+        </m:r>
+        <m:r>
+          <m:t>=</m:t>
+        </m:r>
+        <m:r>
+          <m:t>b</m:t>
+        </m:r>
+        <m:r>
+          <m:t>+</m:t>
+        </m:r>
+        <m:r>
+          <m:t>c</m:t>
+        </m:r>
+      </m:e>
+      <m:e>
+        <m:r>
+          <m:t>&amp;</m:t>
+        </m:r>
+        <m:r>
+          <m:t>=</m:t>
+        </m:r>
+        <m:r>
+          <m:t>d</m:t>
+        </m:r>
+        <m:r>
+          <m:t>+</m:t>
+        </m:r>
+        <m:r>
+          <m:t>e</m:t>
+        </m:r>
+      </m:e>
+      <m:e>
+        <m:r>
+          <m:t>&amp;</m:t>
+        </m:r>
+        <m:r>
+          <m:t>=</m:t>
+        </m:r>
+        <m:r>
+          <m:t>f</m:t>
+        </m:r>
+      </m:e>
+    </m:eqArr>
+  </m:oMath>
+</m:oMathPara>
+    </w:p>
+    <w:sectPr>
+      <w:footnotePr>
+        <w:numRestart w:val="eachPage"/>
+      </w:footnotePr>
+      <w:pgSz w:w="11906" w:h="16838"/>
+      <w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417"/>
+    </w:sectPr>
+  </w:body>
+</w:document>

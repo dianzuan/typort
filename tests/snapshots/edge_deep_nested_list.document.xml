@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">
+  <w:body>
+    <w:p>
+      <w:pPr>
+        <w:numPr>
+          <w:ilvl w:val="0"/>
+          <w:numId w:val="4"/>
+        </w:numPr>
+        <w:ind w:left="440" w:hanging="220"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">Level 0 bullet</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:numPr>
+          <w:ilvl w:val="1"/>
+          <w:numId w:val="4"/>
+        </w:numPr>
+        <w:ind w:left="440" w:hanging="220"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">Level 1 bullet</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:numPr>
+          <w:ilvl w:val="2"/>
+          <w:numId w:val="4"/>
+        </w:numPr>
+        <w:ind w:left="440" w:hanging="220"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">Level 2 bullet</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:numPr>
+          <w:ilvl w:val="3"/>
+          <w:numId w:val="4"/>
+        </w:numPr>
+        <w:ind w:left="440" w:hanging="220"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">Level 3 bullet</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:numPr>
+          <w:ilvl w:val="0"/>
+          <w:numId w:val="5"/>
+        </w:numPr>
+        <w:ind w:left="440" w:hanging="220"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">First item</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:numPr>
+          <w:ilvl w:val="1"/>
+          <w:numId w:val="5"/>
+        </w:numPr>
+        <w:ind w:left="440" w:hanging="220"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">Sub-item one</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:numPr>
+          <w:ilvl w:val="2"/>
+          <w:numId w:val="5"/>
+        </w:numPr>
+        <w:ind w:left="440" w:hanging="220"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">Sub-sub-item</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:numPr>
+          <w:ilvl w:val="1"/>
+          <w:numId w:val="5"/>
+        </w:numPr>
+        <w:ind w:left="440" w:hanging="220"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">Sub-item two</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:numPr>
+          <w:ilvl w:val="0"/>
+          <w:numId w:val="5"/>
+        </w:numPr>
+        <w:ind w:left="440" w:hanging="220"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">Second item</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:numPr>
+          <w:ilvl w:val="0"/>
+          <w:numId w:val="6"/>
+        </w:numPr>
+        <w:ind w:left="440" w:hanging="220"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">Bullet parent</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:numPr>
+          <w:ilvl w:val="1"/>
+          <w:numId w:val="6"/>
+        </w:numPr>
+        <w:ind w:left="440" w:hanging="220"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">Ordered child one</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:numPr>
+          <w:ilvl w:val="1"/>
+          <w:numId w:val="6"/>
+        </w:numPr>
+        <w:ind w:left="440" w:hanging="220"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">Ordered child two</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:numPr>
+          <w:ilvl w:val="2"/>
+          <w:numId w:val="6"/>
+        </w:numPr>
+        <w:ind w:left="440" w:hanging="220"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">Bullet grandchild</w:t>
+      </w:r>
+    </w:p>
+    <w:sectPr>
+      <w:footnotePr>
+        <w:numRestart w:val="eachPage"/>
+      </w:footnotePr>
+      <w:pgSz w:w="11906" w:h="16838"/>
+      <w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417"/>
+    </w:sectPr>
+  </w:body>
+</w:document>

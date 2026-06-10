@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">
+  <w:body>
+    <w:p>
+      <w:pPr>
+        <w:ind w:firstLine="0"/>
+        <w:jc w:val="center"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">B2C2</w:t>
+      </w:r>
+    </w:p>
+    <w:tbl>
+      <w:tblPr>
+        <w:tblW w:w="5000" w:type="pct"/>
+        <w:tblBorders>
+          <w:top w:val="single" w:sz="4" w:space="0"/>
+          <w:bottom w:val="single" w:sz="4" w:space="0"/>
+          <w:left w:val="single" w:sz="4" w:space="0"/>
+          <w:right w:val="single" w:sz="4" w:space="0"/>
+          <w:insideH w:val="single" w:sz="4" w:space="0"/>
+          <w:insideV w:val="single" w:sz="4" w:space="0"/>
+        </w:tblBorders>
+      </w:tblPr>
+      <w:tr>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="2500" w:type="pct"/>
+            <w:gridSpan w:val="2"/>
+          </w:tcPr>
+          <w:p>
+            <w:r>
+              <w:t xml:space="preserve">Header A-B</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="2500" w:type="pct"/>
+            <w:gridSpan w:val="2"/>
+          </w:tcPr>
+          <w:p>
+            <w:r>
+              <w:t xml:space="preserve">Header C-D</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+      </w:tr>
+      <w:tr>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="1250" w:type="pct"/>
+            <w:vMerge w:val="restart"/>
+          </w:tcPr>
+          <w:p>
+            <w:r>
+              <w:t xml:space="preserve">Row 1-2, Col A</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="1250" w:type="pct"/>
+          </w:tcPr>
+          <w:p>
+            <w:r>
+              <w:t xml:space="preserve">B1</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="1250" w:type="pct"/>
+          </w:tcPr>
+          <w:p>
+            <w:r>
+              <w:t xml:space="preserve">C1</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="1250" w:type="pct"/>
+            <w:vMerge w:val="restart"/>
+          </w:tcPr>
+          <w:p>
+            <w:r>
+              <w:t xml:space="preserve">Row 1-2, Col D</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+      </w:tr>
+      <w:tr>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="1250" w:type="pct"/>
+            <w:vMerge/>
+          </w:tcPr>
+          <w:p>
+          </w:p>
+        </w:tc>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="1250" w:type="pct"/>
+          </w:tcPr>
+          <w:p>
+            <w:r>
+              <w:t xml:space="preserve">B2</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="1250" w:type="pct"/>
+          </w:tcPr>
+          <w:p>
+            <w:r>
+              <w:t xml:space="preserve">C2</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="1250" w:type="pct"/>
+            <w:vMerge/>
+          </w:tcPr>
+          <w:p>
+          </w:p>
+        </w:tc>
+      </w:tr>
+      <w:tr>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="5000" w:type="pct"/>
+            <w:gridSpan w:val="4"/>
+          </w:tcPr>
+          <w:p>
+            <w:r>
+              <w:t xml:space="preserve">Full width footer row</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+      </w:tr>
+    </w:tbl>
+    <w:sectPr>
+      <w:footnotePr>
+        <w:numRestart w:val="eachPage"/>
+      </w:footnotePr>
+      <w:pgSz w:w="11906" w:h="16838"/>
+      <w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417"/>
+    </w:sectPr>
+  </w:body>
+</w:document>

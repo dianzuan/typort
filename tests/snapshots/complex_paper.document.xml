@@ -1,0 +1,1431 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">
+  <w:body>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+        <w:spacing w:before="0"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">数字经济对区域创新效率的影响研究</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading2"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">——基于长三角城市群的实证分析</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:ind w:firstLine="0"/>
+        <w:jc w:val="center"/>
+      </w:pPr>
+      <w:r>
+        <w:rPr>
+          <w:b/>
+        </w:rPr>
+        <w:t xml:space="preserve">张三</w:t>
+      </w:r>
+      <w:r>
+        <w:rPr>
+          <w:sz w:val="13"/>
+          <w:szCs w:val="13"/>
+          <w:vertAlign w:val="superscript"/>
+        </w:rPr>
+        <w:t xml:space="preserve">1 </w:t>
+      </w:r>
+      <w:r>
+        <w:rPr>
+          <w:b/>
+        </w:rPr>
+        <w:t xml:space="preserve">李四</w:t>
+      </w:r>
+      <w:r>
+        <w:rPr>
+          <w:sz w:val="13"/>
+          <w:szCs w:val="13"/>
+          <w:vertAlign w:val="superscript"/>
+        </w:rPr>
+        <w:t xml:space="preserve">2</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:ind w:firstLine="0"/>
+        <w:jc w:val="center"/>
+      </w:pPr>
+      <w:r>
+        <w:rPr>
+          <w:sz w:val="18"/>
+          <w:szCs w:val="18"/>
+        </w:rPr>
+        <w:t xml:space="preserve">(1. 某大学 经济学院，上海  200433；2. 某研究院 数字经济研究中心，北京  100732)</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:ind w:firstLine="0"/>
+        <w:jc w:val="center"/>
+      </w:pPr>
+      <w:r>
+        <w:rPr>
+          <w:sz w:val="15"/>
+          <w:szCs w:val="15"/>
+          <w:vertAlign w:val="superscript"/>
+        </w:rPr>
+        <w:t xml:space="preserve">1</w:t>
+      </w:r>
+      <w:r>
+        <w:rPr>
+          <w:sz w:val="18"/>
+          <w:szCs w:val="18"/>
+        </w:rPr>
+        <w:t xml:space="preserve">习近平：《不断做强做优做大我国数字经济》，《求是》 2022年第2期。</w:t>
+      </w:r>
+      <w:r>
+        <w:rPr>
+          <w:sz w:val="18"/>
+          <w:szCs w:val="18"/>
+          <w:vertAlign w:val="superscript"/>
+        </w:rPr>
+        <w:t xml:space="preserve">2</w:t>
+      </w:r>
+      <w:r>
+        <w:rPr>
+          <w:sz w:val="18"/>
+          <w:szCs w:val="18"/>
+        </w:rPr>
+        <w:t xml:space="preserve">参见Schumpeter J A. The Theory of Economic Development. Cambridge: Harvard University Press, </w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pBdr>
+          <w:bottom w:val="single" w:sz="6" w:space="1" w:color="auto"/>
+        </w:pBdr>
+      </w:pPr>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:tabs>
+          <w:tab w:val="right" w:pos="8205"/>
+        </w:tabs>
+        <w:ind w:firstLine="0"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">核心解释变</w:t>
+      </w:r>
+      <w:r>
+        <w:tab/>
+      </w:r>
+      <w:r>
+        <w:t xml:space="preserve">数字经济发展指数</w:t>
+      </w:r>
+      <w:r>
+        <w:tab/>
+      </w:r>
+      <w:r>
+        <w:t xml:space="preserve">主成分分析法（四维度</w:t>
+      </w:r>
+      <w:r>
+        <w:tab/>
+      </w:r>
+      <w:r>
+        <w:t xml:space="preserve">18指标）</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:rPr>
+          <w:b/>
+        </w:rPr>
+        <w:t xml:space="preserve">摘要：</w:t>
+      </w:r>
+      <w:r>
+        <w:t xml:space="preserve">本文利用2012—2022年长三角城市群41个城市的面板数据，构建数字经济发展指数，运用超效率SBM模型测算区域创新效率，采用空间杜宾模型（SDM）实证检验数字经济对区域创新效率的直接效应与空间溢出效应。研究发现：（1）数字经济显著提升本地区域创新效率，弹性系数为0.234；（2）数字经济具有正向空间溢出效应，对邻近地区创新效率的间接效应为0.156；（3）异质性分析表明，数字经济对创新效率的促进作用在经济发达地区更为显著。本文的政策启示是：应加快数字基础设施建设，促进数字技术与创新活动深度融合，同时加强区域间数字经济协同发展。</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:rPr>
+          <w:b/>
+        </w:rPr>
+        <w:t xml:space="preserve">关键词：</w:t>
+      </w:r>
+      <w:r>
+        <w:t xml:space="preserve">数字经济；区域创新效率；空间溢出效应；长三角城市群</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">一、引言</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:ind w:firstLine="0"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">随着新一轮科技革命和产业变革的加速推进，数字经济已成为推动经济高质量发展的重要引擎</w:t>
+      </w:r>
+      <w:r>
+        <w:rPr>
+          <w:rStyle w:val="FootnoteReference"/>
+        </w:rPr>
+        <w:footnoteReference w:id="2"/>
+      </w:r>
+      <w:r>
+        <w:t xml:space="preserve">。党的二十大报告明确提出“加快发展数字经济，促进数字经济和实体经济深度融合”的战略部署。在此背景下，数字经济如何赋能区域创新成为学术界关注的焦点问题。</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t xml:space="preserve">创新是引领发展的第一动力</w:t>
+      </w:r>
+      <w:r>
+        <w:rPr>
+          <w:rStyle w:val="FootnoteReference"/>
+        </w:rPr>
+        <w:footnoteReference w:id="3"/>
+      </w:r>
+      <w:r>
+        <w:t xml:space="preserve">，区域创新效率反映了创新投入向创新产出转化的能力。近年来，大量文献从不同维度考察了数字经济的经济效应，包括对经济增长（赵涛等，2020）、产业结构升级（戚聿东和肖旭，2020）、全要素生产率（杨慧梅和江璐，2021）等方面的影响。然而，关于数字经济对区域创新效率影响的研究尚不充分，特别是在空间维度上的溢出效应分析有待深入。</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t xml:space="preserve">本文的边际贡献在于：第一，构建了包含数字基础设施、数字产业化、产业数字化和数字治理四个维度的数字经济综合评价体系；第二，采用超效率SBM模型克服了传统DEA方法无法区分有效决策单元的缺陷；第三，运用空间杜宾模型系统考察了数字经济影响创新效率的空间传导机制。</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">二、理论分析与研究假设</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading2"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">（一）数字经济对本地创新效率的直接效应</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:ind w:firstLine="0"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">数字经济通过以下机制促进本地区域创新效率提升：</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:numPr>
+          <w:ilvl w:val="0"/>
+          <w:numId w:val="4"/>
+        </w:numPr>
+        <w:ind w:left="420" w:hanging="210"/>
+      </w:pPr>
+      <w:r>
+        <w:rPr>
+          <w:b/>
+        </w:rPr>
+        <w:t xml:space="preserve">降低创新交易成本</w:t>
+      </w:r>
+      <w:r>
+        <w:t xml:space="preserve">。数字平台降低了信息搜寻成本和匹配成本，促进创新要素的高效配置（Goldfarb and Tucker, 2019）。</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:numPr>
+          <w:ilvl w:val="0"/>
+          <w:numId w:val="4"/>
+        </w:numPr>
+        <w:ind w:left="420" w:hanging="210"/>
+      </w:pPr>
+      <w:r>
+        <w:rPr>
+          <w:b/>
+        </w:rPr>
+        <w:t xml:space="preserve">加速知识扩散</w:t>
+      </w:r>
+      <w:r>
+        <w:t xml:space="preserve">。数字技术打破了知识传播的时空限制，加速了隐性知识的编码化和显性化（Autor et al., 2020）。</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:numPr>
+          <w:ilvl w:val="0"/>
+          <w:numId w:val="4"/>
+        </w:numPr>
+        <w:ind w:left="420" w:hanging="210"/>
+      </w:pPr>
+      <w:r>
+        <w:rPr>
+          <w:b/>
+        </w:rPr>
+        <w:t xml:space="preserve">优化创新协作模式</w:t>
+      </w:r>
+      <w:r>
+        <w:t xml:space="preserve">。云计算、大数据等技术为开放式创新提供了基础设施支撑，促进产学研深度融合。</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t xml:space="preserve">基于上述分析，本文提出：</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:rPr>
+          <w:b/>
+        </w:rPr>
+        <w:t xml:space="preserve">假设1：</w:t>
+      </w:r>
+      <w:r>
+        <w:t xml:space="preserve">数字经济发展能够显著提升本地区域创新效率。</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading2"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">（二）数字经济的空间溢出效应</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:ind w:firstLine="0"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">数字经济的空间溢出效应主要通过三条路径实现</w:t>
+      </w:r>
+      <w:r>
+        <w:rPr>
+          <w:rStyle w:val="FootnoteReference"/>
+        </w:rPr>
+        <w:footnoteReference w:id="4"/>
+      </w:r>
+      <w:r>
+        <w:rPr>
+          <w:b/>
+        </w:rPr>
+        <w:t xml:space="preserve">：</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t xml:space="preserve">第一，</w:t>
+      </w:r>
+      <w:r>
+        <w:rPr>
+          <w:b/>
+        </w:rPr>
+        <w:t xml:space="preserve">数字连接效应</w:t>
+      </w:r>
+      <w:r>
+        <w:t xml:space="preserve">。数字基础设施的互联互通降低了区域间协作的边际成本，扩大了创新知识的传播范围。</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t xml:space="preserve">第二，</w:t>
+      </w:r>
+      <w:r>
+        <w:rPr>
+          <w:b/>
+        </w:rPr>
+        <w:t xml:space="preserve">竞争示范效应</w:t>
+      </w:r>
+      <w:r>
+        <w:t xml:space="preserve">。先进地区数字经济发展的成功实践产生示范效应，激励相邻地区加快数字化转型步伐。</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t xml:space="preserve">第三，</w:t>
+      </w:r>
+      <w:r>
+        <w:rPr>
+          <w:b/>
+        </w:rPr>
+        <w:t xml:space="preserve">要素流动效应</w:t>
+      </w:r>
+      <w:r>
+        <w:t xml:space="preserve">。数字经济促进人才、资本等创新要素跨区域流动，提升资源空间配置效率。</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:rPr>
+          <w:b/>
+        </w:rPr>
+        <w:t xml:space="preserve">假设2：</w:t>
+      </w:r>
+      <w:r>
+        <w:t xml:space="preserve">数字经济发展具有正向空间溢出效应，能够促进邻近地区创新效率提升。</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">三、研究设计</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading2"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">（一）模型设定</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:ind w:firstLine="0"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">本文构建如下空间杜宾模型：</w:t>
+      </w:r>
+    </w:p>
+    <w:p><m:oMathPara>
+  <m:oMath>
+    <m:sSub>
+      <m:e>
+        <m:r>
+          <m:t>Y</m:t>
+        </m:r>
+      </m:e>
+      <m:sub>
+        <m:r>
+          <m:t>i</m:t>
+        </m:r>
+        <m:r>
+          <m:t>t</m:t>
+        </m:r>
+      </m:sub>
+    </m:sSub>
+    <m:r>
+      <m:t>=</m:t>
+    </m:r>
+    <m:r>
+      <m:t>ρ</m:t>
+    </m:r>
+    <m:r>
+      <m:t>W</m:t>
+    </m:r>
+    <m:sSub>
+      <m:e>
+        <m:r>
+          <m:t>Y</m:t>
+        </m:r>
+      </m:e>
+      <m:sub>
+        <m:r>
+          <m:t>i</m:t>
+        </m:r>
+        <m:r>
+          <m:t>t</m:t>
+        </m:r>
+      </m:sub>
+    </m:sSub>
+    <m:r>
+      <m:t>+</m:t>
+    </m:r>
+    <m:sSub>
+      <m:e>
+        <m:r>
+          <m:t>β</m:t>
+        </m:r>
+      </m:e>
+      <m:sub>
+        <m:r>
+          <m:t>1</m:t>
+        </m:r>
+      </m:sub>
+    </m:sSub>
+    <m:sSub>
+      <m:e>
+        <m:r>
+          <m:t>X</m:t>
+        </m:r>
+      </m:e>
+      <m:sub>
+        <m:r>
+          <m:t>i</m:t>
+        </m:r>
+        <m:r>
+          <m:t>t</m:t>
+        </m:r>
+      </m:sub>
+    </m:sSub>
+    <m:r>
+      <m:t>+</m:t>
+    </m:r>
+    <m:sSub>
+      <m:e>
+        <m:r>
+          <m:t>β</m:t>
+        </m:r>
+      </m:e>
+      <m:sub>
+        <m:r>
+          <m:t>2</m:t>
+        </m:r>
+      </m:sub>
+    </m:sSub>
+    <m:r>
+      <m:t>W</m:t>
+    </m:r>
+    <m:sSub>
+      <m:e>
+        <m:r>
+          <m:t>X</m:t>
+        </m:r>
+      </m:e>
+      <m:sub>
+        <m:r>
+          <m:t>i</m:t>
+        </m:r>
+        <m:r>
+          <m:t>t</m:t>
+        </m:r>
+      </m:sub>
+    </m:sSub>
+    <m:r>
+      <m:t>+</m:t>
+    </m:r>
+    <m:sSub>
+      <m:e>
+        <m:r>
+          <m:t>μ</m:t>
+        </m:r>
+      </m:e>
+      <m:sub>
+        <m:r>
+          <m:t>i</m:t>
+        </m:r>
+      </m:sub>
+    </m:sSub>
+    <m:r>
+      <m:t>+</m:t>
+    </m:r>
+    <m:sSub>
+      <m:e>
+        <m:r>
+          <m:t>λ</m:t>
+        </m:r>
+      </m:e>
+      <m:sub>
+        <m:r>
+          <m:t>t</m:t>
+        </m:r>
+      </m:sub>
+    </m:sSub>
+    <m:r>
+      <m:t>+</m:t>
+    </m:r>
+    <m:sSub>
+      <m:e>
+        <m:r>
+          <m:t>ε</m:t>
+        </m:r>
+      </m:e>
+      <m:sub>
+        <m:r>
+          <m:t>i</m:t>
+        </m:r>
+        <m:r>
+          <m:t>t</m:t>
+        </m:r>
+      </m:sub>
+    </m:sSub>
+  </m:oMath>
+</m:oMathPara>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t xml:space="preserve">其中，</w:t>
+      </w:r><m:oMath>
+  <m:sSub>
+    <m:e>
+      <m:r>
+        <m:t>Y</m:t>
+      </m:r>
+    </m:e>
+    <m:sub>
+      <m:r>
+        <m:t>i</m:t>
+      </m:r>
+      <m:r>
+        <m:t>t</m:t>
+      </m:r>
+    </m:sub>
+  </m:sSub>
+</m:oMath>
+      <w:r>
+        <w:t xml:space="preserve">为城市</w:t>
+      </w:r><m:oMath>
+  <m:r>
+    <m:t>i</m:t>
+  </m:r>
+</m:oMath>
+      <w:r>
+        <w:t xml:space="preserve">在</w:t>
+      </w:r><m:oMath>
+  <m:r>
+    <m:t>t</m:t>
+  </m:r>
+</m:oMath>
+      <w:r>
+        <w:t xml:space="preserve">期的创新效率值，</w:t>
+      </w:r><m:oMath>
+  <m:sSub>
+    <m:e>
+      <m:r>
+        <m:t>X</m:t>
+      </m:r>
+    </m:e>
+    <m:sub>
+      <m:r>
+        <m:t>i</m:t>
+      </m:r>
+      <m:r>
+        <m:t>t</m:t>
+      </m:r>
+    </m:sub>
+  </m:sSub>
+</m:oMath>
+      <w:r>
+        <w:t xml:space="preserve">为核心解释变量数字经济发展指数，</w:t>
+      </w:r><m:oMath>
+  <m:r>
+    <m:t>W</m:t>
+  </m:r>
+</m:oMath>
+      <w:r>
+        <w:t xml:space="preserve">为空间权重矩阵，</w:t>
+      </w:r><m:oMath>
+  <m:r>
+    <m:t>ρ</m:t>
+  </m:r>
+</m:oMath>
+      <w:r>
+        <w:t xml:space="preserve">为空间自回归系数，</w:t>
+      </w:r><m:oMath>
+  <m:sSub>
+    <m:e>
+      <m:r>
+        <m:t>μ</m:t>
+      </m:r>
+    </m:e>
+    <m:sub>
+      <m:r>
+        <m:t>i</m:t>
+      </m:r>
+    </m:sub>
+  </m:sSub>
+</m:oMath>
+      <w:r>
+        <w:t xml:space="preserve">和</w:t>
+      </w:r><m:oMath>
+  <m:sSub>
+    <m:e>
+      <m:r>
+        <m:t>λ</m:t>
+      </m:r>
+    </m:e>
+    <m:sub>
+      <m:r>
+        <m:t>t</m:t>
+      </m:r>
+    </m:sub>
+  </m:sSub>
+</m:oMath>
+      <w:r>
+        <w:t xml:space="preserve">分别为个体固定效应和时间固定效应。</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading2"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">（二）变量测量</w:t>
+      </w:r>
+    </w:p>
+    <w:tbl>
+      <w:tblPr>
+        <w:tblW w:w="5000" w:type="pct"/>
+        <w:tblBorders>
+          <w:top w:val="single" w:sz="4" w:space="0"/>
+          <w:bottom w:val="single" w:sz="4" w:space="0"/>
+          <w:left w:val="single" w:sz="4" w:space="0"/>
+          <w:right w:val="single" w:sz="4" w:space="0"/>
+          <w:insideH w:val="single" w:sz="4" w:space="0"/>
+          <w:insideV w:val="single" w:sz="4" w:space="0"/>
+        </w:tblBorders>
+      </w:tblPr>
+      <w:tr>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="833" w:type="pct"/>
+          </w:tcPr>
+          <w:p>
+            <w:r>
+              <w:rPr>
+                <w:b/>
+              </w:rPr>
+              <w:t xml:space="preserve">变量类型</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="1667" w:type="pct"/>
+          </w:tcPr>
+          <w:p>
+            <w:r>
+              <w:rPr>
+                <w:b/>
+              </w:rPr>
+              <w:t xml:space="preserve">变量名称</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="2500" w:type="pct"/>
+          </w:tcPr>
+          <w:p>
+            <w:r>
+              <w:rPr>
+                <w:b/>
+              </w:rPr>
+              <w:t xml:space="preserve">测量方法</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+      </w:tr>
+      <w:tr>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="833" w:type="pct"/>
+          </w:tcPr>
+          <w:p>
+            <w:r>
+              <w:t xml:space="preserve">被解释变量</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="1667" w:type="pct"/>
+          </w:tcPr>
+          <w:p>
+            <w:r>
+              <w:t xml:space="preserve">区域创新效率</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="2500" w:type="pct"/>
+          </w:tcPr>
+          <w:p>
+            <w:r>
+              <w:t xml:space="preserve">超效率SBM模型</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+      </w:tr>
+      <w:tr>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="833" w:type="pct"/>
+          </w:tcPr>
+          <w:p>
+            <w:r>
+              <w:t xml:space="preserve">核心解释变量</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="1667" w:type="pct"/>
+          </w:tcPr>
+          <w:p>
+            <w:r>
+              <w:t xml:space="preserve">数字经济发展指数</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="2500" w:type="pct"/>
+          </w:tcPr>
+          <w:p>
+            <w:r>
+              <w:t xml:space="preserve">主成分分析法（四维度18指标）</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+      </w:tr>
+      <w:tr>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="833" w:type="pct"/>
+          </w:tcPr>
+          <w:p>
+            <w:r>
+              <w:t xml:space="preserve">控制变量</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="1667" w:type="pct"/>
+          </w:tcPr>
+          <w:p>
+            <w:r>
+              <w:t xml:space="preserve">经济发展水平</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="2500" w:type="pct"/>
+          </w:tcPr>
+          <w:p>
+            <w:r>
+              <w:t xml:space="preserve">人均GDP（对数）</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+      </w:tr>
+      <w:tr>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="833" w:type="pct"/>
+          </w:tcPr>
+          <w:p>
+          </w:p>
+        </w:tc>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="1667" w:type="pct"/>
+          </w:tcPr>
+          <w:p>
+            <w:r>
+              <w:t xml:space="preserve">人力资本</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="2500" w:type="pct"/>
+          </w:tcPr>
+          <w:p>
+            <w:r>
+              <w:t xml:space="preserve">每万人高校在校生数</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+      </w:tr>
+      <w:tr>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="833" w:type="pct"/>
+          </w:tcPr>
+          <w:p>
+          </w:p>
+        </w:tc>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="1667" w:type="pct"/>
+          </w:tcPr>
+          <w:p>
+            <w:r>
+              <w:t xml:space="preserve">政府支持</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="2500" w:type="pct"/>
+          </w:tcPr>
+          <w:p>
+            <w:r>
+              <w:t xml:space="preserve">科技支出占财政支出比重</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+      </w:tr>
+      <w:tr>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="833" w:type="pct"/>
+          </w:tcPr>
+          <w:p>
+          </w:p>
+        </w:tc>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="1667" w:type="pct"/>
+          </w:tcPr>
+          <w:p>
+            <w:r>
+              <w:t xml:space="preserve">对外开放</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="2500" w:type="pct"/>
+          </w:tcPr>
+          <w:p>
+            <w:r>
+              <w:t xml:space="preserve">实际利用外资/GDP</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+      </w:tr>
+      <w:tr>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="833" w:type="pct"/>
+          </w:tcPr>
+          <w:p>
+          </w:p>
+        </w:tc>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="1667" w:type="pct"/>
+          </w:tcPr>
+          <w:p>
+            <w:r>
+              <w:t xml:space="preserve">金融发展</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="2500" w:type="pct"/>
+          </w:tcPr>
+          <w:p>
+            <w:r>
+              <w:t xml:space="preserve">金融机构贷款余额/GDP</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+      </w:tr>
+    </w:tbl>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading2"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">（三）数据来源</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:ind w:firstLine="0"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">本文数据来源于2012—2022年《中国城市统计年鉴》《中国区域创新能力评价报告》以及各省市统计公报。样本覆盖长三角城市群41个城市，共451个观测值。</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">四、实证结果</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading2"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">（一）基准回归结果</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:ind w:firstLine="0"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">基准回归结果如表2所示。模型（1）为普通面板固定效应回归，模型（2）为空间杜宾模型。</w:t>
+      </w:r>
+    </w:p>
+    <w:p><m:oMathPara>
+  <m:oMath>
+    <m:sSup>
+      <m:e>
+        <m:r>
+          <m:t>R</m:t>
+        </m:r>
+      </m:e>
+      <m:sup>
+        <m:r>
+          <m:t>2</m:t>
+        </m:r>
+      </m:sup>
+    </m:sSup>
+    <m:r>
+      <m:t>=</m:t>
+    </m:r>
+    <m:r>
+      <m:t>0.856</m:t>
+    </m:r>
+    <m:r>
+      <m:t>,</m:t>
+    </m:r>
+    <m:sSup>
+      <m:e>
+        <m:r>
+          <m:t>σ</m:t>
+        </m:r>
+      </m:e>
+      <m:sup>
+        <m:r>
+          <m:t>2</m:t>
+        </m:r>
+      </m:sup>
+    </m:sSup>
+    <m:r>
+      <m:t>=</m:t>
+    </m:r>
+    <m:r>
+      <m:t>0.0234</m:t>
+    </m:r>
+    <m:r>
+      <m:t>,</m:t>
+    </m:r>
+    <m:r>
+      <m:t>Log-L</m:t>
+    </m:r>
+    <m:r>
+      <m:t>=</m:t>
+    </m:r>
+    <m:r>
+      <m:t>425.67</m:t>
+    </m:r>
+  </m:oMath>
+</m:oMathPara>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t xml:space="preserve">空间自回归系数</w:t>
+      </w:r><m:oMath>
+  <m:r>
+    <m:t>ρ</m:t>
+  </m:r>
+  <m:r>
+    <m:t>=</m:t>
+  </m:r>
+  <m:r>
+    <m:t>0.312</m:t>
+  </m:r>
+</m:oMath>
+      <w:r>
+        <w:t xml:space="preserve">在1%水平上显著，表明创新效率存在显著的空间正相关性。核心解释变量数字经济发展指数的估计系数</w:t>
+      </w:r><m:oMath>
+  <m:sSub>
+    <m:e>
+      <m:acc>
+        <m:accPr>
+          <m:chr m:val="̂"/>
+        </m:accPr>
+        <m:e>
+          <m:r>
+            <m:t>β</m:t>
+          </m:r>
+        </m:e>
+      </m:acc>
+    </m:e>
+    <m:sub>
+      <m:r>
+        <m:t>1</m:t>
+      </m:r>
+    </m:sub>
+  </m:sSub>
+  <m:r>
+    <m:t>=</m:t>
+  </m:r>
+  <m:r>
+    <m:t>0.234</m:t>
+  </m:r>
+</m:oMath>
+      <w:r>
+        <w:t xml:space="preserve">在1%水平上显著为正，初步验证了假设1。</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading2"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">（二）空间效应分解</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:ind w:firstLine="0"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">根据LeSage和Pace（2009）提出的偏微分方法，将空间杜宾模型的总效应分解为直接效应和间接效应：</w:t>
+      </w:r>
+    </w:p>
+    <w:p><m:oMathPara>
+  <m:oMath>
+    <m:f>
+      <m:num>
+        <m:r>
+          <m:t>∂</m:t>
+        </m:r>
+        <m:r>
+          <m:t>Y</m:t>
+        </m:r>
+      </m:num>
+      <m:den>
+        <m:r>
+          <m:t>∂</m:t>
+        </m:r>
+        <m:sSub>
+          <m:e>
+            <m:r>
+              <m:t>X</m:t>
+            </m:r>
+          </m:e>
+          <m:sub>
+            <m:r>
+              <m:t>k</m:t>
+            </m:r>
+          </m:sub>
+        </m:sSub>
+      </m:den>
+    </m:f>
+    <m:r>
+      <m:t>=</m:t>
+    </m:r>
+    <m:sSup>
+      <m:e>
+        <m:d>
+          <m:dPr>
+            <m:begChr m:val="("/>
+            <m:endChr m:val=")"/>
+          </m:dPr>
+          <m:e>
+            <m:sSub>
+              <m:e>
+                <m:r>
+                  <m:t>I</m:t>
+                </m:r>
+              </m:e>
+              <m:sub>
+                <m:r>
+                  <m:t>n</m:t>
+                </m:r>
+              </m:sub>
+            </m:sSub>
+            <m:r>
+              <m:t>−</m:t>
+            </m:r>
+            <m:r>
+              <m:t>ρ</m:t>
+            </m:r>
+            <m:r>
+              <m:t>W</m:t>
+            </m:r>
+          </m:e>
+        </m:d>
+      </m:e>
+      <m:sup>
+        <m:r>
+          <m:t>−</m:t>
+        </m:r>
+        <m:r>
+          <m:t>1</m:t>
+        </m:r>
+      </m:sup>
+    </m:sSup>
+    <m:d>
+      <m:dPr>
+        <m:begChr m:val="("/>
+        <m:endChr m:val=")"/>
+      </m:dPr>
+      <m:e>
+        <m:sSub>
+          <m:e>
+            <m:r>
+              <m:t>I</m:t>
+            </m:r>
+          </m:e>
+          <m:sub>
+            <m:r>
+              <m:t>n</m:t>
+            </m:r>
+          </m:sub>
+        </m:sSub>
+        <m:sSub>
+          <m:e>
+            <m:r>
+              <m:t>β</m:t>
+            </m:r>
+          </m:e>
+          <m:sub>
+            <m:r>
+              <m:t>k</m:t>
+            </m:r>
+          </m:sub>
+        </m:sSub>
+        <m:r>
+          <m:t>+</m:t>
+        </m:r>
+        <m:r>
+          <m:t>W</m:t>
+        </m:r>
+        <m:sSub>
+          <m:e>
+            <m:r>
+              <m:t>θ</m:t>
+            </m:r>
+          </m:e>
+          <m:sub>
+            <m:r>
+              <m:t>k</m:t>
+            </m:r>
+          </m:sub>
+        </m:sSub>
+      </m:e>
+    </m:d>
+  </m:oMath>
+</m:oMathPara>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pBdr>
+          <w:bottom w:val="single" w:sz="6" w:space="1" w:color="auto"/>
+        </w:pBdr>
+      </w:pPr>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t xml:space="preserve">分解结果表明：数字经济对创新效率的直接效应为0.234（</w:t>
+      </w:r><m:oMath>
+  <m:r>
+    <m:t>p</m:t>
+  </m:r>
+  <m:r>
+    <m:t>&lt;</m:t>
+  </m:r>
+  <m:r>
+    <m:t>0.01</m:t>
+  </m:r>
+</m:oMath>
+      <w:r>
+        <w:t xml:space="preserve">），间接效应（空间溢出）为0.156（</w:t>
+      </w:r><m:oMath>
+  <m:r>
+    <m:t>p</m:t>
+  </m:r>
+  <m:r>
+    <m:t>&lt;</m:t>
+  </m:r>
+  <m:r>
+    <m:t>0.05</m:t>
+  </m:r>
+</m:oMath>
+      <w:r>
+        <w:t xml:space="preserve">），总效应为0.390。假设2得到验证。</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">五、结论与政策启示</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:ind w:firstLine="0"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">本文基于2012—2022年长三角城市群面板数据的实证研究表明，数字经济不仅显著提升本地创新效率，还具有正向空间溢出效应。研究结论的政策启示如下：</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:br w:type="page"/>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:numPr>
+          <w:ilvl w:val="0"/>
+          <w:numId w:val="5"/>
+        </w:numPr>
+        <w:ind w:left="420" w:hanging="210"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">加快数字基础设施建设，缩小区域间“数字鸿沟”。</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:numPr>
+          <w:ilvl w:val="0"/>
+          <w:numId w:val="5"/>
+        </w:numPr>
+        <w:ind w:left="420" w:hanging="210"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">促进数字技术与创新活动的深度融合，提升创新资源配置效率。</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:numPr>
+          <w:ilvl w:val="0"/>
+          <w:numId w:val="5"/>
+        </w:numPr>
+        <w:ind w:left="420" w:hanging="210"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">建立区域间数字经济协同发展机制，充分发挥空间溢出效应。</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:numPr>
+          <w:ilvl w:val="0"/>
+          <w:numId w:val="5"/>
+        </w:numPr>
+        <w:ind w:left="420" w:hanging="210"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">因地制宜制定差异化政策，重点扶持欠发达地区数字经济发展。</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">参考文献</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:ind w:left="420" w:hanging="420" w:firstLine="0"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">[</w:t>
+      </w:r>
+      <w:r>
+        <w:rPr>
+          <w:sz w:val="13"/>
+          <w:szCs w:val="13"/>
+        </w:rPr>
+        <w:t xml:space="preserve">1</w:t>
+      </w:r>
+      <w:r>
+        <w:t xml:space="preserve">] 赵涛, 张智, 梁上坤. 数字经济、创业活跃度与高质量发展——来自中国城市的经验证据[J]. 管理世界, 2020, 36(10): 65-76.</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:ind w:left="420" w:hanging="420" w:firstLine="0"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">[</w:t>
+      </w:r>
+      <w:r>
+        <w:rPr>
+          <w:sz w:val="13"/>
+          <w:szCs w:val="13"/>
+        </w:rPr>
+        <w:t xml:space="preserve">2</w:t>
+      </w:r>
+      <w:r>
+        <w:t xml:space="preserve">] 戚聿东, 肖旭. 数字经济时代的企业管理变革[J]. 管理世界, 2020, 36(6): 135-152.</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:ind w:left="420" w:hanging="420" w:firstLine="0"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">[</w:t>
+      </w:r>
+      <w:r>
+        <w:rPr>
+          <w:sz w:val="13"/>
+          <w:szCs w:val="13"/>
+        </w:rPr>
+        <w:t xml:space="preserve">3</w:t>
+      </w:r>
+      <w:r>
+        <w:t xml:space="preserve">] 杨慧梅, 江璐. 数字经济、空间效应与全要素生产率[J]. 统计研究, 2021, 38(4): 3-15.</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:ind w:left="420" w:hanging="420" w:firstLine="0"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">[4] Goldfarb A, Tucker C. Digital Economics[J]. Journal of Economic Literature, 2019, 57(1): 3-43.</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:ind w:left="420" w:hanging="420" w:firstLine="0"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">[5] Autor D, Dorn D, Katz L F, et al. The Fall of the Labor Share and the Rise of Superstar Firms[J]. Quarterly Journal of Economics, 2020, 135(2): 645-709.</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:ind w:left="420" w:hanging="420" w:firstLine="0"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">[6] Audretsch D B, Feldman M P. R&amp;D Spillovers and the Geography of Innovation and Production[J]. American Economic Review, 1996, 86(3): 630-640.</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:ind w:left="420" w:hanging="420" w:firstLine="0"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">[7] LeSage J, Pace R K. Introduction to Spatial Econometrics[M]. New York: Chapman and Hall/CRC, 2009.</w:t>
+      </w:r>
+    </w:p>
+    <w:sectPr>
+      <w:footnotePr>
+        <w:numRestart w:val="eachPage"/>
+      </w:footnotePr>
+      <w:pgSz w:w="11906" w:h="16838"/>
+      <w:pgMar w:top="1440" w:right="1797" w:bottom="1440" w:left="1797"/>
+    </w:sectPr>
+  </w:body>
+</w:document>

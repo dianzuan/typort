@@ -82,6 +82,25 @@ anyone "simplify" it back to a dual-compilation description. Full detail in
   ship with a fixture-based regression test** for the specific case — that code is
   the most fragile part of the system (geometry → semantics inference with magic
   thresholds; see ARCHITECTURE.md "fragile seam").
+- **Golden snapshots** (the `mod golden` in `cli/tests/integration.rs`) pin the
+  exact `word/document.xml` for a curated set of fixtures under `tests/snapshots/`,
+  so output-formatting drift surfaces as a reviewable diff — the suite's only
+  oracle for output *quality*, not just presence. After an intentional output
+  change, regenerate and **review the diff before committing**:
+  ```bash
+  UPDATE_SNAPSHOTS=1 cargo test -p typort --test integration golden
+  git diff tests/snapshots
+  ```
+  The set is curated for CI-safety: only fixtures whose fonts are embedded,
+  constant, or **declared in source** are snapshotted — fixtures relying on a
+  *detected* system CJK font (the World loads system fonts) are excluded, because
+  the font name would differ between machines. Don't snapshot a CJK fixture that
+  doesn't `#set text(font: …)`.
+- **Visual-regression tests** (`visual_regression_*`) render the docx via
+  LibreOffice/pdftoppm/ImageMagick and RMSE-compare against Typst's own PDF. They
+  are `#[ignore]`d (those tools aren't in CI) but **panic loudly on a missing
+  tool** when opted into — they never silently pass. Run them with
+  `cargo test -p typort -- --ignored`.
 
 ## What must pass before committing
 

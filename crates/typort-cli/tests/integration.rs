@@ -2909,56 +2909,47 @@ fn compare_images(a: &Path, b: &Path) -> Option<f64> {
     stderr[paren_start + 1..paren_end].parse::<f64>().ok()
 }
 
+// The visual-regression tests render typort's docx to PDF (LibreOffice), to PNG
+// (pdftoppm), and RMSE-compare against Typst's own PDF (ImageMagick). They are
+// `#[ignore]`d because those tools are not in CI — but, when opted into with
+// `cargo test -- --ignored`, a MISSING tool is a hard `panic!`, never a silent
+// pass, so "ran but skipped" can no longer masquerade as "passed".
 #[test]
+#[ignore = "needs libreoffice + pdftoppm + ImageMagick; run with --ignored"]
 fn visual_regression_hello() {
     let path = Path::new("../../tests/fixtures/hello.typ");
     let ground_truth = typst_to_pdf(path);
-    let Some(docx_pdf) = typort_to_pdf_via_docx(path, "hello") else {
-        eprintln!("SKIP: LibreOffice not available for visual regression");
-        return;
-    };
-
-    let Some(gt_png) = pdf_page_to_png(&ground_truth, 1, "gt_hello") else {
-        eprintln!("SKIP: pdftoppm not available");
-        return;
-    };
-    let Some(docx_png) = pdf_page_to_png(&docx_pdf, 1, "docx_hello") else {
-        eprintln!("SKIP: pdftoppm failed for docx PDF");
-        return;
-    };
-
-    if let Some(diff) = compare_images(&gt_png, &docx_png) {
-        eprintln!("hello.typ visual diff: {diff:.4} (0=identical, <0.15=acceptable)");
-        assert!(
-            diff < 0.30,
-            "visual regression too high for hello.typ: {diff:.4}"
-        );
-    }
+    let docx_pdf = typort_to_pdf_via_docx(path, "hello")
+        .expect("libreoffice required: install it or do not opt into the --ignored visual tests");
+    let gt_png =
+        pdf_page_to_png(&ground_truth, 1, "gt_hello").expect("pdftoppm required for ground truth");
+    let docx_png =
+        pdf_page_to_png(&docx_pdf, 1, "docx_hello").expect("pdftoppm required for docx render");
+    let diff = compare_images(&gt_png, &docx_png).expect("ImageMagick `compare` required");
+    eprintln!("hello.typ visual diff: {diff:.4} (0=identical, <0.15=acceptable)");
+    assert!(
+        diff < 0.30,
+        "visual regression too high for hello.typ: {diff:.4}"
+    );
 }
 
 #[test]
+#[ignore = "needs libreoffice + pdftoppm + ImageMagick; run with --ignored"]
 fn visual_regression_complex_paper() {
     let path = Path::new("../../tests/fixtures/complex_paper.typ");
     let ground_truth = typst_to_pdf(path);
-    let Some(docx_pdf) = typort_to_pdf_via_docx(path, "complex") else {
-        eprintln!("SKIP: LibreOffice not available");
-        return;
-    };
-
-    let Some(gt_png) = pdf_page_to_png(&ground_truth, 1, "gt_complex") else {
-        return;
-    };
-    let Some(docx_png) = pdf_page_to_png(&docx_pdf, 1, "docx_complex") else {
-        return;
-    };
-
-    if let Some(diff) = compare_images(&gt_png, &docx_png) {
-        eprintln!("complex_paper.typ visual diff: {diff:.4}");
-        assert!(
-            diff < 0.35,
-            "visual regression too high for complex_paper.typ: {diff:.4}"
-        );
-    }
+    let docx_pdf = typort_to_pdf_via_docx(path, "complex")
+        .expect("libreoffice required: install it or do not opt into the --ignored visual tests");
+    let gt_png = pdf_page_to_png(&ground_truth, 1, "gt_complex")
+        .expect("pdftoppm required for ground truth");
+    let docx_png =
+        pdf_page_to_png(&docx_pdf, 1, "docx_complex").expect("pdftoppm required for docx render");
+    let diff = compare_images(&gt_png, &docx_png).expect("ImageMagick `compare` required");
+    eprintln!("complex_paper.typ visual diff: {diff:.4}");
+    assert!(
+        diff < 0.35,
+        "visual regression too high for complex_paper.typ: {diff:.4}"
+    );
 }
 
 // ---------- equation label bookmark tests (#15) ----------
@@ -5628,4 +5619,117 @@ fn complex_paper_handwritten_refs_get_hanging_indent() {
         !body.contains("w:hanging"),
         "body paragraph before the set-rule must stay flush:\n{body}"
     );
+}
+
+// ===========================================================================
+// Golden snapshots: pin the exact `word/document.xml` for a curated fixture set
+// so any output-formatting drift surfaces as a reviewable diff (the suite's only
+// oracle for output *quality*, not mere presence). quick-xml already emits
+// deterministic 2-space-indented XML (writer.rs `new_with_indent`), verified
+// byte-identical across separate processes, so we snapshot it verbatim — no
+// pretty-printer, no new dependency.
+//
+// CURATION — CI-safety: the World loads system fonts (world.rs
+// `include_system_fonts(true)`), so a fixture whose CJK font is *detected* from
+// rendering (not declared) pins a machine-specific font name (e.g. "KaiTi" on
+// the dev box, something else on CI) and would flake. The set below is therefore
+// limited to fixtures whose fonts are embedded (Libertinus), constant ("Courier
+// New"), or DECLARED in source (complex_paper → "Noto Serif SC", read from the
+// AST and thus environment-independent). CJK fixtures that rely on *detected*
+// fonts (hello, issue_cjk_heading_numbering, edge_three_line_table) are
+// deliberately excluded — they are covered by the substring-based tests above.
+//
+// Regenerate after an intentional change, then review the diff before committing:
+//   UPDATE_SNAPSHOTS=1 cargo test -p typort --test integration golden
+//   git diff tests/snapshots
+mod golden {
+    use super::fixture_doc_xml;
+
+    /// Path of a committed golden, relative to the crate dir (where tests run),
+    /// mirroring the `../../tests/...` convention `fixture_doc_xml` uses.
+    fn golden_path(fixture: &str) -> std::path::PathBuf {
+        std::path::Path::new("../../tests/snapshots").join(format!("{fixture}.document.xml"))
+    }
+
+    /// Normalize for comparison: strip trailing whitespace per line and force LF,
+    /// defending against CRLF checkouts and editor end-of-line churn.
+    fn normalize_xml(xml: &str) -> String {
+        let body = xml.replace("\r\n", "\n");
+        let mut out: String = body
+            .lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>()
+            .join("\n");
+        out.push('\n');
+        out
+    }
+
+    /// First differing line, for a one-line failure message instead of a huge
+    /// dump. Returns `(line_no, expected, actual)`.
+    fn first_diff<'a>(expected: &'a str, actual: &'a str) -> Option<(usize, &'a str, &'a str)> {
+        for (i, (e, a)) in expected.lines().zip(actual.lines()).enumerate() {
+            if e != a {
+                return Some((i + 1, e, a));
+            }
+        }
+        let (el, al) = (expected.lines().count(), actual.lines().count());
+        if el != al {
+            return Some((
+                el.min(al) + 1,
+                "<line count differs>",
+                "<line count differs>",
+            ));
+        }
+        None
+    }
+
+    /// Convert the fixture, normalize, and either (re)write the golden
+    /// (`UPDATE_SNAPSHOTS=1`) or assert byte-equality against the committed one.
+    fn check_golden(fixture: &str) {
+        let actual = normalize_xml(&fixture_doc_xml(fixture));
+        let path = golden_path(fixture);
+
+        if std::env::var_os("UPDATE_SNAPSHOTS").is_some() {
+            std::fs::write(&path, &actual)
+                .unwrap_or_else(|e| panic!("failed to write golden {}: {e}", path.display()));
+            return;
+        }
+
+        let expected = match std::fs::read_to_string(&path) {
+            Ok(s) => normalize_xml(&s),
+            Err(_) => panic!(
+                "missing golden {}\nregenerate with: \
+                 UPDATE_SNAPSHOTS=1 cargo test -p typort --test integration golden",
+                path.display()
+            ),
+        };
+
+        if let Some((line, e, a)) = first_diff(&expected, &actual) {
+            panic!(
+                "golden mismatch for {fixture} at line {line}\n  expected: {e}\n  actual:   {a}\n\
+                 \nif this change is intentional, regenerate and review:\n  \
+                 UPDATE_SNAPSHOTS=1 cargo test -p typort --test integration golden\n  \
+                 git diff tests/snapshots"
+            );
+        }
+    }
+
+    macro_rules! golden_test {
+        ($name:ident, $fixture:literal) => {
+            #[test]
+            fn $name() {
+                check_golden($fixture);
+            }
+        };
+    }
+
+    golden_test!(golden_complex_paper, "complex_paper");
+    golden_test!(golden_aligned_equations, "aligned_equations");
+    golden_test!(golden_inline_math_in_text, "inline_math_in_text");
+    golden_test!(golden_edge_complex_table, "edge_complex_table");
+    golden_test!(golden_formatted_footnote, "formatted_footnote");
+    golden_test!(golden_edge_term_list, "edge_term_list");
+    golden_test!(golden_edge_deep_nested_list, "edge_deep_nested_list");
+    golden_test!(golden_bibliography_basic, "bibliography_basic");
+    golden_test!(golden_edge_theorem_proof, "edge_theorem_proof");
 }

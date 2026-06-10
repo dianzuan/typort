@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">
+  <w:body>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+        <w:spacing w:before="0"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">Introduction</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:ind w:firstLine="0"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">This is an example document that cites a journal article [1], a book [2], and a conference paper [3].</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t xml:space="preserve">Multiple citations can appear together [1], [2].</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">Methods</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:ind w:firstLine="0"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">As described by [1], the methodology is sound.</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+      </w:pPr>
+      <w:r>
+        <w:t xml:space="preserve">Bibliography</w:t>
+      </w:r>
+    </w:p>
+    <w:sdt>
+      <w:sdtPr>
+        <w:id w:val="1000000"/>
+        <w:docPartObj>
+          <w:docPartGallery w:val="Bibliographies"/>
+          <w:docPartUnique/>
+        </w:docPartObj>
+        <w:bibliography/>
+      </w:sdtPr>
+      <w:sdtContent>
+        <w:p>
+          <w:pPr>
+            <w:pStyle w:val="Bibliography"/>
+          </w:pPr>
+          <w:r>
+            <w:fldChar w:fldCharType="begin"/>
+          </w:r>
+          <w:r>
+            <w:instrText xml:space="preserve"> BIBLIOGRAPHY </w:instrText>
+          </w:r>
+          <w:r>
+            <w:fldChar w:fldCharType="separate"/>
+          </w:r>
+        </w:p>
+        <w:p>
+          <w:pPr>
+            <w:ind w:left="440" w:hanging="440" w:firstLine="0"/>
+          </w:pPr>
+          <w:r>
+            <w:rPr>
+              <w:i/>
+            </w:rPr>
+            <w:t xml:space="preserve">[1]</w:t>
+          </w:r>
+          <w:r>
+            <w:t xml:space="preserve"> J. A. Smith and J. Doe, “An Example Article on Citation Testing,” </w:t>
+          </w:r>
+          <w:r>
+            <w:rPr>
+              <w:i/>
+            </w:rPr>
+            <w:t xml:space="preserve">Journal of Examples</w:t>
+          </w:r>
+          <w:r>
+            <w:t xml:space="preserve">, vol. 42, no. 3, pp. 100–115, 2020, doi: </w:t>
+          </w:r>
+          <w:r>
+            <w:rPr>
+              <w:i/>
+            </w:rPr>
+            <w:t xml:space="preserve">10.1234/example.2020</w:t>
+          </w:r>
+          <w:r>
+            <w:t xml:space="preserve">.</w:t>
+          </w:r>
+        </w:p>
+        <w:p>
+          <w:pPr>
+            <w:ind w:left="440" w:hanging="440" w:firstLine="0"/>
+          </w:pPr>
+          <w:r>
+            <w:rPr>
+              <w:i/>
+            </w:rPr>
+            <w:t xml:space="preserve">[2]</w:t>
+          </w:r>
+          <w:r>
+            <w:t xml:space="preserve"> D. E. Knuth, </w:t>
+          </w:r>
+          <w:r>
+            <w:rPr>
+              <w:i/>
+            </w:rPr>
+            <w:t xml:space="preserve">The Art of Computer Programming</w:t>
+          </w:r>
+          <w:r>
+            <w:t xml:space="preserve">, 3rd ed., vol. 1. Addison-Wesley, 1997.</w:t>
+          </w:r>
+        </w:p>
+        <w:p>
+          <w:pPr>
+            <w:ind w:left="440" w:hanging="440" w:firstLine="0"/>
+          </w:pPr>
+          <w:r>
+            <w:rPr>
+              <w:i/>
+            </w:rPr>
+            <w:t xml:space="preserve">[3]</w:t>
+          </w:r>
+          <w:r>
+            <w:t xml:space="preserve"> W. Wang and M. Li, “A Conference Paper Example,” in </w:t>
+          </w:r>
+          <w:r>
+            <w:rPr>
+              <w:i/>
+            </w:rPr>
+            <w:t xml:space="preserve">Proceedings of the International Conference</w:t>
+          </w:r>
+          <w:r>
+            <w:t xml:space="preserve">,  </w:t>
+          </w:r>
+          <w:r>
+            <w:t xml:space="preserve">2023, pp. 1–10.</w:t>
+          </w:r>
+        </w:p>
+        <w:p>
+          <w:r>
+            <w:fldChar w:fldCharType="end"/>
+          </w:r>
+        </w:p>
+      </w:sdtContent>
+    </w:sdt>
+    <w:sectPr>
+      <w:footnotePr>
+        <w:numRestart w:val="eachPage"/>
+      </w:footnotePr>
+      <w:pgSz w:w="11906" w:h="16838"/>
+      <w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417"/>
+    </w:sectPr>
+  </w:body>
+</w:document>
