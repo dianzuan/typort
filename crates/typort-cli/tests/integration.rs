@@ -23,18 +23,21 @@ fn inline_math_spacing_cjk_tight_latin_spaced() {
     // CJK text and an equation (Typst renders 标量M tight); it must keep the space
     // for Latin text (Typst trims it, Word needs it back). See
     // tests/fixtures/edge_cjk_inline_math_spacing.typ.
+    //
+    // The run-coalescing post-pass folds the (formerly standalone) space run into
+    // the adjacent text run, so we assert the space is present *in the neighbouring
+    // run's text* (tight for CJK, spaced for Latin) rather than as its own run.
     let doc_xml = fixture_doc_xml("edge_cjk_inline_math_spacing");
-    let space_run = r#"<w:t xml:space="preserve"> </w:t>"#;
 
     let cjk = paragraph_containing(&doc_xml, "标量");
     assert!(
-        !cjk.contains(space_run),
+        cjk.contains("标量</w:t>") && !cjk.contains("标量 "),
         "CJK text adjacent to inline math must stay tight (no inserted space):\n{cjk}"
     );
     let latin = paragraph_containing(&doc_xml, "the value");
     assert!(
-        latin.contains(space_run),
-        "Latin text around inline math must keep its space"
+        latin.contains("the value </w:t>") && latin.contains(" is here."),
+        "Latin text around inline math must keep its space:\n{latin}"
     );
 }
 
@@ -5419,4 +5422,78 @@ fn bibliography_body_text_preserved() {
         xml.contains("methodology is sound"),
         "expected body text near citation"
     );
+}
+
+#[test]
+fn run_coalescing_collapses_split_line() {
+    // Regression: the HTML walk emits one <w:r> per Typst text/space node, so a
+    // plain line is shattered into many runs. The coalescing post-pass merges
+    // adjacent equally-formatted runs while preserving the bold boundary.
+    // See tests/fixtures/edge_run_coalescing.typ.
+    let doc_xml = fixture_doc_xml("edge_run_coalescing");
+    let para = paragraph_containing(&doc_xml, "plain line");
+
+    // Count runs in just this paragraph (both `<w:r>` and `<w:r ...>` forms).
+    let run_count = para.matches("<w:r>").count() + para.matches("<w:r ").count();
+
+    // Without coalescing this line is ~10+ runs; merged it is the plain head,
+    // the bold word, and the plain tail — at most a handful.
+    assert!(
+        run_count <= 4,
+        "expected the plain line to collapse to <=4 runs, got {run_count}"
+    );
+
+    // The bold word must remain its OWN run (boundary preserved): exactly one
+    // run in this paragraph carries <w:b/>.
+    assert_eq!(
+        para.matches("<w:b/>").count(),
+        1,
+        "the bold span must stay a separate styled run"
+    );
+}
+
+#[test]
+fn no_math_fallback_font_on_plain_digit_or_whitespace() {
+    // Regression: per-glyph math fallback must not leak a math font onto plain
+    // text, and a whitespace-only run must not carry a stray size. Typst shapes
+    // the isolated digit '7' in "[7]" with a math-table face; copying the paged
+    // run style verbatim used to emit `w:rFonts w:ascii="...Math"` on that digit.
+    // Detection now normalizes any FontFlags::MATH face (and any non-letter run
+    // whose font differs from baseline) back to the baseline, and drops all
+    // overrides on whitespace-only runs. See tests/fixtures/edge_math_fallback_digit.typ.
+    let xml = fixture_doc_xml("edge_math_fallback_digit");
+
+    // (a) No run carries a *Math* face on its rFonts (the OpenType math family
+    //     name marker), anywhere in the document.
+    for rfonts in xml.split("<w:rFonts").skip(1) {
+        let tag = rfonts.split('>').next().unwrap_or("");
+        assert!(
+            !tag.contains("Math"),
+            "no run should carry a math fallback font; found rFonts: <w:rFonts{tag}>"
+        );
+    }
+
+    // (b) The bare digit '7' must still survive as body text.
+    assert!(
+        xml.contains(">7<"),
+        "expected the digit 7 to survive as a run"
+    );
+
+    // (c) A whitespace-only run must not carry a size override.
+    for run in xml.split("<w:r>").skip(1) {
+        let body = run.split("</w:r>").next().unwrap_or("");
+        let Some(after_t) = body.split("<w:t").nth(1) else {
+            continue;
+        };
+        let text = after_t
+            .split_once('>')
+            .and_then(|(_, rest)| rest.split("</w:t>").next())
+            .unwrap_or("");
+        if !text.is_empty() && text.chars().all(char::is_whitespace) {
+            assert!(
+                !body.contains("<w:sz "),
+                "whitespace-only run must inherit size, got run: {body}"
+            );
+        }
+    }
 }

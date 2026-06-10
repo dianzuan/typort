@@ -6,6 +6,7 @@
 //! `FootnoteElem`, etc. without parsing HTML tags.
 
 mod bibliography;
+mod coalesce;
 mod footnote;
 mod image;
 pub mod inline;
@@ -245,6 +246,14 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
     if let Some(paged) = &paged_doc {
         recovery::merge_same_line_paragraphs(&mut doc, paged);
     }
+
+    // 16. Final pass: coalesce adjacent equally-formatted text runs. Runs LAST,
+    //     after every per-run style patch (step 12a/12c and the recovery passes)
+    //     has settled, so "equal formatting" is judged on the final styling.
+    //     Covers body paragraphs, table cells, bibliography blocks, footnote
+    //     bodies, and headers/footers. If any future pass re-splits runs, it must
+    //     run before this one or coalescing silently undoes its work.
+    coalesce::coalesce_runs(&mut doc);
 
     Ok(doc)
 }

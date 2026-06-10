@@ -1544,6 +1544,9 @@ fn roman_value(s: &str, uppercase: bool) -> u32 {
 // ---------------------------------------------------------------------------
 
 /// All per-run styling extracted from a single `TextItem` in the paged output.
+// Each bool is an independent detected style property (weight, slant, math-face
+// artifact, glyph-free), not a state machine — mirrors the same allow on `Run`.
+#[allow(clippy::struct_excessive_bools)]
 struct PagedRunStyle {
     text: String,
     spans: Vec<typst_syntax::Span>,
@@ -1552,6 +1555,18 @@ struct PagedRunStyle {
     color_hex: Option<String>,
     is_bold: bool,
     is_italic: bool,
+    /// The face Typst shaped this run with carries an OpenType `MATH` table
+    /// (`FontFlags::MATH`). This is a typographic property of the *font*, not a
+    /// guess about the document: math fallback faces ("New Computer Modern
+    /// Math", "Cambria Math", "STIX Two Math", …) set it; body text faces do
+    /// not. When Typst's per-glyph fallback shapes an isolated glyph with such a
+    /// face, copying it verbatim leaks a math font onto plain text, so we
+    /// normalize it back to the baseline.
+    is_math_font: bool,
+    /// The run has no visible glyphs (entirely whitespace). Such a run inherits
+    /// all formatting; a font/size detected on it is never observable, so it
+    /// must carry no override at all.
+    is_whitespace: bool,
     x: f64,
     text_width: f64,
     page_width: f64,
@@ -1585,6 +1600,11 @@ fn collect_styles_from_frame(
                 let info = text_item.font.info();
                 let spans: Vec<typst_syntax::Span> =
                     text_item.glyphs.iter().map(|g| g.span.0).collect();
+                // Compute the artifact signals before `text` is moved into the
+                // struct. `text` is non-empty (early-continue above), so the
+                // `all(..)` whitespace check can't vacuously succeed.
+                let is_math_font = info.flags.contains(typst_library::text::FontFlags::MATH);
+                let is_whitespace = text.chars().all(char::is_whitespace);
                 items.push(PagedRunStyle {
                     text,
                     spans,
@@ -1597,6 +1617,8 @@ fn collect_styles_from_frame(
                         typst_library::text::FontStyle::Italic
                             | typst_library::text::FontStyle::Oblique
                     ),
+                    is_math_font,
+                    is_whitespace,
                     x: abs_x.to_pt(),
                     text_width: text_item.width().to_pt(),
                     page_width,
@@ -1756,6 +1778,14 @@ fn build_style_override_maps(
     let mut text_overrides: HashMap<String, Vec<RunStyleOverride>> = HashMap::new();
 
     for item in paged_styles {
+        // A whitespace-only run has no visible glyphs: any size/font/color
+        // detected on it is a layout artifact that is never observable as
+        // styling. Emit no override of any kind so it inherits cleanly (fixes
+        // isolated spaces picking up a stray `sz`).
+        if item.is_whitespace {
+            continue;
+        }
+
         let size_half = pt_to_half_pt(item.size_pt);
 
         let color = item.color_hex.clone();
@@ -1775,7 +1805,21 @@ fn build_style_override_maps(
             item.font_family == rendered_ascii || item.font_family == declared_ascii
         };
 
-        let (font_ascii, font_east_asia) = if is_baseline_font {
+        // Normalize per-glyph fallback artifacts back to the baseline font.
+        // Two universal, language/genre-neutral signals — both font- or
+        // glyph-class properties, never natural-language matches:
+        //   (a) the shaped face carries an OpenType MATH table (FontFlags::MATH);
+        //       math fallback faces set it and body faces don't, so an isolated
+        //       glyph that fell back to one is an artifact, not authorial intent.
+        //   (b) the run text is entirely non-letter (digits/punctuation) AND its
+        //       font differs from the baseline; a one-character bracketed digit
+        //       shaped in a different face than its neighbours is fallback noise.
+        //       Letters are excluded so a genuine inline font run (a word set in
+        //       a display face) still produces an override.
+        let run_has_letters = item.text.chars().any(char::is_alphabetic);
+        let is_font_artifact = item.is_math_font || (!run_has_letters && !is_baseline_font);
+
+        let (font_ascii, font_east_asia) = if is_baseline_font || is_font_artifact {
             (None, None)
         } else if font_is_cjk {
             (None, Some(item.font_family.clone()))
