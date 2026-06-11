@@ -1018,7 +1018,15 @@ fn write_run<W: Write>(
                         .with_attribute(("w:val", color.as_str()))
                         .write_empty()?;
                 }
-                if let Some(size) = run.size_half_pt {
+                // A super/subscript run must not carry an explicit reduced size:
+                // `w:vertAlign` already shrinks the glyph and raises it by a fraction
+                // of the *effective* em, so a pre-shrunk `w:sz` collapses the raise and
+                // the mark sits mid-line. Emit vertAlign alone and let the consumer
+                // reduce+raise from the inherited body size (ECMA-376 §17.3.2.42).
+                if let Some(size) = run
+                    .size_half_pt
+                    .filter(|_| !run.superscript && !run.subscript)
+                {
                     let size_str = size.to_string();
                     rpr.create_element("w:sz")
                         .with_attribute(("w:val", size_str.as_str()))

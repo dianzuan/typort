@@ -5953,6 +5953,28 @@ fn superscript_marker_size_does_not_leak_to_body_reference() {
 }
 
 #[test]
+fn superscript_run_uses_vertalign_alone_not_a_shrunk_size() {
+    // A super/subscript run must NOT carry an explicit reduced <w:sz>: w:vertAlign
+    // already shrinks the glyph and raises it by a fraction of the *effective* em, so
+    // a pre-shrunk size collapses the raise and the mark sits mid-line instead of up
+    // top (ECMA-376 §17.3.2.42). The run must emit vertAlign alone and inherit the
+    // body size. See tests/fixtures/edge_super_marker_size.typ.
+    let doc_xml = fixture_doc_xml("edge_super_marker_size");
+    for chunk in doc_xml.split("<w:r>").skip(1) {
+        let run = chunk.split("</w:r>").next().unwrap_or("");
+        if run.contains(r#"<w:vertAlign w:val="superscript"/>"#)
+            || run.contains(r#"<w:vertAlign w:val="subscript"/>"#)
+        {
+            assert!(
+                !run.contains("<w:sz "),
+                "a super/subscript run must use vertAlign alone, not a shrunk <w:sz> \
+                 (which collapses the baseline raise):\n{run}"
+            );
+        }
+    }
+}
+
+#[test]
 fn table_cells_do_not_inherit_body_first_line_indent() {
     // Table cells are their own context — they must not take the body's
     // first-line indent (which they would inherit from the Normal style).

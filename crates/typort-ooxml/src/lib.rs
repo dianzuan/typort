@@ -133,6 +133,33 @@ mod tests {
     }
 
     #[test]
+    fn superscript_run_emits_vertalign_alone_not_a_shrunk_size() {
+        // A super/subscript run must NOT also emit an explicit (reduced) <w:sz>:
+        // w:vertAlign already shrinks the glyph and raises it by a fraction of the
+        // *effective* em, so a pre-shrunk size collapses the raise and the mark sits
+        // mid-line instead of up top (ECMA-376 §17.3.2.42). vertAlign alone, at the
+        // inherited body size, is the spec-intended representation.
+        let mut doc = Document::new();
+        let mut para = document::Paragraph::new();
+        let mut run = document::Run::new("1");
+        run.superscript = true;
+        run.size_half_pt = Some(13); // a detected, already-reduced superscript size
+        para.push_run(run);
+        doc.add_paragraph(para);
+
+        let buf = build_docx(&doc);
+        let xml = read_zip_entry(&buf, "word/document.xml");
+        assert!(
+            xml.contains(r#"<w:vertAlign w:val="superscript"/>"#),
+            "expected vertAlign superscript in: {xml}"
+        );
+        assert!(
+            !xml.contains("<w:sz "),
+            "a superscript run must use vertAlign alone, not a shrunk <w:sz>: {xml}"
+        );
+    }
+
+    #[test]
     fn run_monospace_produces_courier_new_font() {
         let mut doc = Document::new();
         let mut para = document::Paragraph::new();
