@@ -850,6 +850,7 @@ fn table_cell_supports_merged_cell_fields() {
         colspan: 2,
         vmerge: VMerge::Restart,
         width_pct: None,
+        vertical_align: None,
     };
     assert_eq!(cell.colspan, 2);
     assert_eq!(cell.vmerge, VMerge::Restart);
@@ -861,6 +862,7 @@ fn table_cell_supports_merged_cell_fields() {
         colspan: 1,
         vmerge: VMerge::Continue,
         width_pct: None,
+        vertical_align: None,
     };
     assert_eq!(cont_cell.vmerge, VMerge::Continue);
 }
@@ -880,6 +882,7 @@ fn merged_cell_emits_grid_span_and_vmerge() {
                         colspan: 2,
                         vmerge: VMerge::Restart,
                         width_pct: None,
+                        vertical_align: None,
                     },
                     TableCell {
                         paragraphs: vec![Paragraph::new()],
@@ -887,6 +890,7 @@ fn merged_cell_emits_grid_span_and_vmerge() {
                         colspan: 1,
                         vmerge: VMerge::None,
                         width_pct: None,
+                        vertical_align: None,
                     },
                 ],
             },
@@ -898,6 +902,7 @@ fn merged_cell_emits_grid_span_and_vmerge() {
                         colspan: 2,
                         vmerge: VMerge::Continue,
                         width_pct: None,
+                        vertical_align: None,
                     },
                     TableCell {
                         paragraphs: vec![Paragraph::new()],
@@ -905,6 +910,7 @@ fn merged_cell_emits_grid_span_and_vmerge() {
                         colspan: 1,
                         vmerge: VMerge::None,
                         width_pct: None,
+                        vertical_align: None,
                     },
                 ],
             },
@@ -5972,6 +5978,36 @@ fn superscript_run_uses_vertalign_alone_not_a_shrunk_size() {
             );
         }
     }
+}
+
+#[test]
+fn table_cell_alignment_from_typst_reaches_word() {
+    // Faithful (non-hardcoded) table conversion: the cell alignment the author set
+    // in Typst must reach Word, read from the semantic TableElem (the HTML export
+    // drops it). Vertical alignment -> <w:vAlign> in tcPr; horizontal -> <w:jc> in
+    // the cell paragraph (Pandoc-style). See tests/fixtures/edge_table_cell_alignment.typ.
+    let doc_xml = fixture_doc_xml("edge_table_cell_alignment");
+    let tc_blocks: Vec<&str> = doc_xml
+        .split("<w:tc>")
+        .skip(1)
+        .map(|c| c.split("</w:tc>").next().unwrap_or(""))
+        .collect();
+    let merged = tc_blocks
+        .iter()
+        .find(|b| b.contains("Merged"))
+        .expect("Merged cell present");
+    assert!(
+        merged.contains(r#"<w:vAlign w:val="center"/>"#),
+        "the align:horizon merged cell must carry <w:vAlign center> in its tcPr:\n{merged}"
+    );
+    let r1 = tc_blocks
+        .iter()
+        .find(|b| b.contains("R1"))
+        .expect("R1 cell present");
+    assert!(
+        r1.contains(r#"<w:jc w:val="right"/>"#),
+        "the align:right cell must carry <w:jc right> in its paragraph:\n{r1}"
+    );
 }
 
 #[test]

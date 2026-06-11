@@ -450,6 +450,7 @@ mod tests {
             colspan: 1,
             vmerge: document::VMerge::None,
             width_pct: None,
+            vertical_align: None,
         };
         let row = document::TableRow { cells: vec![cell] };
         let table = document::Table {

@@ -5,7 +5,7 @@ pub enum ParagraphStyle {
 }
 
 /// Paragraph alignment / justification.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Alignment {
     Left,
     Center,
@@ -428,6 +428,29 @@ pub struct TableCell {
     /// Cell width as percentage of table width (in fiftieths of a percent, i.e. 5000 = 100%).
     /// If None, width is auto-distributed.
     pub width_pct: Option<u32>,
+    /// Vertical alignment of the cell's content, read from the semantic
+    /// `TableElem`. Maps to `w:vAlign`. `None` = unset (don't override Word).
+    pub vertical_align: Option<VerticalAlign>,
+}
+
+/// Vertical alignment of a table cell's content. Maps to `w:vAlign`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VerticalAlign {
+    Top,
+    Center,
+    Bottom,
+}
+
+impl VerticalAlign {
+    /// The `w:vAlign` attribute value.
+    #[must_use]
+    pub fn as_val(self) -> &'static str {
+        match self {
+            VerticalAlign::Top => "top",
+            VerticalAlign::Center => "center",
+            VerticalAlign::Bottom => "bottom",
+        }
+    }
 }
 
 /// Vertical merge state for a table cell.

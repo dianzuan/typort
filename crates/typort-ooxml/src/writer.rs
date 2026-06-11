@@ -1181,6 +1181,13 @@ fn write_table<W: Write>(writer: &mut Writer<W>, table: &Table, ctx: &WriteCtx) 
                                         Ok(())
                                     })?;
                             }
+                            // Vertical cell alignment (w:vAlign comes after
+                            // tcBorders in the CT_TcPr schema order).
+                            if let Some(va) = cell.vertical_align {
+                                tcpr.create_element("w:vAlign")
+                                    .with_attribute(("w:val", va.as_val()))
+                                    .write_empty()?;
+                            }
                             Ok(())
                         })?;
                         if !cell.content.is_empty() {

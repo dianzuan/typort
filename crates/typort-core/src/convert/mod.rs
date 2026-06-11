@@ -12,6 +12,7 @@ mod image;
 pub mod inline;
 pub mod page;
 mod recovery;
+mod table_align;
 mod table_width;
 
 use std::collections::{HashSet, VecDeque};
@@ -687,7 +688,7 @@ fn handle_html_element(elem: &HtmlElement, ctx: &mut WalkCtx) {
             if let Some(align) = alignment {
                 for element in &mut ctx.doc.body.elements[start_idx..] {
                     if let BlockElement::Paragraph(para) = element {
-                        para.alignment = Some(align.clone());
+                        para.alignment = Some(align);
                     }
                 }
             }
@@ -1609,6 +1610,9 @@ fn convert_html_table(
         if let Some(col_pct) = table_width::track_widths_pct(&tracks.0, wctx) {
             table_width::assign_cell_widths(&mut table, &col_pct);
         }
+        // Semantic cell alignment (the HTML `<td>`s carry none): horizontal → cell
+        // paragraph `w:jc`, vertical → `w:vAlign`, read from the same TableElem.
+        table_align::apply_cell_alignment(&mut table, &table_elem);
     }
 
     doc.add_table(table);
@@ -1645,6 +1649,7 @@ fn postprocess_rowspans(raw_rows: Vec<RawTableRow>) -> Table {
                     colspan,
                     vmerge: VMerge::Continue,
                     width_pct: None,
+                    vertical_align: None,
                 });
                 logical_col += colspan as usize;
             } else if src_idx < src_cells.len() {
@@ -1742,6 +1747,7 @@ fn convert_table_row(tr: &HtmlElement, html_doc: &HtmlDocument) -> Option<RawTab
                     colspan,
                     vmerge,
                     width_pct: None,
+                    vertical_align: None,
                 });
                 cell_idx += 1;
             }
