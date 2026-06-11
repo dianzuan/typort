@@ -1,8 +1,26 @@
 use typort_ooxml::document::{Document, FootnoteFormat, InlineElement, Run};
 use typst::introspection::Tag;
+use typst::layout::PagedDocument;
 use typst_html::HtmlNode;
 
 use super::{get_text_content, has_attr_value, tag_name};
+
+/// Extract the footnote bodies from the HTML `doc-endnotes` section, add them to the
+/// document, and refine the footnote text size from the Paged render. The size is
+/// measured from the footnote runs themselves (`page::apply_footnote_text_size`)
+/// because the global size histogram mistakes the superscript reference marker for
+/// the footnote body text.
+pub(super) fn extract_add_and_size_footnotes(
+    doc: &mut Document,
+    body_children: &[HtmlNode],
+    paged: Option<&PagedDocument>,
+) {
+    let contents = extract_footnote_contents(body_children);
+    for content in &contents {
+        doc.add_footnote(content.clone());
+    }
+    super::page::apply_footnote_text_size(doc, paged, &contents);
+}
 
 /// Find the footnote number from children starting at a TAG Start("footnote").
 /// Looks for `<a role="doc-noteref">` -> `<sup>` -> text number.

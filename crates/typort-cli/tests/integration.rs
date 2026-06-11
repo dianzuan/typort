@@ -5201,6 +5201,35 @@ fn fixture_styles_xml(fixture: &str) -> String {
 }
 
 #[test]
+fn footnote_text_size_is_body_size_not_marker_size() {
+    // Regression for detect_footnote_size (page.rs): it took the global-minimum
+    // small size, which is the superscript reference/marker size (~6.5pt), and
+    // pinned FootnoteText to it. The fix measures the footnote BODY runs from the
+    // Paged render (located by the semantic footnote content), giving the real
+    // footnote text size (~9pt). See tests/fixtures/edge_footnote_size_not_marker.typ.
+    let styles = fixture_styles_xml("edge_footnote_size_not_marker");
+    let block = styles
+        .split(r#"w:styleId="FootnoteText""#)
+        .nth(1)
+        .expect("FootnoteText style present");
+    let block = block.split("</w:style>").next().unwrap();
+    let sz: u32 = block
+        .split(r#"<w:sz w:val=""#)
+        .nth(1)
+        .and_then(|s| s.split('"').next())
+        .and_then(|s| s.parse().ok())
+        .expect("FootnoteText sz present");
+    // Body is 10.5pt (sz 21); the footnote body renders ~9pt (sz 16-20); the
+    // superscript marker is ~6.5pt (sz 13). The footnote style must take the
+    // footnote-body size, not the marker size.
+    assert!(
+        (16..21).contains(&sz),
+        "FootnoteText size must be the footnote body size (~9pt, sz 16-20), not the \
+         superscript marker size (~6.5pt, sz 13); got sz={sz}"
+    );
+}
+
+#[test]
 fn lang_german_is_de_de_not_guessed() {
     // A German document (no CJK) must derive de-DE from #set text(lang: "de"),
     // not fall back to the en-US/zh-CN guess. Guards against P1 regressions.

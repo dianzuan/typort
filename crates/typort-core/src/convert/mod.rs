@@ -123,12 +123,10 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
     // showed it misread ~17 single-column fixtures as multi-column while the
     // genuine three column documents are all covered by the source parse.
 
-    // 4. First pass: extract footnote content from <section role="doc-endnotes">
+    // 4. First pass: extract footnote content from <section role="doc-endnotes">,
+    //    add it to the document, and size the footnote text from the Paged render.
     let body = find_body(&html_doc.root).unwrap_or(&html_doc.root);
-    let footnote_contents = footnote::extract_footnote_contents(&body.children);
-    for content in &footnote_contents {
-        doc.add_footnote(content.clone());
-    }
+    footnote::extract_add_and_size_footnotes(&mut doc, &body.children, paged_doc.as_ref());
 
     // 5. Extract images from PagedDocument for embedding. Two FIFOs: raster/SVG
     //    images (for <img>), and rasterized vector drawings (for drawing figures).

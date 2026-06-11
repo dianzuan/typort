@@ -7,8 +7,8 @@
 use std::collections::{HashMap, HashSet};
 
 use typort_ooxml::document::{
-    Alignment, DocumentStyle, FootnoteFormat, HeaderFooter, InlineElement, PageNumberFormat,
-    PageSettings, Paragraph, ParagraphStyle, Run, SectionBreak, SectionBreakType,
+    Alignment, Document, DocumentStyle, FootnoteFormat, HeaderFooter, InlineElement,
+    PageNumberFormat, PageSettings, Paragraph, ParagraphStyle, Run, SectionBreak, SectionBreakType,
 };
 use typst::layout::{Frame, FrameItem, PagedDocument, Point};
 
@@ -377,13 +377,84 @@ fn detect_code_size(size_counts: &HashMap<u32, usize>, body_size: u32) -> u32 {
         .map_or(body_size.saturating_sub(3).max(14), |(sz, _)| *sz)
 }
 
-/// Detect footnote text size: the smallest size with significant usage.
+/// Fallback footnote text size from the global histogram: the smallest size with
+/// significant usage. This is imprecise — it cannot tell the footnote body text
+/// from the (smaller) superscript reference marker — so it is only used when the
+/// semantic [`detect_footnote_text_size`] finds no footnote text to measure.
 fn detect_footnote_size(size_counts: &HashMap<u32, usize>, body_size: u32) -> u32 {
     size_counts
         .iter()
         .filter(|(sz, count)| **sz < body_size && **count >= 3 && **sz >= 12)
         .min_by_key(|(sz, _)| *sz)
         .map_or(body_size.saturating_sub(3).max(14), |(sz, _)| *sz)
+}
+
+/// Refine `doc.style.footnote_size_half_pt` from the actual footnote entries when a
+/// Paged render is available — overriding the imprecise global-histogram fallback
+/// with the footnote body size measured by [`detect_footnote_text_size`].
+pub(super) fn apply_footnote_text_size(
+    doc: &mut Document,
+    paged: Option<&PagedDocument>,
+    footnote_contents: &[Vec<InlineElement>],
+) {
+    if let Some(paged) = paged
+        && let Some(sz) = detect_footnote_text_size(paged, footnote_contents)
+    {
+        doc.style.footnote_size_half_pt = sz;
+    }
+}
+
+/// Measure the footnote **body** text size from the Paged render, located by the
+/// already-extracted footnote content. The global histogram ([`detect_footnote_size`])
+/// takes the smallest size in the document, which is the superscript reference
+/// marker — not the footnote text. Matching the rendered fragments against the
+/// semantic footnote content reads the size of the actual footnote runs instead.
+/// Returns the dominant matched size, or `None` when nothing matches (caller keeps
+/// the histogram fallback).
+fn detect_footnote_text_size(
+    paged: &PagedDocument,
+    footnote_contents: &[Vec<InlineElement>],
+) -> Option<u32> {
+    let mut haystack = String::new();
+    for content in footnote_contents {
+        for inline in content {
+            if let InlineElement::Text(run) = inline {
+                haystack.push_str(&run.text);
+            }
+        }
+    }
+    let haystack: String = haystack.chars().filter(|c| !c.is_whitespace()).collect();
+    if haystack.chars().count() < 4 {
+        return None;
+    }
+    let mut size_counts: HashMap<u32, usize> = HashMap::new();
+    for page in &paged.pages {
+        collect_footnote_text_sizes(&page.frame, &haystack, &mut size_counts);
+    }
+    // The footnote body is the dominant matched size; a tie prefers the smaller
+    // size (footnotes are smaller than any body text that coincidentally matches).
+    size_counts
+        .into_iter()
+        .max_by_key(|(sz, count)| (*count, std::cmp::Reverse(*sz)))
+        .map(|(sz, _)| sz)
+}
+
+/// Accumulate sizes of rendered text fragments that belong to the footnote body
+/// `haystack`. A fragment must be ≥3 chars and a substring of the footnote text, so
+/// single-glyph markers and unrelated body text do not register.
+fn collect_footnote_text_sizes(frame: &Frame, haystack: &str, out: &mut HashMap<u32, usize>) {
+    for (_, item) in frame.items() {
+        match item {
+            FrameItem::Text(t) => {
+                let frag: String = t.text.chars().filter(|c| !c.is_whitespace()).collect();
+                if frag.chars().count() >= 3 && haystack.contains(frag.as_str()) {
+                    *out.entry(pt_to_half_pt(t.size.to_pt())).or_insert(0) += t.glyphs.len();
+                }
+            }
+            FrameItem::Group(group) => collect_footnote_text_sizes(&group.frame, haystack, out),
+            _ => {}
+        }
+    }
 }
 
 /// Detect heading sizes from rendered text: sizes larger than body, sorted descending.
