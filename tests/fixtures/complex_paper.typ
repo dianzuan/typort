@@ -1,6 +1,7 @@
 #set page(margin: (top: 2.54cm, bottom: 2.54cm, left: 3.17cm, right: 3.17cm))
 #set text(font: ("New Computer Modern", "Noto Serif SC"), size: 10.5pt)
 #set par(leading: 1.5em, first-line-indent: (amount: 2em, all: true))
+#set math.equation(numbering: "(1)")
 
 = 数字经济对区域创新效率的影响研究
 == ——基于长三角城市群的实证分析
@@ -59,7 +60,8 @@
 
 本文构建如下空间杜宾模型：
 
-$ Y_(i t) = rho W Y_(i t) + beta_1 X_(i t) + beta_2 W X_(i t) + mu_i + lambda_t + epsilon_(i t) $
+$ Y_(i t) = & rho W Y_(i t) + beta_1 X_(i t) + beta_2 W X_(i t) \
+          & + mu_i + lambda_t + epsilon_(i t) $
 
 其中，$Y_(i t)$为城市$i$在$t$期的创新效率值，$X_(i t)$为核心解释变量数字经济发展指数，$W$为空间权重矩阵，$rho$为空间自回归系数，$mu_i$和$lambda_t$分别为个体固定效应和时间固定效应。
 
