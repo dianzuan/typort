@@ -70,6 +70,27 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
     // table row that text-dedup can miss when a narrow column wrapped a cell
     // (the wrap truncates the cell so it no longer substring-matches the model).
     let table_cell_texts = collect_table_cell_texts(doc);
+    // Whitespace-cancelled text of every emitted heading. A paged heading line
+    // carries Typst's own computed number ("三、", "1.1", "十六、", …) exactly as the
+    // emitted heading paragraph does — the number comes from the semantic
+    // `HeadingElem.numbers`, prepended at emission — so an exact match with all
+    // whitespace removed dedups a re-scraped heading regardless of numbering scheme
+    // or language, with no hardcoded numeral table. This is the short-line
+    // counterpart of the `full_doc_text_nospace` check below, which the `!short_line`
+    // gate skips (a short heading numbered outside any fixed table would otherwise be
+    // re-injected as a duplicate orphan).
+    let heading_texts_nospace: Vec<String> = doc
+        .body
+        .elements
+        .iter()
+        .filter_map(|e| match e {
+            BlockElement::Paragraph(p) if matches!(p.style, Some(ParagraphStyle::Heading(_))) => {
+                let t = cancel_whitespace(&strip_math_italic(&p.text_content()));
+                (!t.is_empty()).then_some(t)
+            }
+            _ => None,
+        })
+        .collect();
 
     let mut exclude_text = extract_header_footer_text(doc);
     for footnote in &doc.footnotes {
@@ -123,7 +144,6 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
         let line_normalized = strip_cjk_spaces_str(&line.text);
         let line_demath = strip_math_italic(&line.text);
         let line_stripped = strip_visual_markers(&line.text);
-        let line_no_numbering = strip_heading_numbering(&line.text);
         let line_demath_nospace = line_demath.replace(' ', "");
         // Short lines (< 6 chars) can match as false-positive substrings in
         // longer paragraphs (e.g. author name "作者甲" inside author bio).
@@ -145,7 +165,7 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
                     || full_doc_text.contains(&line_stripped)
                     || full_doc_text.contains(&line_demath)
                     || full_doc_text_nospace.contains(&line_demath_nospace)))
-            || (!line_no_numbering.is_empty() && full_doc_text.contains(&line_no_numbering))
+            || line_matches_emitted_heading(&line.text, &heading_texts_nospace)
             || exclude_text.contains(&line.text)
         {
             continue;
@@ -218,13 +238,15 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
         if strip_citation_markers(&line.text).trim().is_empty() {
             continue;
         }
-        // CJK-projection match: strip citation markers and a leading heading
-        // number, then project to CJK ideographs and treat the line as already
-        // present when that projection is a contiguous substring of the document.
-        // This catches body lines the checks above miss because their prose is
-        // split by OMML math / superscript citations (which never byte-match).
+        // CJK-projection match: strip citation markers, then project to CJK
+        // ideographs and treat the line as already present when that projection is a
+        // contiguous substring of the document. This catches body lines the checks
+        // above miss because their prose is split by OMML math / superscript
+        // citations (which never byte-match). A heading number is left in place —
+        // it projects into the CJK string identically on both the paged and emitted
+        // sides (e.g. "三、引言" → "三引言"), so it never defeats the match.
         {
-            let norm = strip_leading_heading_number(&strip_citation_markers(&line.text));
+            let norm = strip_citation_markers(&line.text);
             let line_cjk: String = norm.chars().filter(|c| is_cjk_ideograph(*c)).collect();
             let cjk_len = line_cjk.chars().count();
             let has_math = line.text.chars().any(|c| {
@@ -478,43 +500,22 @@ fn strip_math_italic(text: &str) -> String {
         .collect()
 }
 
-/// Strip common Chinese heading numbering prefixes for fuzzy matching.
-/// Patterns: "一、", "（一）", "1. ", "第一章 " etc.
-fn strip_heading_numbering(text: &str) -> String {
-    let trimmed = text.trim();
-    // "一、引言" → "引言", "二、文献综述" → "文献综述"
-    let cn_nums = [
-        "一", "二", "三", "四", "五", "六", "七", "八", "九", "十", "十一", "十二", "十三", "十四",
-        "十五",
-    ];
-    for num in &cn_nums {
-        let prefix = format!("{num}、");
-        if let Some(rest) = trimmed.strip_prefix(&prefix) {
-            return rest.trim().to_string();
-        }
-        let prefix = format!("（{num}）");
-        if let Some(rest) = trimmed.strip_prefix(&prefix) {
-            return rest.trim().to_string();
-        }
-        // With space after prefix: "一、 引言"
-        let prefix = format!("{num}、 ");
-        if let Some(rest) = trimmed.strip_prefix(&prefix) {
-            return rest.trim().to_string();
-        }
-        let prefix = format!("（{num}） ");
-        if let Some(rest) = trimmed.strip_prefix(&prefix) {
-            return rest.trim().to_string();
-        }
-    }
-    // Arabic number prefixes: "1. ", "2. ", "1 ", etc.
-    if let Some(rest) = trimmed.strip_prefix(|c: char| c.is_ascii_digit()) {
-        let rest = rest.strip_prefix('.').unwrap_or(rest);
-        let rest = rest.strip_prefix(' ').unwrap_or(rest);
-        if !rest.is_empty() {
-            return rest.to_string();
-        }
-    }
-    String::new()
+/// Cancel every whitespace character, so a paged render and the emitted text of the
+/// same heading compare equal despite the `format!("{numbers} ")` space (and any
+/// layout spacing) between a heading's number and its title.
+fn cancel_whitespace(text: &str) -> String {
+    text.chars().filter(|c| !c.is_whitespace()).collect()
+}
+
+/// True when a paged line is a re-scraped emitted heading. The emitted heading
+/// already carries Typst's computed number (from the semantic `HeadingElem`), so an
+/// exact whitespace-cancelled match against the emitted heading texts dedups the line
+/// for any numbering scheme or language — replacing the old hardcoded Chinese-numeral
+/// prefix stripping. Exact (not substring) match keeps it from ever suppressing body
+/// prose that merely contains a short heading's words.
+fn line_matches_emitted_heading(line: &str, heading_texts_nospace: &[String]) -> bool {
+    let line_nospace = cancel_whitespace(&strip_math_italic(line));
+    !line_nospace.is_empty() && heading_texts_nospace.iter().any(|h| h == &line_nospace)
 }
 
 /// Whether `c` is a CJK ideograph (the ranges used for projection/fragments).
@@ -547,25 +548,6 @@ fn strip_citation_markers(text: &str) -> String {
         i += 1;
     }
     out
-}
-
-/// Strip a leading heading-number prefix ("三、", "(三)" or "（三）"), returning the
-/// remainder. Unlike [`strip_heading_numbering`], the input is returned unchanged
-/// (not emptied) when there is no such prefix, so it is safe on ordinary prose.
-fn strip_leading_heading_number(text: &str) -> String {
-    const CN_NUMS: [&str; 15] = [
-        "一", "二", "三", "四", "五", "六", "七", "八", "九", "十", "十一", "十二", "十三", "十四",
-        "十五",
-    ];
-    let t = text.trim_start();
-    for num in CN_NUMS {
-        for prefix in [format!("{num}、"), format!("({num})"), format!("（{num}）")] {
-            if let Some(rest) = t.strip_prefix(&prefix) {
-                return rest.trim_start().to_string();
-            }
-        }
-    }
-    t.to_string()
 }
 
 /// Extract contiguous CJK ideograph runs of at least `min_len` characters.

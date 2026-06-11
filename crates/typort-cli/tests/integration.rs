@@ -197,6 +197,74 @@ fn recovery_does_not_inject_citation_or_duplicate_orphans() {
 }
 
 #[test]
+fn recovery_dedups_heading_with_number_beyond_old_table() {
+    // Regression for recover_missing_content (recovery.rs): a SHORT heading whose
+    // Typst-computed number is outside the old hardcoded Chinese-numeral table
+    // (一..十五) — here "十六、讨论" / "十七、综述" — was re-scraped from page
+    // geometry and injected as a duplicate orphan, because the short-line (<6 char)
+    // gate skipped the whitespace-cancelled full-text dedup and the numeral table
+    // capped at 十五. The fix dedups heading lines against the emitted heading text
+    // (which carries the same Typst number), language-agnostically — no numeral
+    // table. See tests/fixtures/edge_recovery_heading_beyond_table.typ.
+    let doc_xml = fixture_doc_xml("edge_recovery_heading_beyond_table");
+
+    // Each paragraph's concatenated w:t text.
+    let para_texts: Vec<String> = doc_xml
+        .match_indices("<w:p>")
+        .map(|(start, _)| {
+            let end = doc_xml[start..]
+                .find("</w:p>")
+                .map_or(doc_xml.len(), |e| start + e);
+            let block = &doc_xml[start..end];
+            let mut t = String::new();
+            let mut rest = block;
+            while let Some(o) = rest.find("<w:t") {
+                let after = &rest[o..];
+                if let Some(gt) = after.find('>') {
+                    let content = &after[gt + 1..];
+                    if let Some(close) = content.find("</w:t>") {
+                        t.push_str(&content[..close]);
+                        rest = &content[close..];
+                        continue;
+                    }
+                }
+                break;
+            }
+            t
+        })
+        .collect();
+
+    let para_count = |needle: &str| para_texts.iter().filter(|t| t.contains(needle)).count();
+    assert_eq!(
+        para_count("讨论"),
+        1,
+        "heading '十六、讨论' must not be duplicated as a recovery orphan: {para_texts:?}"
+    );
+    assert_eq!(
+        para_count("综述"),
+        1,
+        "heading '十七、综述' must not be duplicated as a recovery orphan: {para_texts:?}"
+    );
+}
+
+#[test]
+fn recovery_keeps_centered_enumerated_line_not_over_suppressed() {
+    // Regression for recover_missing_content (recovery.rs) "site 2": the old code
+    // stripped a hardcoded Chinese-numeral prefix before the CJK-projection dedup,
+    // which OVER-SUPPRESSED a legitimate layout-only centered line ("三、甲乙丙，丁戊己")
+    // whose number-stripped projection collided with body prose ("甲乙丙丁戊己").
+    // Removing the strip keeps the numeral in the projection, so the distinct
+    // centered line survives. The centered line is the only place with the
+    // comma-bearing "甲乙丙，丁戊己", so its presence proves it was not deleted.
+    // See tests/fixtures/edge_recovery_enumerated_centered_line.typ.
+    let doc_xml = fixture_doc_xml("edge_recovery_enumerated_centered_line");
+    assert!(
+        doc_xml.contains("三、甲乙丙"),
+        "the centered enumerated line must be preserved, not over-suppressed by recovery:\n{doc_xml}"
+    );
+}
+
+#[test]
 fn table_cell_inline_math_is_spliced_not_dropped() {
     // Regression: inline equations inside table cells are `equation` Tag siblings
     // between the cell's <p> text fragments. convert_cell_paragraphs only consumed
