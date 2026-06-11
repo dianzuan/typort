@@ -156,7 +156,7 @@ crates/
 | `convert/table_width.rs` | Turns a `TableElem`'s declared column `TrackSizings` (fr/rel/auto) into per-cell `w:tcW` percentages. |
 | `convert/bibliography.rs` | Citation data via the semantic `BibliographyElem` (+ re-parsing `.bib`/`.yml` with hayagriva). |
 | `convert/footnote.rs` | Footnote bodies from the HTML `doc-endnotes` section. |
-| `convert/image.rs` | Embedded image bytes from Paged frames. |
+| `convert/image.rs` | Embedded image bytes from Paged frames; rasterizes SVG `<img>` (via `resvg`) and whole drawing canvases — CeTZ plots/diagrams, detected by a Bézier-curve signature — to PNG (via `typst-render`). |
 | `convert/inline.rs` | Inline formatting (bold/italic/…) → styled runs. |
 
 ## The IR: `typort_ooxml::Document`
@@ -167,7 +167,8 @@ share.
 
 - `Document` — root: body elements, footnotes, page settings, document style,
   header/footer, page numbering, citation sources, metadata.
-- `BlockElement` — `Paragraph | Table`.
+- `BlockElement` — `Paragraph | Table | BibliographyBlock` (the bibliography
+  section, wrapped in an SDT carrying a `BIBLIOGRAPHY` field code).
 - `Paragraph` — inline runs + optional `ParagraphStyle` + alignment/indent/spacing.
 - `InlineElement` — `Text(Run)`, images, footnote refs, breaks, fields/bookmarks.
 - `Run` — a styled text span (bold/italic/underline/color/font/size/script).
@@ -197,7 +198,10 @@ the introspector, not from rendered glyphs) into OMML, which keeps equations
 (`m:rad`), n-ary operators (`m:nary`), delimiters (`m:d`), matrices (`m:m`),
 aligned equations (`m:eqArr`), accents (`m:acc`), bars (`m:bar`), group characters
 / over-under braces (`m:groupChr`), named functions (`m:func`), limits
-(`m:limLow`/`m:limUpp`), phantoms (`m:phant`), and boxes (`m:box`).
+(`m:limLow`/`m:limUpp`), phantoms (`m:phant`), and boxes (`m:box`). Math **style
+wrappers** (e.g. `bold`, `bb`, `cal`, `upright`, `dif`) are resolved to their
+styled Unicode glyphs via the `codex` crate Typst itself uses (`bb(R)` → ℝ,
+`bold(e)` → 𝒆), with an explicit `m:sty="p"` forcing upright for `upright`/`dif`.
 
 An n-ary operator's operand (the integrand/summand) is bound into its `<m:e>`
 body rather than left as detached siblings: Typst stores the operand as flat

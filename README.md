@@ -35,11 +35,12 @@ input.typ ──► Typst compiler ──► HtmlDocument (structure)
 |---------|--------|
 | Headings (h1–h6) | Heading styles with detected font sizes |
 | Bold, italic, underline, strikethrough, highlight, superscript, subscript, small caps | Full formatting |
-| Math (inline & display) | OMML: fractions, scripts, pre-scripts, roots, n-ary operators (sum/integral/…) with operands, named functions, limits, matrices, vectors, accents, bars, cases, aligned equations, over/under braces & brackets |
-| Tables | colspan, rowspan, multi-paragraph cells, nested tables, cell shading, dashed borders |
+| Math (inline & display) | OMML: fractions, scripts, pre-scripts, roots, n-ary operators (sum/integral/…) with operands, named functions, limits, matrices, vectors, accents, bars, cases, aligned equations, over/under braces & brackets; styled variants (bold/blackboard/calligraphic/upright) rendered as styled Unicode glyphs |
+| Tables | colspan, rowspan, multi-paragraph cells, nested tables, cell shading; proportional column widths from `(1fr, 2fr, …)`/relative tracks; three-line vs boxed borders detected from drawn rules |
 | Lists | Ordered/unordered, nested up to 5+ levels, contextual spacing |
+| Paragraph indentation | Hanging & first-line indent honored from `#set par(hanging-indent:, first-line-indent:)` (incl. `(amount, all: true)`) |
 | Footnotes | Including inside table cells, with formatting and circled numbers |
-| Images | PNG, JPG embedded; SVG rasterized via resvg |
+| Images | PNG, JPG embedded; SVG rasterized via resvg; vector drawings (CeTZ plots, diagrams) rasterized via typst-render |
 | Code blocks | Detected monospace font, light-gray background shading |
 | Cross-references | `@label` to bookmarks + REF field codes |
 | Hyperlinks | With preserved formatting (bold links, etc.) |
