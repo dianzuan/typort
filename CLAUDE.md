@@ -91,11 +91,14 @@ anyone "simplify" it back to a dual-compilation description. Full detail in
   UPDATE_SNAPSHOTS=1 cargo test -p typort --test integration golden
   git diff tests/snapshots
   ```
-  The set is curated for CI-safety: only fixtures whose fonts are embedded,
-  constant, or **declared in source** are snapshotted — fixtures relying on a
-  *detected* system CJK font (the World loads system fonts) are excluded, because
-  the font name would differ between machines. Don't snapshot a CJK fixture that
-  doesn't `#set text(font: …)`.
+  The set is curated for CI-safety: only fixtures whose fonts are **embedded**
+  (Libertinus) or **constant** ("Courier New") are snapshotted. **Declaring a CJK
+  font in source is *not* enough** — it pins the font name in the output, but
+  properties detected from rendering (bold weight, size) still need that font
+  *installed*, and CI installs no CJK fonts (the World loads system fonts). So a
+  CJK fixture flakes on CI even with `#set text(font: …)` — e.g. `complex_paper`
+  declares "Noto Serif SC", which CI lacks, so its author-name bold detection
+  diverged. **Don't byte-snapshot any CJK fixture**; cover it with substring tests.
 - **Visual-regression tests** (`visual_regression_*`) render the docx via
   LibreOffice/pdftoppm/ImageMagick and RMSE-compare against Typst's own PDF. They
   are `#[ignore]`d (those tools aren't in CI) but **panic loudly on a missing

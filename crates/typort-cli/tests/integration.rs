@@ -5698,14 +5698,17 @@ fn complex_paper_handwritten_refs_get_hanging_indent() {
 // pretty-printer, no new dependency.
 //
 // CURATION — CI-safety: the World loads system fonts (world.rs
-// `include_system_fonts(true)`), so a fixture whose CJK font is *detected* from
-// rendering (not declared) pins a machine-specific font name (e.g. "KaiTi" on
-// the dev box, something else on CI) and would flake. The set below is therefore
-// limited to fixtures whose fonts are embedded (Libertinus), constant ("Courier
-// New"), or DECLARED in source (complex_paper → "Noto Serif SC", read from the
-// AST and thus environment-independent). CJK fixtures that rely on *detected*
-// fonts (hello, issue_cjk_heading_numbering, edge_three_line_table) are
-// deliberately excluded — they are covered by the substring-based tests above.
+// `include_system_fonts(true)`). Declaring a CJK font in source pins the font
+// NAME in the output (environment-independent), but it is NOT sufficient for a
+// byte-exact snapshot: properties DETECTED from rendering — bold weight, size —
+// still require that font to be INSTALLED on the runner. complex_paper declares
+// "Noto Serif SC", yet CI (which installs no CJK fonts) substitutes it and no
+// longer detects the author name as bold, so its snapshot flaked. The set below
+// is therefore limited to fixtures whose fonts are embedded (Libertinus) or
+// constant ("Courier New"). CJK fixtures — whether the font is declared or
+// detected (complex_paper, hello, issue_cjk_heading_numbering,
+// edge_three_line_table) — are excluded; they are covered by the substring-based
+// tests above.
 //
 // Regenerate after an intentional change, then review the diff before committing:
 //   UPDATE_SNAPSHOTS=1 cargo test -p typort --test integration golden
@@ -5791,7 +5794,6 @@ mod golden {
         };
     }
 
-    golden_test!(golden_complex_paper, "complex_paper");
     golden_test!(golden_aligned_equations, "aligned_equations");
     golden_test!(golden_inline_math_in_text, "inline_math_in_text");
     golden_test!(golden_edge_complex_table, "edge_complex_table");
