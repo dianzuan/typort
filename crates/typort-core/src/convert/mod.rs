@@ -2524,12 +2524,48 @@ fn is_pagebreak_call(node: &typst_syntax::SyntaxNode) -> bool {
 
 /// Walk the AST; for each `#pagebreak()`, record the trimmed text of the markup
 /// node immediately before it (its anchor paragraph).
+/// True if `node` is a list/enum/term item (`+ …`, `- …`, `/ term: …`). Its visible
+/// text lives in a nested `Markup`, not as a direct `Text` child of the surrounding
+/// markup, so it must be descended into to find the anchor at the end of a list.
+fn is_list_item(node: &typst_syntax::SyntaxNode) -> bool {
+    matches!(
+        node.kind(),
+        typst_syntax::SyntaxKind::EnumItem
+            | typst_syntax::SyntaxKind::ListItem
+            | typst_syntax::SyntaxKind::TermItem
+    )
+}
+
+/// The last non-empty trimmed `Text` leaf within `node`, in document order — used to
+/// anchor a break to the end of a list item.
+fn last_text_in(node: &typst_syntax::SyntaxNode) -> Option<String> {
+    let mut found = None;
+    for child in node.children() {
+        if child.kind() == typst_syntax::SyntaxKind::Text {
+            let t = child.text().trim().to_string();
+            if !t.is_empty() {
+                found = Some(t);
+            }
+        } else if let Some(t) = last_text_in(child) {
+            found = Some(t);
+        }
+    }
+    found
+}
+
 fn collect_pagebreak_anchors(node: &typst_syntax::SyntaxNode, out: &mut Vec<String>) {
     let mut last_text: Option<String> = None;
     for child in node.children() {
         if child.kind() == typst_syntax::SyntaxKind::Text {
             let t = child.text().trim().to_string();
             if !t.is_empty() {
+                last_text = Some(t);
+            }
+        } else if is_list_item(child) {
+            // A list item's text is in a nested Markup, not a direct Text child, so a
+            // following break must anchor to the item's last text — otherwise a break
+            // after a list lands before it (on the prior plain paragraph).
+            if let Some(t) = last_text_in(child) {
                 last_text = Some(t);
             }
         } else if is_pagebreak_call(child)
@@ -2570,6 +2606,12 @@ fn collect_colbreak_anchors(node: &typst_syntax::SyntaxNode, out: &mut Vec<Strin
         if child.kind() == typst_syntax::SyntaxKind::Text {
             let t = child.text().trim().to_string();
             if !t.is_empty() {
+                last_text = Some(t);
+            }
+        } else if is_list_item(child) {
+            // See `collect_pagebreak_anchors`: a list item's text is nested, so anchor
+            // a following colbreak to the item's last text, not the prior paragraph.
+            if let Some(t) = last_text_in(child) {
                 last_text = Some(t);
             }
         } else if is_colbreak_call(child)

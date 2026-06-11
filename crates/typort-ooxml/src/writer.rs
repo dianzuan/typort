@@ -1358,6 +1358,17 @@ fn generate_numbering_xml(writer: &mut Writer<&mut Vec<u8>>, doc: &Document) -> 
                         num.create_element("w:abstractNumId")
                             .with_attribute(("w:val", abs_id_str.as_str()))
                             .write_empty()?;
+                        // Each top-level list is an independent instance: override the
+                        // level-0 start so Word restarts at 1, rather than continuing the
+                        // shared abstractNum's counter across distinct lists.
+                        num.create_element("w:lvlOverride")
+                            .with_attribute(("w:ilvl", "0"))
+                            .write_inner_content(|ovr| {
+                                ovr.create_element("w:startOverride")
+                                    .with_attribute(("w:val", "1"))
+                                    .write_empty()?;
+                                Ok(())
+                            })?;
                         Ok(())
                     })?;
             }

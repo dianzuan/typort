@@ -6011,6 +6011,50 @@ fn table_cell_alignment_from_typst_reaches_word() {
 }
 
 #[test]
+fn pagebreak_after_a_list_lands_after_the_list() {
+    // A #pagebreak() after an ordered list (before the next heading) must land after
+    // the LAST list item, not before the list — the anchor must descend into the
+    // nested list-item markup. See tests/fixtures/pagebreak_after_list.typ.
+    let doc_xml = fixture_doc_xml("pagebreak_after_list");
+    let last_item = doc_xml
+        .find("Last recommendation item.")
+        .expect("last item present");
+    let brk = doc_xml
+        .find(r#"<w:br w:type="page"/>"#)
+        .expect("page break present");
+    let refs = doc_xml
+        .find("References")
+        .expect("References heading present");
+    assert!(
+        last_item < brk && brk < refs,
+        "page break must sit after the last list item and before References \
+         (last_item={last_item}, break={brk}, refs={refs})"
+    );
+}
+
+#[test]
+fn separate_ordered_lists_each_restart_at_one() {
+    // Two distinct ordered lists must each restart at 1 — the second must not
+    // continue (1,2,3 then 4,5,6). They share one abstract numbering format, so
+    // every <w:num> instance needs a level-0 startOverride or Word continues the
+    // shared counter across lists. See tests/fixtures/two_ordered_lists.typ.
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/two_ordered_lists.typ"))
+            .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let numbering = std::io::read_to_string(reader.by_name("word/numbering.xml").unwrap()).unwrap();
+    let overrides = numbering.matches(r#"<w:startOverride w:val="1"/>"#).count();
+    assert!(
+        overrides >= 2,
+        "each ordered list's <w:num> must carry a level-0 startOverride so it restarts \
+         at 1 (two lists -> >= 2 overrides); found {overrides}:\n{numbering}"
+    );
+}
+
+#[test]
 fn table_cells_do_not_inherit_body_first_line_indent() {
     // Table cells are their own context — they must not take the body's
     // first-line indent (which they would inherit from the Normal style).
