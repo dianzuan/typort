@@ -484,8 +484,13 @@ fn walk_tags(children: &[HtmlNode], ctx: &mut WalkCtx) {
                             i = end;
                         }
                         "image" => {
-                            // Consume the next image from the queue extracted from PagedDocument
-                            if let Some(img_data) = ctx.image_queue.pop_front() {
+                            // Consume the next image from the queue extracted from
+                            // PagedDocument. An empty placeholder (unencodable image)
+                            // still consumes its slot to keep the FIFO aligned, but
+                            // adds nothing.
+                            if let Some(img_data) = ctx.image_queue.pop_front()
+                                && !img_data.bytes.is_empty()
+                            {
                                 let mut para = Paragraph::new();
                                 para.add_image(img_data);
                                 ctx.doc.add_paragraph(para);
@@ -1137,8 +1142,11 @@ fn handle_inline_tag(
             find_tag_end(children, i, start_loc)
         }
         "image" => {
-            // Inline image within a paragraph
-            if let Some(img_data) = ctx.image_queue.pop_front() {
+            // Inline image within a paragraph. An empty placeholder still consumes
+            // its FIFO slot (keeping alignment) but adds nothing.
+            if let Some(img_data) = ctx.image_queue.pop_front()
+                && !img_data.bytes.is_empty()
+            {
                 para.add_image(img_data);
             }
             find_tag_end(children, i, tag.location())

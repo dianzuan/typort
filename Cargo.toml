@@ -31,6 +31,10 @@ typst-render = "0.14.2"
 # SVG rasterization
 resvg = { version = "0.45", default-features = false }
 tiny-skia = "0.11"
+# Pinned to the version typst-library 0.14.2 decodes rasters with, so the
+# `DynamicImage` types match. Only the PNG encoder is needed (re-encoding
+# already-decoded GIF/WebP/Pixel rasters to PNG).
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 # OOXML generation
 quick-xml = "0.37"

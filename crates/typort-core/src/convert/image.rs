@@ -16,9 +16,16 @@ fn collect_frame_images(frame: &Frame, images: &mut Vec<ImageData>) {
     for (_, item) in frame.items() {
         match item {
             FrameItem::Image(img, size, _) => {
-                if let Some(data) = convert_typst_image(img, size) {
-                    images.push(data);
-                }
+                // Always push one entry per image so the `<img>` FIFO stays aligned
+                // with the HTML `<img>` tags. An unencodable image (e.g. an embedded
+                // PDF) becomes an empty placeholder the consumer skips — never a
+                // silent positional shift onto the wrong caption.
+                images.push(convert_typst_image(img, size).unwrap_or_else(|| ImageData {
+                    bytes: Vec::new(),
+                    format: ImageFormat::Png,
+                    width_emu: (size.x.to_pt() * 12700.0) as u64,
+                    height_emu: (size.y.to_pt() * 12700.0) as u64,
+                }));
             }
             // Skip drawing canvases: they are rasterized whole by
             // `extract_figure_rasters_from_paged`, so don't also pull any raster
@@ -114,19 +121,26 @@ fn convert_typst_image(
 
     match img.kind() {
         ImageKind::Raster(raster) => {
-            use typst_library::visualize::ExchangeFormat;
-            let bytes = raster.data().to_vec();
-            let format = match raster.format() {
-                typst_library::visualize::RasterFormat::Exchange(ExchangeFormat::Png) => {
-                    ImageFormat::Png
+            use typst_library::visualize::{ExchangeFormat, RasterFormat};
+            // Word embeds PNG/JPEG directly; for GIF/WebP/Pixel (which Word can't
+            // embed) re-encode the already-decoded image to PNG. Returning None would
+            // drop the frame and desync the `<img>` FIFO onto the wrong captions.
+            let (bytes, format) = match raster.format() {
+                RasterFormat::Exchange(ExchangeFormat::Png) => {
+                    (raster.data().to_vec(), ImageFormat::Png)
                 }
-                typst_library::visualize::RasterFormat::Exchange(ExchangeFormat::Jpg) => {
-                    ImageFormat::Jpeg
+                RasterFormat::Exchange(ExchangeFormat::Jpg) => {
+                    (raster.data().to_vec(), ImageFormat::Jpeg)
                 }
-                typst_library::visualize::RasterFormat::Exchange(
-                    ExchangeFormat::Gif | ExchangeFormat::Webp,
-                )
-                | typst_library::visualize::RasterFormat::Pixel(_) => return None,
+                RasterFormat::Exchange(ExchangeFormat::Gif | ExchangeFormat::Webp)
+                | RasterFormat::Pixel(_) => {
+                    let mut png = Vec::new();
+                    raster
+                        .dynamic()
+                        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+                        .ok()?;
+                    (png, ImageFormat::Png)
+                }
             };
             Some(ImageData {
                 bytes,

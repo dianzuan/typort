@@ -2658,6 +2658,7 @@ name = "typort-core"
 version = "0.1.1"
 dependencies = [
  "hayagriva",
+ "image",
  "resvg",
  "time",
  "tiny-skia",

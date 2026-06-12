@@ -6066,6 +6066,31 @@ fn citations_link_to_their_bibliography_entry() {
 }
 
 #[test]
+fn mixed_image_formats_stay_aligned() {
+    // A GIF (unsupported raster) between two SVGs must not desync the image FIFO:
+    // dropping it used to shift every later image onto the wrong caption. Re-encoding
+    // it to PNG keeps all three figures' images. See edge_image_format_mix.typ.
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/edge_image_format_mix.typ"))
+            .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let names: Vec<String> = (0..reader.len())
+        .map(|i| reader.by_index(i).unwrap().name().to_string())
+        .collect();
+    let media = names
+        .iter()
+        .filter(|n| n.starts_with("word/media/"))
+        .count();
+    assert_eq!(
+        media, 3,
+        "all three figure images must be embedded (the GIF re-encoded), got {media}: {names:?}"
+    );
+}
+
+#[test]
 fn separate_ordered_lists_each_restart_at_one() {
     // Two distinct ordered lists must each restart at 1 — the second must not
     // continue (1,2,3 then 4,5,6). They share one abstract numbering format, so
