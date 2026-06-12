@@ -648,7 +648,12 @@ fn handle_html_element(elem: &HtmlElement, ctx: &mut WalkCtx) {
                 let start_idx = ctx.doc.body.elements.len();
                 walk_tags(&elem.children, ctx);
                 let bib_elements: Vec<_> = ctx.doc.body.elements.drain(start_idx..).collect();
+                // Each reference `<li id="loc-N">` becomes one entry paragraph in
+                // order; bookmark each by its id so citations can link to it.
+                let mut li_ids = Vec::new();
+                collect_li_ids(&elem.children, &mut li_ids);
                 let mut bib_paragraphs = Vec::new();
+                let mut entry_idx = 0;
                 for element in bib_elements {
                     match element {
                         BlockElement::Paragraph(p) => {
@@ -663,6 +668,11 @@ fn handle_html_element(elem: &HtmlElement, ctx: &mut WalkCtx) {
                                 // so Word doesn't prepend a redundant bullet; the
                                 // hanging indent above gives the reference layout.
                                 bp.list_info = None;
+                                if let Some(Some(id)) = li_ids.get(entry_idx) {
+                                    let bk_id = ctx.doc.next_bookmark_id();
+                                    bp.add_bookmark_at_start(bk_id, sanitize_anchor(id));
+                                }
+                                entry_idx += 1;
                                 bib_paragraphs.push(bp);
                             }
                         }
@@ -1152,7 +1162,17 @@ fn handle_inline_tag(
                     // from a <sup> in the rendered ref, not assumed from the style.
                     let mut run = Run::new(&display);
                     run.superscript = subtree_has_element(&children[i + 1..end], "sup");
-                    para.push_run(run);
+                    // Clickable cross-reference to the reference entry: Typst's HTML
+                    // links the marker to its bibliography entry via
+                    // `<a role="doc-biblioref" href="#loc-N">`; the bibliography side
+                    // bookmarks each entry by the same id, so link the marker there.
+                    match first_biblioref_href(&children[i + 1..end]) {
+                        Some(href) => para.add_internal_link(
+                            sanitize_anchor(href.trim_start_matches('#')),
+                            vec![run],
+                        ),
+                        None => para.push_run(run),
+                    }
                 } else {
                     para.add_field_ref(target_label, display);
                 }
@@ -2836,6 +2856,58 @@ pub(super) fn get_attr_value(elem: &HtmlElement, attr_name: &str) -> Option<Stri
         }
     }
     None
+}
+
+/// Sanitize an HTML id into a valid Word bookmark/anchor name (letters, digits and
+/// underscore; not starting with a digit; <= 40 chars).
+fn sanitize_anchor(id: &str) -> String {
+    let mut out: String = id
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if out.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+        out.insert(0, '_');
+    }
+    out.truncate(40);
+    out
+}
+
+/// The `href` of the first `<a role="doc-biblioref">` within `nodes` — the link from
+/// a citation marker to its bibliography entry.
+fn first_biblioref_href(nodes: &[HtmlNode]) -> Option<String> {
+    for node in nodes {
+        if let HtmlNode::Element(elem) = node {
+            if tag_name(elem) == "a"
+                && has_attr_value(elem, "role", "doc-biblioref")
+                && let Some(href) = get_attr_value(elem, "href")
+            {
+                return Some(href);
+            }
+            if let Some(href) = first_biblioref_href(&elem.children) {
+                return Some(href);
+            }
+        }
+    }
+    None
+}
+
+/// Collect each `<li>`'s `id` attribute within `nodes`, in document order — the
+/// bibliography entries' anchors.
+fn collect_li_ids(nodes: &[HtmlNode], out: &mut Vec<Option<String>>) {
+    for node in nodes {
+        if let HtmlNode::Element(elem) = node {
+            if tag_name(elem) == "li" {
+                out.push(get_attr_value(elem, "id"));
+            }
+            collect_li_ids(&elem.children, out);
+        }
+    }
 }
 
 /// Get concatenated text content from children.

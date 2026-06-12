@@ -6033,6 +6033,39 @@ fn pagebreak_after_a_list_lands_after_the_list() {
 }
 
 #[test]
+fn citations_link_to_their_bibliography_entry() {
+    // @key citations must become clickable cross-references to the matching
+    // reference entry: each bib entry gets a bookmark, each in-text citation an
+    // internal hyperlink (w:anchor) pointing at it. Typst's HTML already carries the
+    // pairing (citation href="#loc-N" <-> entry id="loc-N"). See
+    // tests/fixtures/bibliography_basic.typ.
+    let doc_xml = fixture_doc_xml("bibliography_basic");
+    let vals = |pre: &str| -> Vec<String> {
+        doc_xml
+            .match_indices(pre)
+            .filter_map(|(i, _)| {
+                doc_xml[i + pre.len()..]
+                    .split('"')
+                    .next()
+                    .map(str::to_string)
+            })
+            .collect()
+    };
+    let anchors = vals(r#"<w:hyperlink w:anchor=""#);
+    let bookmarks: std::collections::HashSet<String> = vals(r#"w:name=""#).into_iter().collect();
+    assert!(
+        !anchors.is_empty(),
+        "@key citations must become internal hyperlinks:\n{doc_xml}"
+    );
+    for a in &anchors {
+        assert!(
+            bookmarks.contains(a),
+            "citation anchor {a:?} has no matching bibliography bookmark; bookmarks={bookmarks:?}"
+        );
+    }
+}
+
+#[test]
 fn separate_ordered_lists_each_restart_at_one() {
     // Two distinct ordered lists must each restart at 1 — the second must not
     // continue (1,2,3 then 4,5,6). They share one abstract numbering format, so

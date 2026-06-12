@@ -15,12 +15,44 @@
         <w:ind w:firstLine="0"/>
       </w:pPr>
       <w:r>
-        <w:t xml:space="preserve">This is an example document that cites a journal article [1], a book [2], and a conference paper [3].</w:t>
+        <w:t xml:space="preserve">This is an example document that cites a journal article </w:t>
+      </w:r>
+      <w:hyperlink w:anchor="loc_4">
+        <w:r>
+          <w:t xml:space="preserve">[1]</w:t>
+        </w:r>
+      </w:hyperlink>
+      <w:r>
+        <w:t xml:space="preserve">, a book </w:t>
+      </w:r>
+      <w:hyperlink w:anchor="loc_5">
+        <w:r>
+          <w:t xml:space="preserve">[2]</w:t>
+        </w:r>
+      </w:hyperlink>
+      <w:r>
+        <w:t xml:space="preserve">, and a conference paper </w:t>
+      </w:r>
+      <w:hyperlink w:anchor="loc_6">
+        <w:r>
+          <w:t xml:space="preserve">[3]</w:t>
+        </w:r>
+      </w:hyperlink>
+      <w:r>
+        <w:t xml:space="preserve">.</w:t>
       </w:r>
     </w:p>
     <w:p>
       <w:r>
-        <w:t xml:space="preserve">Multiple citations can appear together [1], [2].</w:t>
+        <w:t xml:space="preserve">Multiple citations can appear together </w:t>
+      </w:r>
+      <w:hyperlink w:anchor="loc_4">
+        <w:r>
+          <w:t xml:space="preserve">[1], [2]</w:t>
+        </w:r>
+      </w:hyperlink>
+      <w:r>
+        <w:t xml:space="preserve">.</w:t>
       </w:r>
     </w:p>
     <w:p>
@@ -36,7 +68,15 @@
         <w:ind w:firstLine="0"/>
       </w:pPr>
       <w:r>
-        <w:t xml:space="preserve">As described by [1], the methodology is sound.</w:t>
+        <w:t xml:space="preserve">As described by </w:t>
+      </w:r>
+      <w:hyperlink w:anchor="loc_4">
+        <w:r>
+          <w:t xml:space="preserve">[1]</w:t>
+        </w:r>
+      </w:hyperlink>
+      <w:r>
+        <w:t xml:space="preserve">, the methodology is sound.</w:t>
       </w:r>
     </w:p>
     <w:p>
@@ -75,6 +115,8 @@
           <w:pPr>
             <w:ind w:left="440" w:hanging="440" w:firstLine="0"/>
           </w:pPr>
+          <w:bookmarkStart w:id="0" w:name="loc_4"/>
+          <w:bookmarkEnd w:id="0"/>
           <w:r>
             <w:rPr>
               <w:i/>
@@ -107,6 +149,8 @@
           <w:pPr>
             <w:ind w:left="440" w:hanging="440" w:firstLine="0"/>
           </w:pPr>
+          <w:bookmarkStart w:id="1" w:name="loc_5"/>
+          <w:bookmarkEnd w:id="1"/>
           <w:r>
             <w:rPr>
               <w:i/>
@@ -130,6 +174,8 @@
           <w:pPr>
             <w:ind w:left="440" w:hanging="440" w:firstLine="0"/>
           </w:pPr>
+          <w:bookmarkStart w:id="2" w:name="loc_6"/>
+          <w:bookmarkEnd w:id="2"/>
           <w:r>
             <w:rPr>
               <w:i/>

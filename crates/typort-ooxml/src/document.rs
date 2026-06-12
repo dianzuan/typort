@@ -136,6 +136,10 @@ pub enum InlineElement {
     },
     /// An external hyperlink using `fldSimple` with HYPERLINK field code.
     Hyperlink { url: String, runs: Vec<Run> },
+    /// An internal hyperlink (`w:hyperlink w:anchor`) to a bookmark — e.g. a
+    /// citation marker linking to its bibliography entry. The runs keep their own
+    /// styling (no Hyperlink char style), so the marker just becomes clickable.
+    InternalLink { anchor: String, runs: Vec<Run> },
     /// A page break (`w:br type="page"`).
     PageBreak,
     /// A column break (`w:br type="column"`) — `#colbreak()` in a multi-column page.
@@ -298,7 +302,8 @@ impl Paragraph {
                         }
                     }
                 }
-                InlineElement::Hyperlink { runs, .. } => {
+                InlineElement::Hyperlink { runs, .. }
+                | InlineElement::InternalLink { runs, .. } => {
                     for run in runs {
                         text.push_str(&run.text);
                     }
@@ -367,6 +372,13 @@ impl Paragraph {
         self.inlines.push(InlineElement::BookmarkEnd { id });
     }
 
+    /// Insert a zero-length bookmark at the very start of the paragraph (a
+    /// cross-reference target, e.g. a bibliography entry that citations link to).
+    pub fn add_bookmark_at_start(&mut self, id: u32, name: String) {
+        self.inlines.insert(0, InlineElement::BookmarkEnd { id });
+        self.inlines.insert(0, InlineElement::Bookmark { id, name });
+    }
+
     /// Add a cross-reference field (REF field code).
     pub fn add_field_ref(&mut self, bookmark_name: String, display_text: String) {
         self.inlines.push(InlineElement::FieldRef {
@@ -378,6 +390,13 @@ impl Paragraph {
     /// Add an external hyperlink.
     pub fn add_hyperlink(&mut self, url: String, runs: Vec<Run>) {
         self.inlines.push(InlineElement::Hyperlink { url, runs });
+    }
+
+    /// Add an internal hyperlink to a bookmark `anchor` (e.g. a citation marker
+    /// linking to its bibliography entry).
+    pub fn add_internal_link(&mut self, anchor: String, runs: Vec<Run>) {
+        self.inlines
+            .push(InlineElement::InternalLink { anchor, runs });
     }
 
     /// Add a Table of Contents field code.

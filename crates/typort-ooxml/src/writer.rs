@@ -913,6 +913,16 @@ fn write_paragraph<W: Write>(
                 InlineElement::Hyperlink { url, runs } => {
                     write_hyperlink(w, url, runs, ctx.doc_style)?;
                 }
+                InlineElement::InternalLink { anchor, runs } => {
+                    w.create_element("w:hyperlink")
+                        .with_attribute(("w:anchor", anchor.as_str()))
+                        .write_inner_content(|hw| {
+                            for run in runs {
+                                write_run(hw, run, ctx.doc_style)?;
+                            }
+                            Ok(())
+                        })?;
+                }
                 InlineElement::PageBreak => {
                     write_page_break(w)?;
                 }
