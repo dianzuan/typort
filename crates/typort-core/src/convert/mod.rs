@@ -3245,17 +3245,6 @@ fn collect_li_ids(nodes: &[HtmlNode], out: &mut Vec<Option<String>>) {
     }
 }
 
-/// Get concatenated text content from children.
-pub(super) fn get_text_content(children: &[HtmlNode]) -> Option<String> {
-    let mut text = String::new();
-    for child in children {
-        if let HtmlNode::Text(t, _) = child {
-            text.push_str(t);
-        }
-    }
-    if text.is_empty() { None } else { Some(text) }
-}
-
 // ---------------------------------------------------------------------------
 // Alignment detection (I5)
 // ---------------------------------------------------------------------------

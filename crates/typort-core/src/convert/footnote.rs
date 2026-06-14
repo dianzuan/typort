@@ -3,7 +3,7 @@ use typst::introspection::Tag;
 use typst_html::HtmlNode;
 use typst_layout::PagedDocument;
 
-use super::{get_text_content, has_attr_value, tag_name};
+use super::{has_attr_value, tag_name};
 
 /// Extract the footnote bodies from the HTML `doc-endnotes` section, add them to the
 /// document, and refine the footnote text size from the Paged render. The size is
@@ -148,6 +148,13 @@ pub(super) fn collect_footnote_inlines(
                     continue;
                 }
                 let tag = tag_name(elem);
+                // Skip the native MathML `<math>` element: typst 0.15 emits it
+                // alongside the `equation` introspection tag (handled below, which
+                // drives the OMML). Descending would emit the equation a SECOND time
+                // as literal glyph text. Mirrors the body path's `<math>` skip.
+                if tag == "math" {
+                    continue;
+                }
                 let new_bold = bold || tag == "strong" || tag == "b";
                 let new_italic = italic || tag == "em" || tag == "i";
                 let new_monospace = monospace || tag == "code";
@@ -177,16 +184,15 @@ pub(super) fn collect_footnote_inlines(
 pub(super) fn detect_footnote_format(children: &[HtmlNode], doc: &mut Document) {
     for child in children {
         if let HtmlNode::Element(elem) = child {
-            if has_attr_value(elem, "role", "doc-noteref")
-                && let Some(sup) = elem
-                    .children
-                    .iter()
-                    .find(|c| matches!(c, HtmlNode::Element(e) if tag_name(e) == "sup"))
-                && let HtmlNode::Element(sup) = sup
-                && let Some(text) = get_text_content(&sup.children)
-            {
-                let trimmed = text.trim();
-                if parse_circled_number(trimmed).is_some() {
+            if has_attr_value(elem, "role", "doc-noteref") {
+                // typst 0.15 puts the `doc-noteref` role ON the `<sup>` (whose child
+                // is `<a>N`), not on an `<a>` with a `<sup>` child as in 0.14, so a
+                // `<sup>`-child scan never matches. Read all descendant text (the
+                // number, regardless of `<sup>`/`<a>` order) and test it — the same
+                // approach `noteref_number` already uses.
+                let mut text = String::new();
+                collect_descendant_text(&elem.children, &mut text);
+                if parse_circled_number(text.trim()).is_some() {
                     doc.style.footnote_format = FootnoteFormat::CircledNumber;
                     return;
                 }

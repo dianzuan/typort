@@ -1168,6 +1168,72 @@ fn features_footnote_restart_and_font_hint() {
 }
 
 #[test]
+fn footnote_circled_numbering_format_emitted() {
+    // Regression (typst 0.15 migration): the `doc-noteref` role moved ONTO the
+    // `<sup>` element (whose child is `<a>N`), so detect_footnote_format's old
+    // `<sup>`-child scan never matched and the circled (①②③) footnote numbering
+    // format was silently dropped — Word then rendered ①②③ as 1,2,3. fn25_test
+    // declares `#set footnote(numbering: "①")`.
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/fn25_test.typ")).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let settings_xml =
+        std::io::read_to_string(reader.by_name("word/settings.xml").unwrap()).unwrap();
+    assert!(
+        settings_xml.contains("decimalEnclosedCircle"),
+        "circled footnote numbering must emit w:numFmt=decimalEnclosedCircle, got: {settings_xml}"
+    );
+}
+
+#[test]
+fn footnote_math_not_duplicated() {
+    // Regression (typst 0.15 migration): collect_footnote_inlines descended into
+    // the new native MathML `<math>` element and emitted the equation a SECOND
+    // time as literal Mathematical-Alphanumeric glyphs in a body `<w:t>` run, on
+    // top of the correct OMML. Body runs must carry no math-script glyphs (those
+    // belong only in OMML `<m:t>`).
+    let world =
+        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/edge_math_in_footnote.typ"))
+            .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let fn_xml = std::io::read_to_string(reader.by_name("word/footnotes.xml").unwrap()).unwrap();
+    assert!(
+        fn_xml.contains("<m:oMath>"),
+        "footnote math should be present as OMML, got: {fn_xml}"
+    );
+    let mut rest = fn_xml.as_str();
+    let mut leaked = false;
+    while let Some(pos) = rest.find("<w:t") {
+        rest = &rest[pos + 4..];
+        let Some(open_end) = rest.find('>') else {
+            break;
+        };
+        let head = &rest[..open_end];
+        // a body text run is `<w:t>` or `<w:t attr…>`, not `<w:tab/>`
+        if (head.is_empty() || head.starts_with(' '))
+            && let Some(close) = rest[open_end + 1..].find("</w:t>")
+            && rest[open_end + 1..open_end + 1 + close]
+                .chars()
+                .any(|c| ('\u{1D400}'..='\u{1D7FF}').contains(&c))
+        {
+            leaked = true;
+            break;
+        }
+        rest = &rest[open_end..];
+    }
+    assert!(
+        !leaked,
+        "footnote math must not be duplicated as literal glyphs in a <w:t> run: {fn_xml}"
+    );
+}
+
+#[test]
 fn features_suppress_indent_after_heading() {
     let doc_xml = fixture_doc_xml("complex_paper");
 
