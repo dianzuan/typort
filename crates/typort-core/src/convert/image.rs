@@ -1,5 +1,6 @@
 use typort_ooxml::document::{ImageData, ImageFormat};
-use typst::layout::{Frame, FrameItem, PagedDocument};
+use typst::layout::{Frame, FrameItem};
+use typst_layout::PagedDocument;
 
 /// Extract all images from a `PagedDocument` by walking page frames.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -83,7 +84,7 @@ pub(super) fn frame_has_curve(frame: &Frame) -> bool {
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn rasterize_frame(frame: &Frame) -> Option<ImageData> {
     use typst::foundations::{Content, Smart};
-    use typst::layout::Page;
+    use typst_layout::Page;
 
     let size = frame.size();
     let (width_pt, height_pt) = (size.x.to_pt(), size.y.to_pt());

@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use typst::diag::FileResult;
 use typst::foundations::{Bytes, Datetime};
-use typst::layout::PagedDocument;
+use typst_layout::PagedDocument;
 use typst::syntax::{FileId, Source, VirtualPath};
 use typst::text::{Font, FontBook};
 use typst::utils::LazyHash;

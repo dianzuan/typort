@@ -5,7 +5,8 @@ use typort_ooxml::document::{
     Table, TableBorders,
 };
 use typst::introspection::Location;
-use typst::layout::{Frame, FrameItem, PagedDocument, Point};
+use typst::layout::{Frame, FrameItem, Point};
+use typst_layout::PagedDocument;
 use typst_html::HtmlNode;
 
 use super::{collect_block_tag_locations, strip_cjk_spaces_str, strip_visual_markers};

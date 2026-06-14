@@ -15,6 +15,7 @@ typst-utils.workspace = true
 typst-realize.workspace = true
 typst-html.workspace = true
 typst-render.workspace = true
+typst-layout.workspace = true
 typort-ooxml.workspace = true
 typort-math.workspace = true
 typort-presets.workspace = true

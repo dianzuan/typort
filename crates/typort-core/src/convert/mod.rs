@@ -26,7 +26,7 @@ use typort_ooxml::document::{
 use typst::comemo::Track;
 use typst::foundations::{Smart, StyleChain};
 use typst::introspection::{Location, Tag};
-use typst::layout::PagedDocument;
+use typst_layout::PagedDocument;
 use typst::model::Numbering;
 use typst_html::{HtmlDocument, HtmlElement, HtmlNode};
 use typst_library::math::EquationElem;

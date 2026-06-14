@@ -11,7 +11,8 @@ use typort_ooxml::document::{
     PageNumberFormat, PageSettings, Paragraph, ParagraphStyle, Run, SectionBreak, SectionBreakType,
 };
 use typst::World;
-use typst::layout::{Frame, FrameItem, PagedDocument, Point};
+use typst::layout::{Frame, FrameItem, Point};
+use typst_layout::PagedDocument;
 
 /// Per-span and per-text style override maps produced by [`build_style_override_maps`].
 type StyleOverrideMaps = (

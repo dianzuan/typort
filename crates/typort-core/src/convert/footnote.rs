@@ -1,6 +1,6 @@
 use typort_ooxml::document::{Document, FootnoteFormat, InlineElement, Run};
 use typst::introspection::Tag;
-use typst::layout::PagedDocument;
+use typst_layout::PagedDocument;
 use typst_html::HtmlNode;
 
 use super::{get_text_content, has_attr_value, tag_name};

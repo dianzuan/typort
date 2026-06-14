@@ -368,12 +368,6 @@ dependencies = [
 
 [[package]]
 name = "codex"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9589e1effc5cacbea347899645c654158b03b2053d24bb426fd3128ced6e423c"
-
-[[package]]
-name = "codex"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0732ab1a27b4ea05e6f9f60a5122c9924dd5123defde0d8e907f58cf643d40e6"
@@ -2801,6 +2795,7 @@ dependencies = [
  "typst",
  "typst-html",
  "typst-kit",
+ "typst-layout",
  "typst-library",
  "typst-realize",
  "typst-render",
@@ -2812,7 +2807,7 @@ dependencies = [
 name = "typort-math"
 version = "0.1.1"
 dependencies = [
- "codex 0.2.0",
+ "codex",
  "quick-xml 0.37.5",
  "typst",
  "typst-library",
@@ -2947,7 +2942,7 @@ checksum = "9194c84caff980597dd400762d9de9ea4ed3b8b580970eb547a5faba5210277d"
 dependencies = [
  "az",
  "bumpalo",
- "codex 0.3.0",
+ "codex",
  "comemo",
  "ecow",
  "either",
@@ -2986,7 +2981,7 @@ dependencies = [
  "bitflags 2.11.1",
  "bumpalo",
  "ciborium",
- "codex 0.3.0",
+ "codex",
  "comemo",
  "csv",
  "ecow",
@@ -3061,7 +3056,7 @@ checksum = "2e193d65571edbbf203473588bbcc75f1c9787ab145bd3e9e11f9a398f232abc"
 dependencies = [
  "az",
  "bytemuck",
- "codex 0.3.0",
+ "codex",
  "comemo",
  "ecow",
  "flate2",
