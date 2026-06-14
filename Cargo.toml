@@ -18,15 +18,15 @@ homepage = "https://github.com/dianzuan/typort"
 
 [workspace.dependencies]
 # Typst ecosystem
-typst = "0.14.2"
-typst-library = "0.14.2"
-typst-syntax = "0.14.2"
-typst-kit = { version = "0.14.2", default-features = false, features = ["fonts", "embed-fonts", "packages", "vendor-openssl"] }
-typst-utils = "0.14.2"
-typst-realize = "0.14.2"
-typst-html = "0.14.2"
-typst-pdf = "0.14.2"
-typst-render = "0.14.2"
+typst = "0.15.0-rc.1"
+typst-library = "0.15.0-rc.1"
+typst-syntax = "0.15.0-rc.1"
+typst-kit = { version = "0.15.0-rc.1", default-features = false, features = ["embedded-fonts", "scan-fonts", "system-packages", "system-downloader", "vendor-openssl"] }
+typst-utils = "0.15.0-rc.1"
+typst-realize = "0.15.0-rc.1"
+typst-html = "0.15.0-rc.1"
+typst-pdf = "0.15.0-rc.1"
+typst-render = "0.15.0-rc.1"
 
 # SVG rasterization
 resvg = { version = "0.45", default-features = false }
