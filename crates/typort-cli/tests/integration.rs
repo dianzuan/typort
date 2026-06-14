@@ -1234,6 +1234,28 @@ fn footnote_math_not_duplicated() {
 }
 
 #[test]
+fn math_differential_dif_emitted() {
+    // Regression (typst 0.15 migration): 0.15 wraps `dif` in a ClassElem
+    // (Unary, upright d) that 0.14 emitted bare. convert_content gained a ClassElem
+    // arm that descends the body; without it the differential `d` was silently
+    // dropped, turning `integral y dif x` into `integral y x` (a math corruption).
+    let doc_xml = fixture_doc_xml("issue_math_differential");
+    // Concatenate the OMML text runs (typort emits attribute-less <m:t>).
+    let omml: String = doc_xml
+        .match_indices("<m:t>")
+        .filter_map(|(i, _)| {
+            let rest = &doc_xml[i + 5..];
+            rest.find("</m:t>").map(|end| &rest[..end])
+        })
+        .collect();
+    assert!(
+        omml.contains("ydx"),
+        "the differential `d` (from `dif x`) must survive in the OMML \
+         (`integral y dif x` => `y d x`), got m:t = {omml:?}"
+    );
+}
+
+#[test]
 fn features_suppress_indent_after_heading() {
     let doc_xml = fixture_doc_xml("complex_paper");
 

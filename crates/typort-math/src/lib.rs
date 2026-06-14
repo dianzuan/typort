@@ -9,9 +9,10 @@ use quick_xml::events::BytesText;
 use typst::foundations::Content;
 use typst_library::foundations::{SequenceElem, StyleChain, StyledElem, SymbolElem};
 use typst_library::math::{
-    AccentElem, AlignPointElem, AttachElem, CasesElem, EquationElem, FracElem, LrElem, MatElem,
-    OpElem, OverbraceElem, OverbracketElem, OverlineElem, OverparenElem, OvershellElem, RootElem,
-    UnderbraceElem, UnderbracketElem, UnderlineElem, UnderparenElem, UndershellElem, VecElem,
+    AccentElem, AlignPointElem, AttachElem, CasesElem, ClassElem, EquationElem, FracElem, LrElem,
+    MatElem, OpElem, OverbraceElem, OverbracketElem, OverlineElem, OverparenElem, OvershellElem,
+    RootElem, UnderbraceElem, UnderbracketElem, UnderlineElem, UnderparenElem, UndershellElem,
+    VecElem,
 };
 use typst_library::text::{LinebreakElem, SpaceElem, TextElem};
 
@@ -201,6 +202,13 @@ fn convert_content<W: Write>(writer: &mut Writer<W>, content: &Content) -> std::
     } else if content.to_packed::<AlignPointElem>().is_some() {
         // Alignment points inside equation arrays are handled by the parent;
         // standalone occurrences are skipped (no OMML equivalent).
+    } else if let Some(class) = content.to_packed::<ClassElem>() {
+        // A math-class wrapper. typst 0.15 wraps several constructs in a ClassElem
+        // that 0.14 emitted bare — e.g. `dif` became `ClassElem(Unary, upright(d))`.
+        // OMML has no class element (the class only tweaks spacing, which Word
+        // derives itself), so emit the wrapped body. Without this arm the wrapped
+        // glyph (e.g. the differential `d`) falls into the silent skip below.
+        convert_content(writer, &class.body)?;
     } else if let Some(sym) = content.to_packed::<SymbolElem>() {
         write_math_run(writer, &sym.text)?;
     } else if let Some(text) = content.to_packed::<TextElem>() {
