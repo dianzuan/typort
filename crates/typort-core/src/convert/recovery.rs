@@ -1,13 +1,14 @@
 use std::collections::{BTreeMap, HashMap};
+use std::num::NonZeroUsize;
 
 use typort_ooxml::document::{
     Alignment, BlockElement, CellContent, Document, InlineElement, Paragraph, ParagraphStyle, Run,
     Table, TableBorders,
 };
-use typst::introspection::Location;
+use typst::introspection::{Introspector, Location};
 use typst::layout::{Frame, FrameItem, Point};
-use typst_layout::PagedDocument;
 use typst_html::HtmlNode;
+use typst_layout::PagedDocument;
 
 use super::{collect_block_tag_locations, strip_cjk_spaces_str, strip_visual_markers};
 
@@ -322,7 +323,7 @@ fn cluster_by_x<'a>(
 pub(super) fn extract_lines_from_all_pages(paged: &PagedDocument) -> Vec<FrameLine> {
     let mut all_lines = Vec::new();
 
-    let body_size = paged.pages.first().map_or(10.5, |p| {
+    let body_size = paged.pages().first().map_or(10.5, |p| {
         let mut items = Vec::new();
         collect_text_items_with_pos(&p.frame, Point::zero(), &mut items);
         let mut sizes: HashMap<i32, usize> = HashMap::new();
@@ -338,7 +339,7 @@ pub(super) fn extract_lines_from_all_pages(paged: &PagedDocument) -> Vec<FrameLi
             .map_or(10.5, |(s, _)| f64::from(s) / 10.0)
     });
 
-    for (page_idx, page) in paged.pages.iter().enumerate() {
+    for (page_idx, page) in paged.pages().iter().enumerate() {
         let mut text_items = Vec::new();
         collect_text_items_with_pos(&page.frame, Point::zero(), &mut text_items);
 
@@ -363,7 +364,7 @@ pub(super) fn extract_lines_from_all_pages(paged: &PagedDocument) -> Vec<FrameLi
 
         for items in y_groups.values() {
             let page_width_pt = paged
-                .pages
+                .pages()
                 .first()
                 .map_or(595.0, |p| p.frame.width().to_pt());
             let max_font_size = items.iter().map(|i| i.size_pt).fold(0.0_f64, f64::max);
@@ -910,7 +911,7 @@ pub(super) fn build_element_page_map(
     paged: &PagedDocument,
 ) -> Vec<usize> {
     let total_elements = doc.body.elements.len();
-    if total_elements == 0 || paged.pages.is_empty() {
+    if total_elements == 0 || paged.pages().is_empty() {
         return Vec::new();
     }
 
@@ -930,9 +931,11 @@ pub(super) fn build_element_page_map(
             .collect();
     }
 
+    // `Introspector::page` now returns `Option<NonZeroUsize>` (0.14 returned the
+    // `NonZeroUsize` directly); a location without a known page falls back to 1.
     let tag_pages: Vec<usize> = locs
         .iter()
-        .map(|loc| paged.introspector.page(*loc).get())
+        .map(|loc| paged.introspector().page(*loc).map_or(1, NonZeroUsize::get))
         .collect();
 
     let n_tags = tag_pages.len();
@@ -998,7 +1001,7 @@ pub(super) fn insert_horizontal_rules_from_paged(
     if !source_declares_line_rule(source) {
         return;
     }
-    let total_pages = paged.pages.len();
+    let total_pages = paged.pages().len();
     if total_pages == 0 {
         return;
     }
@@ -1010,7 +1013,7 @@ pub(super) fn insert_horizontal_rules_from_paged(
 
     let mut hrules: Vec<(usize, f64)> = Vec::new();
 
-    for (page_idx, page) in paged.pages.iter().enumerate() {
+    for (page_idx, page) in paged.pages().iter().enumerate() {
         let page_width = page.frame.width().to_pt();
         let content_width = page_width * 0.6;
 
@@ -1176,7 +1179,7 @@ pub(super) fn detect_three_line_tables(paged: &PagedDocument, doc: &mut Document
 
     let mut rule_sizes: Vec<u32> = Vec::new();
     let mut has_vertical = false;
-    for page in &paged.pages {
+    for page in paged.pages() {
         collect_table_rule_sizes(&page.frame, &mut rule_sizes, &mut has_vertical);
     }
     if has_vertical || rule_sizes.is_empty() {

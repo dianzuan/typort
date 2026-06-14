@@ -2,6 +2,8 @@ use hayagriva::types::{EntryType, Person};
 use typort_ooxml::document::{CitationSource, SourceType};
 use typst::comemo::Track;
 use typst_html::HtmlDocument;
+use typst_library::foundations::{NativeElement, PathOrStr};
+use typst_library::introspection::Introspector;
 use typst_library::loading::DataSource;
 use typst_library::model::BibliographyElem;
 
@@ -17,10 +19,19 @@ pub fn extract_bibliography_sources(
     html_doc: &HtmlDocument,
     world: &TyportWorld,
 ) -> Vec<CitationSource> {
-    let tracked = html_doc.introspector.track();
+    // `track()` is provided by `#[comemo::track]` on the `Introspector` trait,
+    // so the receiver must be coerced to `&dyn Introspector` (the wrapper struct
+    // `HtmlIntrospector` no longer exposes an inherent `track`).
+    let introspector: &dyn Introspector = &**html_doc.introspector();
+    let tracked = introspector.track();
 
-    // Find the BibliographyElem to access source file paths
-    let Ok(bib_elem) = BibliographyElem::find(tracked) else {
+    // Find the BibliographyElem to access source file paths. `find` was removed
+    // in typst 0.15; query the introspector for the element and take the first
+    // one (a document has at most one bibliography in practice).
+    let Some(content) = tracked.query_first(&BibliographyElem::ELEM.select()) else {
+        return Vec::new();
+    };
+    let Some(bib_elem) = content.to_packed::<BibliographyElem>() else {
         return Vec::new();
     };
 
@@ -46,8 +57,16 @@ fn load_bibliography_library(sources: &[DataSource], world: &TyportWorld) -> hay
 
     for source in sources {
         match source {
-            DataSource::Path(path_str) => {
-                let path = root.join(path_str.as_str().trim_start_matches('/'));
+            DataSource::Path(path_or_str) => {
+                // `PathOrStr::as_str` was removed in typst 0.15; the type is now
+                // an enum. A `Str` carries the raw author-written path; a `Path`
+                // carries a resolved `RootedPath`. Both resolve, as before, to a
+                // root-relative path (leading slash stripped) joined onto root.
+                let rel = match path_or_str {
+                    PathOrStr::Str(s) => s.trim_start_matches('/').to_string(),
+                    PathOrStr::Path(rooted) => rooted.vpath().get_without_slash().to_string(),
+                };
+                let path = root.join(&rel);
                 match std::fs::read_to_string(&path) {
                     Ok(content) => {
                         let is_bib = path.extension().and_then(|e| e.to_str()) == Some("bib");

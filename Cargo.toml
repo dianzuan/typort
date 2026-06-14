@@ -29,9 +29,11 @@ typst-pdf = "0.15.0-rc.1"
 typst-render = "0.15.0-rc.1"
 typst-layout = "0.15.0-rc.1"
 
-# SVG rasterization
-resvg = { version = "0.45", default-features = false }
-tiny-skia = "0.11"
+# SVG rasterization. Pinned to match typst 0.15's usvg/tiny-skia (usvg 0.47,
+# tiny-skia 0.12), so the `usvg::Tree` from `Image::tree()` is the exact type
+# `resvg::render` accepts (otherwise two incompatible usvg versions resolve).
+resvg = { version = "0.47", default-features = false }
+tiny-skia = "0.12"
 # Pinned to the version typst-library 0.14.2 decodes rasters with, so the
 # `DynamicImage` types match. Only the PNG encoder is needed (re-encoding
 # already-decoded GIF/WebP/Pixel rasters to PNG).

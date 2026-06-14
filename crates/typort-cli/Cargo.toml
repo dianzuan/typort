@@ -19,6 +19,9 @@ typort-presets.workspace = true
 [dev-dependencies]
 zip.workspace = true
 typst.workspace = true
+# `PagedDocument` moved out of `typst::layout` into the `typst-layout` crate in
+# typst 0.15; the visual-regression test compiles to it directly.
+typst-layout.workspace = true
 typst-pdf.workspace = true
 typort-presets.workspace = true
 time.workspace = true

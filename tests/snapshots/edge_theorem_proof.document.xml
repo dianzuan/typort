@@ -148,50 +148,8 @@
         <w:rPr>
           <w:b/>
         </w:rPr>
-        <w:t xml:space="preserve">Theorem</w:t>
+        <w:t xml:space="preserve">Theorem 1 (Intermediate Value). </w:t>
       </w:r>
-    </w:p>
-    <w:p>
-      <w:r>
-        <w:rPr>
-          <w:b/>
-        </w:rPr>
-        <w:t xml:space="preserve">1</w:t>
-      </w:r>
-    </w:p>
-    <w:p>
-      <w:r>
-        <w:rPr>
-          <w:b/>
-        </w:rPr>
-        <w:t xml:space="preserve">(</w:t>
-      </w:r>
-    </w:p>
-    <w:p>
-      <w:r>
-        <w:rPr>
-          <w:b/>
-        </w:rPr>
-        <w:t xml:space="preserve">Intermediate Value</w:t>
-      </w:r>
-    </w:p>
-    <w:p>
-      <w:r>
-        <w:rPr>
-          <w:b/>
-        </w:rPr>
-        <w:t xml:space="preserve">)</w:t>
-      </w:r>
-    </w:p>
-    <w:p>
-      <w:r>
-        <w:rPr>
-          <w:b/>
-        </w:rPr>
-        <w:t xml:space="preserve">.</w:t>
-      </w:r>
-    </w:p>
-    <w:p>
       <w:r>
         <w:rPr>
           <w:i/>
@@ -274,7 +232,7 @@
         <w:rPr>
           <w:i/>
         </w:rPr>
-        <w:t xml:space="preserve"> . Then there exists </w:t>
+        <w:t xml:space="preserve">. Then there exists </w:t>
       </w:r><m:oMath>
   <m:r>
     <m:t>c</m:t>
@@ -331,7 +289,7 @@
         <w:rPr>
           <w:i/>
         </w:rPr>
-        <w:t xml:space="preserve"> .</w:t>
+        <w:t xml:space="preserve">.</w:t>
       </w:r>
     </w:p>
     <w:p>
@@ -396,7 +354,7 @@
         <w:rPr>
           <w:i/>
         </w:rPr>
-        <w:t xml:space="preserve"> .</w:t>
+        <w:t xml:space="preserve">.</w:t>
       </w:r>
       <w:r>
         <w:t xml:space="preserve"> This contradicts the continuity of </w:t>
@@ -409,15 +367,12 @@
         <w:rPr>
           <w:i/>
         </w:rPr>
-        <w:t xml:space="preserve"> . </w:t>
+        <w:t xml:space="preserve">. </w:t>
       </w:r><m:oMath>
   <m:r>
     <m:t>⊥</m:t>
   </m:r>
-</m:oMath>
-      <w:r>
-        <w:t xml:space="preserve">  </w:t>
-      </w:r><m:oMath>
+</m:oMath><m:oMath>
   <m:r>
     <m:t>□</m:t>
   </m:r>
@@ -428,26 +383,8 @@
         <w:rPr>
           <w:b/>
         </w:rPr>
-        <w:t xml:space="preserve">Theorem</w:t>
+        <w:t xml:space="preserve">Theorem 2. </w:t>
       </w:r>
-    </w:p>
-    <w:p>
-      <w:r>
-        <w:rPr>
-          <w:b/>
-        </w:rPr>
-        <w:t xml:space="preserve">2</w:t>
-      </w:r>
-    </w:p>
-    <w:p>
-      <w:r>
-        <w:rPr>
-          <w:b/>
-        </w:rPr>
-        <w:t xml:space="preserve">.</w:t>
-      </w:r>
-    </w:p>
-    <w:p>
       <w:r>
         <w:rPr>
           <w:i/>

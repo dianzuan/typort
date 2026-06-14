@@ -1,7 +1,7 @@
 use typort_ooxml::document::{Document, FootnoteFormat, InlineElement, Run};
 use typst::introspection::Tag;
-use typst_layout::PagedDocument;
 use typst_html::HtmlNode;
+use typst_layout::PagedDocument;
 
 use super::{get_text_content, has_attr_value, tag_name};
 
@@ -23,13 +23,18 @@ pub(super) fn extract_add_and_size_footnotes(
 }
 
 /// Find the footnote number from children starting at a TAG Start("footnote").
-/// Looks for `<a role="doc-noteref">` -> `<sup>` -> text number.
+///
+/// Locates the `role="doc-noteref"` element and reads its number. typst 0.15
+/// changed the nesting: the marker is now `<sup id role="doc-noteref"><a>N</a></sup>`
+/// (0.14 was `<a role="doc-noteref"><sup>N</sup></a>`), so rather than assume a
+/// `<sup>` child we read the noteref element's own text content (which is `N`
+/// either way) and only fall back to the nested-`<sup>` scan.
 pub(super) fn find_footnote_id_in_range(children: &[HtmlNode]) -> Option<u32> {
     for child in children {
         match child {
             HtmlNode::Element(elem) => {
                 if has_attr_value(elem, "role", "doc-noteref") {
-                    return find_sup_number(&elem.children);
+                    return noteref_number(elem);
                 }
                 if let Some(id) = find_footnote_id_in_range(&elem.children) {
                     return Some(id);
@@ -46,27 +51,31 @@ pub(super) fn find_footnote_id_in_range(children: &[HtmlNode]) -> Option<u32> {
     None
 }
 
-fn find_sup_number(children: &[HtmlNode]) -> Option<u32> {
+/// Read the footnote number carried by a `role="doc-noteref"` element.
+///
+/// typst 0.15 nests the number one level deeper (`<sup role="doc-noteref"><a>N</a>`)
+/// than 0.14 (`<a role="doc-noteref"><sup>N`), so a direct-children-only text read
+/// misses it. Recursively gather all descendant text (the number `N` regardless of
+/// the `<sup>`/`<a>` order) and parse it as a decimal or circled number.
+fn noteref_number(elem: &typst_html::HtmlElement) -> Option<u32> {
+    let mut text = String::new();
+    collect_descendant_text(&elem.children, &mut text);
+    let trimmed = text.trim();
+    if let Ok(n) = trimmed.parse() {
+        return Some(n);
+    }
+    parse_circled_number(trimmed)
+}
+
+/// Append all descendant text leaves of `children` to `out`, in document order.
+fn collect_descendant_text(children: &[HtmlNode], out: &mut String) {
     for child in children {
-        if let HtmlNode::Element(elem) = child {
-            let tag = tag_name(elem);
-            if tag == "sup"
-                && let Some(text) = get_text_content(&elem.children)
-            {
-                let trimmed = text.trim();
-                if let Ok(n) = trimmed.parse() {
-                    return Some(n);
-                }
-                if let Some(n) = parse_circled_number(trimmed) {
-                    return Some(n);
-                }
-            }
-            if let Some(n) = find_sup_number(&elem.children) {
-                return Some(n);
-            }
+        match child {
+            HtmlNode::Text(t, _) => out.push_str(t),
+            HtmlNode::Element(elem) => collect_descendant_text(&elem.children, out),
+            _ => {}
         }
     }
-    None
 }
 
 pub(super) fn parse_circled_number(s: &str) -> Option<u32> {

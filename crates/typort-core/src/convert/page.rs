@@ -24,6 +24,7 @@ type StyleOverrideMaps = (
 ///
 /// Walks the first few pages' frames to find the most common font family and size,
 /// which represent the body text styling.
+#[must_use]
 pub fn extract_document_style(paged: &PagedDocument) -> DocumentStyle {
     let mut ascii_font_counts: HashMap<String, usize> = HashMap::new();
     let mut cjk_font_counts: HashMap<String, usize> = HashMap::new();
@@ -31,7 +32,7 @@ pub fn extract_document_style(paged: &PagedDocument) -> DocumentStyle {
     let mut y_positions: Vec<(f64, u32)> = Vec::new();
     let mut body_cap_heights: Vec<f64> = Vec::new();
 
-    for page in paged.pages.iter().take(3) {
+    for page in paged.pages().iter().take(3) {
         collect_font_info_split(
             &page.frame,
             Point::zero(),
@@ -157,7 +158,7 @@ pub(crate) fn is_cjk_char(c: char) -> bool {
 }
 
 fn detect_first_line_indent(paged: &PagedDocument, body_pt: f64) -> u32 {
-    let Some(page) = paged.pages.first() else {
+    let Some(page) = paged.pages().first() else {
         return pt_to_twips(body_pt * 2.0);
     };
 
@@ -266,7 +267,7 @@ fn detect_justification(paged: &PagedDocument) -> String {
     // We group text items by y-position (line), then compute the right edge per line.
     let mut line_items: Vec<(f64, f64)> = Vec::new(); // (y, right_edge_x)
 
-    for page in paged.pages.iter().take(3) {
+    for page in paged.pages().iter().take(3) {
         let page_width = page.frame.width().to_pt();
         let page_height = page.frame.height().to_pt();
         let (body_top, body_bottom) = find_body_zone(page_width, page_height, None, None);
@@ -433,7 +434,7 @@ fn detect_footnote_text_size(
         return None;
     }
     let mut size_counts: HashMap<u32, usize> = HashMap::new();
-    for page in &paged.pages {
+    for page in paged.pages() {
         collect_footnote_text_sizes(&page.frame, &haystack, &mut size_counts);
     }
     // The footnote body is the dominant matched size; a tie prefers the smaller
@@ -497,7 +498,7 @@ fn detect_heading_spacing_per_level(
     let default_after = [120; 5];
 
     let mut items: Vec<(f64, u32)> = Vec::new();
-    for page in paged.pages.iter().take(5) {
+    for page in paged.pages().iter().take(5) {
         collect_y_and_size(&page.frame, Point::zero(), &mut items);
     }
     if items.len() < 3 {
@@ -562,7 +563,7 @@ fn detect_body_paragraph_spacing(
     paged: &PagedDocument,
 ) -> (u32, u32) {
     let mut items: Vec<(f64, u32)> = Vec::new();
-    for page in paged.pages.iter().take(3) {
+    for page in paged.pages().iter().take(3) {
         collect_y_and_size(&page.frame, Point::zero(), &mut items);
     }
     if items.len() < 4 {
@@ -690,7 +691,7 @@ fn collect_font_info_split(
 
 /// Extract page dimensions from the `PagedDocument` and apply to `PageSettings`.
 pub fn extract_page_settings(paged: &PagedDocument, settings: &mut PageSettings) {
-    let Some(page) = paged.pages.first() else {
+    let Some(page) = paged.pages().first() else {
         return;
     };
     let w = page.frame.width().to_pt();
@@ -868,6 +869,26 @@ pub fn collect_par_hanging_indent_rules(source: &typst_syntax::Source) -> Vec<Pa
     rules
 }
 
+/// Byte range of `span` within `source`.
+///
+/// typst 0.15 changed `Source::range` to take a decomposed
+/// `(SpanNumber, Option<SubRange>)` instead of a `Span`; this performs that
+/// decomposition (the same one `WorldExt::range` does) for a span that points
+/// into `source`. Returns `None` for a detached span or one in another file.
+fn span_range_in_source(
+    source: &typst_syntax::Source,
+    span: typst_syntax::Span,
+) -> Option<std::ops::Range<usize>> {
+    use typst_syntax::{DiagSpan, DiagSpanKind};
+    match DiagSpan::from(span).get() {
+        DiagSpanKind::Number { id, num, sub_range } if id == source.id() => {
+            source.range(num, sub_range)
+        }
+        DiagSpanKind::Range { id, range } if id == source.id() => Some(range),
+        _ => None,
+    }
+}
+
 fn collect_hanging_rules(
     source: &typst_syntax::Source,
     node: &typst_syntax::SyntaxNode,
@@ -888,7 +909,7 @@ fn collect_hanging_rules(
             if let typst_syntax::ast::Arg::Named(named) = arg
                 && named.name().as_str() == "hanging-indent"
                 && let typst_syntax::ast::Expr::Numeric(n) = named.expr()
-                && let Some(range) = source.range(node.span())
+                && let Some(range) = span_range_in_source(source, node.span())
             {
                 let (value, _unit) = n.get();
                 out.push(ParHangingRule {
@@ -1323,25 +1344,26 @@ pub struct DetectedSection {
 /// (if any) represents a change starting at `start_page` index. Each section's
 /// `page_settings` describes the settings BEFORE the break (i.e., the settings
 /// of the section that is ending).
+#[must_use]
 pub fn detect_section_breaks(paged: &PagedDocument) -> Vec<DetectedSection> {
-    if paged.pages.len() < 2 {
+    if paged.pages().len() < 2 {
         return Vec::new();
     }
 
     let mut sections = Vec::new();
-    let prev_w = paged.pages[0].frame.width();
-    let prev_h = paged.pages[0].frame.height();
+    let prev_w = paged.pages()[0].frame.width();
+    let prev_h = paged.pages()[0].frame.height();
     let mut prev_width = pt_to_twips(prev_w.to_pt());
     let mut prev_height = pt_to_twips(prev_h.to_pt());
 
-    for i in 1..paged.pages.len() {
-        let curr_w = pt_to_twips(paged.pages[i].frame.width().to_pt());
-        let curr_h = pt_to_twips(paged.pages[i].frame.height().to_pt());
+    for i in 1..paged.pages().len() {
+        let curr_w = pt_to_twips(paged.pages()[i].frame.width().to_pt());
+        let curr_h = pt_to_twips(paged.pages()[i].frame.height().to_pt());
         let tol = 20; // 1pt tolerance for rounding
         if curr_w.abs_diff(prev_width) > tol || curr_h.abs_diff(prev_height) > tol {
             let margin = default_margin_pt(
-                prev_w.to_pt().min(paged.pages[i].frame.width().to_pt()),
-                prev_h.to_pt().min(paged.pages[i].frame.height().to_pt()),
+                prev_w.to_pt().min(paged.pages()[i].frame.width().to_pt()),
+                prev_h.to_pt().min(paged.pages()[i].frame.height().to_pt()),
             );
             let margin_twips = pt_to_twips(margin);
             sections.push(DetectedSection {
@@ -1519,11 +1541,13 @@ pub(super) fn find_body_zone(
 }
 
 /// Extract header content from the top margin area of the first page.
+#[must_use]
 pub fn extract_header(paged: &PagedDocument) -> Option<HeaderFooter> {
     extract_margin_zone(paged, MarginZone::Top)
 }
 
 /// Extract footer content from the bottom margin area of the first page.
+#[must_use]
 pub fn extract_footer(paged: &PagedDocument) -> Option<HeaderFooter> {
     extract_margin_zone(paged, MarginZone::Bottom)
 }
@@ -1535,7 +1559,7 @@ enum MarginZone {
 
 #[allow(clippy::needless_pass_by_value)]
 fn extract_margin_zone(paged: &PagedDocument, zone: MarginZone) -> Option<HeaderFooter> {
-    let page = paged.pages.first()?;
+    let page = paged.pages().first()?;
     let page_width = page.frame.width().to_pt();
     let page_height = page.frame.height().to_pt();
 
@@ -1593,21 +1617,22 @@ fn extract_margin_zone(paged: &PagedDocument, zone: MarginZone) -> Option<Header
 /// consecutive numbers, it's definitely a page number rather than static text.
 /// A single footer "i" (a word) or "5" (a static label) would be misclassified
 /// without multi-page verification.
+#[must_use]
 pub fn detect_page_numbering(paged: &PagedDocument) -> Option<PageNumberFormat> {
-    if paged.pages.is_empty() {
+    if paged.pages().is_empty() {
         return None;
     }
 
     // Extract footer text from the first page
-    let first_footer = extract_footer_text_from_page(&paged.pages[0].frame)?;
+    let first_footer = extract_footer_text_from_page(&paged.pages()[0].frame)?;
     let first_trimmed = first_footer.trim();
 
     // Try to classify the text as a page number format
     let fmt = classify_page_number(first_trimmed)?;
 
     // If we have a second page, verify consecutiveness to avoid false positives
-    if paged.pages.len() >= 2 {
-        let second_footer = extract_footer_text_from_page(&paged.pages[1].frame);
+    if paged.pages().len() >= 2 {
+        let second_footer = extract_footer_text_from_page(&paged.pages()[1].frame);
         match second_footer {
             Some(ref text) => {
                 let second_trimmed = text.trim();
@@ -1830,7 +1855,7 @@ struct PagedRunStyle {
 /// Collect per-run style information from all pages of the `PagedDocument`.
 fn collect_paged_run_styles(paged: &PagedDocument) -> Vec<PagedRunStyle> {
     let mut items = Vec::new();
-    for page in &paged.pages {
+    for page in paged.pages() {
         let page_width = page.frame.width().to_pt();
         collect_styles_from_frame(&page.frame, Point::zero(), page_width, &mut items);
     }
@@ -2298,10 +2323,20 @@ fn localized_name_via_book(world: &dyn World, family: &str, lang_ids: &[u16]) ->
         .book()
         .select_family(&family.to_lowercase())
         .filter_map(|index| world.font(index))
-        .filter(|font| {
-            english_family_from_face(font.ttf()).is_none_or(|eng| eng.eq_ignore_ascii_case(family))
+        .find_map(|font| {
+            // typst 0.15 removed `Font::ttf`; the `ttf_parser::Face` now lives on
+            // `FontInstance`. Re-parse the face from the font's own buffer and
+            // collection index (exactly what `Font::new` does internally) so we
+            // can still read its name table for localized CJK family names.
+            let face = ttf_parser::Face::parse(font.data(), font.index()).ok()?;
+            // Skip variants whose English typographic family differs from the
+            // requested one (e.g. a same-keyed "Noto Serif SC Light").
+            if english_family_from_face(&face).is_some_and(|eng| !eng.eq_ignore_ascii_case(family))
+            {
+                return None;
+            }
+            localized_family_from_face(&face, lang_ids)
         })
-        .find_map(|font| localized_family_from_face(font.ttf(), lang_ids))
 }
 
 /// The English typographic FAMILY (name ID 1, LCID 0x0409) of a face, or `None`

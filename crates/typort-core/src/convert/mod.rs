@@ -25,12 +25,12 @@ use typort_ooxml::document::{
 
 use typst::comemo::Track;
 use typst::foundations::{Smart, StyleChain};
-use typst::introspection::{Location, Tag};
-use typst_layout::PagedDocument;
+use typst::introspection::{Introspector, Location, Tag};
 use typst::model::Numbering;
 use typst_html::{HtmlDocument, HtmlElement, HtmlNode};
+use typst_layout::PagedDocument;
 use typst_library::math::EquationElem;
-use typst_library::model::{CiteGroup, HeadingElem, OutlineElem, RefElem, TableElem};
+use typst_library::model::{CiteElem, CiteGroup, HeadingElem, OutlineElem, RefElem, TableElem};
 use typst_library::text::{Lang, Region, SmartQuoteElem, SmartQuoter, SmartQuotes};
 
 /// Tracks equation numbering state across the document.
@@ -115,7 +115,7 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
 
     // 4. First pass: extract footnote content from <section role="doc-endnotes">,
     //    add it to the document, and size the footnote text from the Paged render.
-    let body = find_body(&html_doc.root).unwrap_or(&html_doc.root);
+    let body = find_body(html_doc.root()).unwrap_or_else(|| html_doc.root());
     footnote::extract_add_and_size_footnotes(&mut doc, &body.children, paged_doc.as_ref());
 
     // 5. Extract images from PagedDocument for embedding. Two FIFOs: raster/SVG
@@ -136,11 +136,12 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
     let mut eq_state = EquationState::default();
     let mut bookmarks: HashSet<String> = HashSet::new();
     // Citation keys, so the <ref> handler can tell a citation from a cross-ref.
-    let bib_keys: HashSet<String> =
-        typst_library::model::BibliographyElem::keys(html_doc.introspector.track())
-            .into_iter()
-            .map(|(label, _)| label.resolve().to_string())
-            .collect();
+    let bib_keys: HashSet<String> = typst_library::model::BibliographyElem::keys(
+        (&**html_doc.introspector() as &dyn typst_library::introspection::Introspector).track(),
+    )
+    .into_iter()
+    .map(|(label, _)| label.resolve().to_string())
+    .collect();
     {
         let mut ctx = WalkCtx {
             html_doc: &html_doc,
@@ -517,7 +518,7 @@ fn walk_tags(children: &[HtmlNode], ctx: &mut WalkCtx) {
                             handle_heading(tag, ctx);
                             // Track chapter changes for equation numbering
                             if let Some(c) = html
-                                .introspector
+                                .introspector()
                                 .query_first(&typst::foundations::Selector::Location(
                                     tag.location(),
                                 ))
@@ -624,7 +625,7 @@ fn walk_tags(children: &[HtmlNode], ctx: &mut WalkCtx) {
                         }
                         "outline" => {
                             let depth: u8 = html
-                                .introspector
+                                .introspector()
                                 .query_first(&typst::foundations::Selector::Location(
                                     tag.location(),
                                 ))
@@ -676,6 +677,60 @@ fn walk_tags(children: &[HtmlNode], ctx: &mut WalkCtx) {
     }
 }
 
+/// Whether every direct child of `nodes` is inline-level content (text, an inline
+/// formatting span, an inline equation, …) rather than a block.
+///
+/// Used to decide whether a block container holds a single inline paragraph (which
+/// must be collected as one paragraph so its text and inline equations stay
+/// together) or genuine block children (which `walk_tags` should handle). A node is
+/// treated as a block only if it is a known block-level HTML element or block Typst
+/// tag; everything else (including bare text and `Tag::End`) counts as inline.
+fn children_are_inline(nodes: &[HtmlNode]) -> bool {
+    const BLOCK_HTML: &[&str] = &[
+        "p",
+        "div",
+        "section",
+        "figure",
+        "figcaption",
+        "table",
+        "ul",
+        "ol",
+        "li",
+        "dl",
+        "blockquote",
+        "pre",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "hr",
+    ];
+    const BLOCK_TAGS: &[&str] = &[
+        "heading",
+        "par",
+        "list",
+        "enum",
+        "table",
+        "figure",
+        "outline",
+        "footnote",
+        "block",
+        "grid",
+        "columns",
+        "pagebreak",
+        "list-item",
+        "enum-item",
+        "terms",
+    ];
+    nodes.iter().all(|node| match node {
+        HtmlNode::Element(elem) => !BLOCK_HTML.contains(&tag_name(elem).as_str()),
+        HtmlNode::Tag(Tag::Start(content, _)) => !BLOCK_TAGS.contains(&content.elem().name()),
+        _ => true,
+    })
+}
+
 /// Whether a figure subtree contains an element with the given Typst tag name.
 /// Checks both flattened `Tag::Start` markers and nested `Element` children, so
 /// it works regardless of which HTML representation the construct took.
@@ -723,6 +778,24 @@ fn handle_html_element(elem: &HtmlElement, ctx: &mut WalkCtx) {
             if !para.inlines.is_empty() {
                 ctx.doc.add_paragraph(para);
             }
+        }
+        // A block-level inline-formatting element that wraps an inline equation —
+        // e.g. a whole `#emph[… $eq$ …]` body that is itself a block (as a custom
+        // theorem/proof show rule produces). On typst 0.15 each inner inline
+        // equation also emits a sibling `<math>` element; the old default
+        // (`walk_tags`) walks this element as block content, splitting every text
+        // node and inline equation into its own block paragraph (turning inline math
+        // into stray display equations and dropping inter-word spaces). Collect it
+        // as ONE paragraph instead, resolving the equations to OMML via the
+        // introspector. Only do this when an equation is actually present, so the
+        // ordinary block-emphasis case keeps its original run/spacing behavior.
+        "em" | "i" | "strong" | "b" | "code" if subtree_has_element(&elem.children, "equation") => {
+            let (bold, italic, mono) = match tag.as_str() {
+                "strong" | "b" => (true, false, false),
+                "code" => (false, false, true),
+                _ => (false, true, false),
+            };
+            emit_inline_equation_paragraph(elem, ctx, bold, italic, mono, None);
         }
         "section" => {
             // Skip doc-endnotes section
@@ -775,6 +848,20 @@ fn handle_html_element(elem: &HtmlElement, ctx: &mut WalkCtx) {
             }
             walk_tags(&elem.children, ctx);
         }
+        // A block container whose direct children are purely inline content
+        // (text + inline-format spans + inline equations) and that holds at least
+        // one inline equation — e.g. the body of a custom theorem/proof show rule
+        // (`block[ … $eq$ … ]`). `walk_tags` would treat each bare text node and
+        // each inline equation as its own block paragraph (and on typst 0.15 turn
+        // the inline math into stray display equations), so collect it as ONE
+        // paragraph here, resolving the equations to OMML via the introspector.
+        // Gated on an inline equation being present so ordinary inline-content
+        // blocks keep their original handling.
+        _ if children_are_inline(&elem.children)
+            && subtree_has_element(&elem.children, "equation") =>
+        {
+            emit_inline_equation_paragraph(elem, ctx, false, false, false, detect_alignment(elem));
+        }
         _ => {
             // Check for alignment on this element and apply to child paragraphs
             let alignment = detect_alignment(elem);
@@ -791,13 +878,40 @@ fn handle_html_element(elem: &HtmlElement, ctx: &mut WalkCtx) {
     }
 }
 
+/// Collect `elem`'s children into a single paragraph (text + inline equations
+/// resolved to OMML via the introspector) and emit it. Used for block-level
+/// inline-content containers whose inner equations must stay inline rather than be
+/// promoted to display equations by `walk_tags`.
+fn emit_inline_equation_paragraph(
+    elem: &HtmlElement,
+    ctx: &mut WalkCtx,
+    bold: bool,
+    italic: bool,
+    monospace: bool,
+    alignment: Option<Alignment>,
+) {
+    let mut para = Paragraph::new();
+    para.alignment = alignment;
+    collect_html_inlines_with_doc(
+        &elem.children,
+        &mut para,
+        bold,
+        italic,
+        monospace,
+        Some(ctx.html_doc),
+    );
+    if !para.inlines.is_empty() {
+        ctx.doc.add_paragraph(para);
+    }
+}
+
 /// Handle a `HeadingElem` tag: query the introspector for the full Content,
 /// extract level + body runs, and emit a heading paragraph.
 fn handle_heading(tag: &Tag, ctx: &mut WalkCtx) {
     let html = ctx.html_doc;
     let loc = tag.location();
     let Some(content) = html
-        .introspector
+        .introspector()
         .query_first(&typst::foundations::Selector::Location(loc))
     else {
         return;
@@ -961,7 +1075,7 @@ fn handle_par_with_inline_equations(
         if let HtmlNode::Tag(eq_tag) = &children[cursor] {
             let loc = eq_tag.location();
             if let Some(c) = html
-                .introspector
+                .introspector()
                 .query_first(&typst::foundations::Selector::Location(loc))
             {
                 para.push_run(Run::new(" "));
@@ -1079,7 +1193,7 @@ fn is_inline_equation_at(children: &[HtmlNode], idx: usize, html_doc: &HtmlDocum
     // Check that it's an inline equation (block == false)
     let loc = tag.location();
     let Some(c) = html_doc
-        .introspector
+        .introspector()
         .query_first(&typst::foundations::Selector::Location(loc))
     else {
         return false;
@@ -1131,6 +1245,28 @@ fn collect_par_inlines(children: &[HtmlNode], ctx: &mut WalkCtx, para: &mut Para
     }
 }
 
+/// Whether `content` (recursively) contains an `EquationElem`.
+///
+/// Used to decide whether an emphasis/strong body must be descended through the
+/// equation-aware DOM walk (typst 0.15 nests inline math inside emphasis) rather
+/// than the run-only `inline::extract_runs` fast path.
+fn content_has_equation(content: &typst::foundations::Content) -> bool {
+    use typst_library::foundations::SequenceElem;
+    use typst_library::model::{EmphElem, StrongElem};
+
+    if content.to_packed::<EquationElem>().is_some() {
+        true
+    } else if let Some(seq) = content.to_packed::<SequenceElem>() {
+        seq.children.iter().any(content_has_equation)
+    } else if let Some(s) = content.to_packed::<StrongElem>() {
+        content_has_equation(&s.body)
+    } else if let Some(e) = content.to_packed::<EmphElem>() {
+        content_has_equation(&e.body)
+    } else {
+        false
+    }
+}
+
 /// Process a single inline `Tag::Start` within a paragraph.
 /// Returns the new index (pointing at the matching End tag).
 #[allow(clippy::too_many_lines)]
@@ -1149,36 +1285,67 @@ fn handle_inline_tag(
     match elem_name {
         "strong" => {
             let loc = tag.location();
-            if let Some(strong) = html
-                .introspector
+            let end = find_tag_end(children, i, tag.location());
+            let body = html
+                .introspector()
                 .query_first(&typst::foundations::Selector::Location(loc))
                 .and_then(|c| c.to_packed::<typst_library::model::StrongElem>().cloned())
-            {
-                for mut r in inline::extract_runs(&strong.body) {
+                .map(|s| s.body.clone());
+            // `extract_runs` only carries text, so a `<strong>` wrapping an inline
+            // equation (typst 0.15 nests math inside the emphasis) would lose the
+            // math. When the body has an equation, descend the DOM children instead
+            // (where the introspector resolves the equation to OMML); otherwise keep
+            // the cheaper run-extraction path.
+            if body.as_ref().is_some_and(content_has_equation) {
+                let mut tmp = Paragraph::new();
+                collect_html_inlines_with_doc(
+                    &children[i + 1..end],
+                    &mut tmp,
+                    true,
+                    false,
+                    false,
+                    Some(html),
+                );
+                para.inlines.append(&mut tmp.inlines);
+            } else if let Some(body) = body {
+                for mut r in inline::extract_runs(&body) {
                     r.bold = true;
                     para.push_run(r);
                 }
             }
-            find_tag_end(children, i, tag.location())
+            end
         }
         "emph" => {
             let loc = tag.location();
-            if let Some(emph) = html
-                .introspector
+            let end = find_tag_end(children, i, tag.location());
+            let body = html
+                .introspector()
                 .query_first(&typst::foundations::Selector::Location(loc))
                 .and_then(|c| c.to_packed::<typst_library::model::EmphElem>().cloned())
-            {
-                for mut r in inline::extract_runs(&emph.body) {
+                .map(|e| e.body.clone());
+            if body.as_ref().is_some_and(content_has_equation) {
+                let mut tmp = Paragraph::new();
+                collect_html_inlines_with_doc(
+                    &children[i + 1..end],
+                    &mut tmp,
+                    false,
+                    true,
+                    false,
+                    Some(html),
+                );
+                para.inlines.append(&mut tmp.inlines);
+            } else if let Some(body) = body {
+                for mut r in inline::extract_runs(&body) {
                     r.italic = true;
                     para.push_run(r);
                 }
             }
-            find_tag_end(children, i, tag.location())
+            end
         }
         "equation" => {
             let loc = tag.location();
             if let Some(c) = html
-                .introspector
+                .introspector()
                 .query_first(&typst::foundations::Selector::Location(loc))
             {
                 let omml = typort_math::equation_to_omml(&c);
@@ -1236,7 +1403,7 @@ fn handle_inline_tag(
             let end = find_tag_end(children, i, tag.location());
             let loc = tag.location();
             if let Some(c) = html
-                .introspector
+                .introspector()
                 .query_first(&typst::foundations::Selector::Location(loc))
                 && let Some(ref_elem) = c.to_packed::<RefElem>()
             {
@@ -1272,7 +1439,7 @@ fn handle_inline_tag(
             let end = find_tag_end(children, i, tag.location());
             let loc = tag.location();
             if let Some(c) = html
-                .introspector
+                .introspector()
                 .query_first(&typst::foundations::Selector::Location(loc))
                 && let Some(link_elem) = c.to_packed::<typst_library::model::LinkElem>()
             {
@@ -1312,13 +1479,16 @@ fn handle_inline_tag(
             let end = find_tag_end(children, i, tag.location());
             let loc = tag.location();
             if let Some(c) = html
-                .introspector
+                .introspector()
                 .query_first(&typst::foundations::Selector::Location(loc))
                 && let Some(cite_group) = c.to_packed::<CiteGroup>()
             {
+                // `CiteGroup::children` is now `Vec<Content>` (was
+                // `Vec<Packed<CiteElem>>`); unpack each to read its `key` label.
                 let keys: Vec<String> = cite_group
                     .children
                     .iter()
+                    .filter_map(|cite| cite.to_packed::<CiteElem>())
                     .map(|cite| cite.key.resolve().to_string())
                     .collect();
                 let display = collect_flat_text(&children[i + 1..end]);
@@ -1328,15 +1498,18 @@ fn handle_inline_tag(
             }
             end
         }
-        "par" => {
-            // A nested `par` reached in an inline context — e.g. an author-written
-            // `par()[...]` wrapping inline math, as journal templates do for the
-            // abstract. Typst emits it as Start(par) … End with the prose held in an
-            // `Element<p>` inside that range, interleaved with `equation` markers.
-            // The default `_ =>` arm below would `find_tag_end` straight past the
-            // inner nodes, dropping the prose and leaving only the equations as an
-            // orphan math paragraph. Descend instead, so prose and equations are
-            // collected into this same paragraph in document order.
+        "par" | "context" => {
+            // A nested `par` or a `context` block reached in an inline context —
+            // e.g. an author-written `par()[...]` wrapping inline math, or a
+            // `#context { [… $eq$ …] }` (journal templates do both). Typst emits it
+            // as Start(par|context) … End with the prose held in an `Element<p>`
+            // inside that range, interleaved with `equation` markers. The default
+            // `_ =>` arm below would `find_tag_end` straight past the inner nodes,
+            // dropping the prose and leaving only the equations as an orphan math
+            // paragraph (and on typst 0.15, where an inline equation also emits a
+            // sibling `<math>` MathML element, the equation would be lost entirely).
+            // Descend instead, so prose and equations are collected into this same
+            // paragraph in document order.
             let end = find_tag_end(children, i, tag.location());
             collect_par_inlines(&children[i + 1..end], ctx, para);
             end
@@ -1387,28 +1560,57 @@ fn handle_inline_html_element(elem: &HtmlElement, ctx: &mut WalkCtx, para: &mut 
     let tag_str = tag_name(elem);
     match tag_str.as_str() {
         "strong" | "b" => {
+            // Pass the doc and move ALL inlines (not just text runs): a `<strong>`
+            // can wrap an inline equation (typst 0.15 nests math inside the
+            // emphasis element), which `collect_html_inlines` emits as OMML via the
+            // introspector — `drain_text_runs` would silently drop that math.
             let mut tmp = Paragraph::new();
-            collect_html_inlines(&elem.children, &mut tmp, true, false, false);
-            for run in drain_text_runs(&mut tmp) {
-                para.push_run(run);
-            }
+            collect_html_inlines_with_doc(
+                &elem.children,
+                &mut tmp,
+                true,
+                false,
+                false,
+                Some(ctx.html_doc),
+            );
+            para.inlines.append(&mut tmp.inlines);
         }
         "em" | "i" => {
             let mut tmp = Paragraph::new();
-            collect_html_inlines(&elem.children, &mut tmp, false, true, false);
-            for run in drain_text_runs(&mut tmp) {
-                para.push_run(run);
-            }
+            collect_html_inlines_with_doc(
+                &elem.children,
+                &mut tmp,
+                false,
+                true,
+                false,
+                Some(ctx.html_doc),
+            );
+            para.inlines.append(&mut tmp.inlines);
         }
         "code" => {
             let mut tmp = Paragraph::new();
-            collect_html_inlines(&elem.children, &mut tmp, false, false, true);
-            for run in drain_text_runs(&mut tmp) {
-                para.push_run(run);
-            }
+            collect_html_inlines_with_doc(
+                &elem.children,
+                &mut tmp,
+                false,
+                false,
+                true,
+                Some(ctx.html_doc),
+            );
+            para.inlines.append(&mut tmp.inlines);
         }
-        "a" if has_attr_value(elem, "role", "doc-noteref") => {
-            // Already handled by Tag::Start("footnote")
+        "math" => {
+            // typst 0.15 emits an inline equation as a native MathML `<math>`
+            // element ALONGSIDE the `Tag::Start("equation")` introspection marker.
+            // The equation handler already produced OMML from that marker, so skip
+            // the `<math>` element — walking it would re-emit the equation's glyphs
+            // as literal duplicate text.
+        }
+        _ if has_attr_value(elem, "role", "doc-noteref") => {
+            // The footnote reference marker. typst 0.15 puts the role on the
+            // wrapping `<sup>` (0.14 used `<a>`), so match by role, not tag name.
+            // Already emitted by the `Tag::Start("footnote")` handler; skip its
+            // text so the number isn't also rendered as literal superscript.
         }
         "a" => {
             // External hyperlink from HTML <a href="...">
@@ -1490,11 +1692,21 @@ fn collect_html_inlines_with_doc(
             }
             HtmlNode::Element(elem) => {
                 let tag = tag_name(elem);
+                // typst 0.15 emits an inline equation as a native MathML `<math>`
+                // element next to its `Tag::Start("equation")` marker. The marker
+                // produces the OMML, so skip `<math>` to avoid re-emitting its
+                // glyphs as duplicate literal text.
+                if tag == "math" {
+                    continue;
+                }
                 let new_bold = bold || tag == "strong" || tag == "b";
                 let new_italic = italic || tag == "em" || tag == "i";
                 let new_monospace = monospace || tag == "code";
-                // Skip footnote reference links
-                if tag == "a" && has_attr_value(elem, "role", "doc-noteref") {
+                // Skip the footnote reference marker (its number is emitted by the
+                // `Tag::Start("footnote")` handler). typst 0.15 puts the
+                // `doc-noteref` role on the `<sup>` (0.14 used `<a>`), so match by
+                // role rather than tag name.
+                if has_attr_value(elem, "role", "doc-noteref") {
                     continue;
                 }
                 collect_html_inlines_with_doc(
@@ -1523,7 +1735,7 @@ fn collect_html_inlines_with_doc(
                     {
                         let loc = tag.location();
                         if let Some(c) = doc
-                            .introspector
+                            .introspector()
                             .query_first(&typst::foundations::Selector::Location(loc))
                         {
                             let omml = typort_math::equation_to_omml(&c);
@@ -1542,7 +1754,7 @@ fn handle_equation(tag: &Tag, ctx: &mut WalkCtx) {
     let html = ctx.html_doc;
     let loc = tag.location();
     let Some(content) = html
-        .introspector
+        .introspector()
         .query_first(&typst::foundations::Selector::Location(loc))
     else {
         return;
@@ -1725,7 +1937,7 @@ fn convert_html_table(
     // or when the element is not queryable (e.g. nested tables with no location).
     if let Some(loc) = table_loc
         && let Some(table_elem) = html_doc
-            .introspector
+            .introspector()
             .query_first(&typst::foundations::Selector::Location(loc))
             .and_then(|c| c.to_packed::<TableElem>().cloned())
     {
@@ -2273,7 +2485,10 @@ fn compute_equation_number(
         } else {
             vec![eq_state.global_eq]
         };
-        Some(pattern.apply(&nums).to_string())
+        // `NumberingPattern::apply` now takes a `warning_context` and returns a
+        // `StrResult`; pass `None` (no engine to warn through here) and drop a
+        // formatting error rather than panicking.
+        pattern.apply(None, &nums).ok().map(|s| s.to_string())
     } else {
         None
     }
@@ -2539,7 +2754,12 @@ fn apply_hanging_indent_from_source(world: &TyportWorld, doc: &mut Document) {
                 InlineElement::Text(run) => run.span,
                 _ => None,
             })
-            .filter_map(|span| source.range(span).map(|r| r.start))
+            // `Source::range` now takes a decomposed `(SpanNumber, Option<SubRange>)`;
+            // `WorldExt::range` does that decomposition for a `Span`. Keep the
+            // main-source-only behavior by skipping spans from other files
+            // (imported templates), which previously yielded `None` here.
+            .filter(|span| span.id() == Some(source.id()))
+            .filter_map(|span| typst_library::WorldExt::range(world, span).map(|r| r.start))
             .min()
         else {
             continue;
@@ -2675,7 +2895,7 @@ fn last_text_in(node: &typst_syntax::SyntaxNode) -> Option<String> {
     let mut found = None;
     for child in node.children() {
         if child.kind() == typst_syntax::SyntaxKind::Text {
-            let t = child.text().trim().to_string();
+            let t = child.leaf_text().trim().to_string();
             if !t.is_empty() {
                 found = Some(t);
             }
@@ -2690,7 +2910,7 @@ fn collect_pagebreak_anchors(node: &typst_syntax::SyntaxNode, out: &mut Vec<Stri
     let mut last_text: Option<String> = None;
     for child in node.children() {
         if child.kind() == typst_syntax::SyntaxKind::Text {
-            let t = child.text().trim().to_string();
+            let t = child.leaf_text().trim().to_string();
             if !t.is_empty() {
                 last_text = Some(t);
             }
@@ -2737,7 +2957,7 @@ fn collect_colbreak_anchors(node: &typst_syntax::SyntaxNode, out: &mut Vec<Strin
     let mut last_text: Option<String> = None;
     for child in node.children() {
         if child.kind() == typst_syntax::SyntaxKind::Text {
-            let t = child.text().trim().to_string();
+            let t = child.leaf_text().trim().to_string();
             if !t.is_empty() {
                 last_text = Some(t);
             }
@@ -2877,7 +3097,7 @@ fn collect_text_from_syntax_node(node: &typst_syntax::SyntaxNode) -> String {
     use typst_syntax::SyntaxKind;
 
     if node.kind() == SyntaxKind::Text || node.kind() == SyntaxKind::Space {
-        return node.text().to_string();
+        return node.leaf_text().to_string();
     }
     let mut result = String::new();
     for child in node.children() {
@@ -2887,15 +3107,17 @@ fn collect_text_from_syntax_node(node: &typst_syntax::SyntaxNode) -> String {
 }
 
 fn extract_document_metadata(html_doc: &HtmlDocument, doc: &mut Document) {
+    // The `info` field is now private; read it through the `Document` trait's
+    // `info()` accessor. The trait is referenced fully-qualified to avoid a name
+    // clash with the OOXML `Document` already in scope (the `doc` parameter).
+    let info = typst_library::model::Document::info(html_doc);
     // Prefer explicit metadata from `#set document(title: ..., author: ...)`
-    if let Some(title) = &html_doc.info.title {
+    if let Some(title) = &info.title {
         doc.metadata.title = Some(title.to_string());
     }
-    if !html_doc.info.author.is_empty() {
+    if !info.author.is_empty() {
         doc.metadata.author = Some(
-            html_doc
-                .info
-                .author
+            info.author
                 .iter()
                 .map(typst::ecow::EcoString::as_str)
                 .collect::<Vec<_>>()

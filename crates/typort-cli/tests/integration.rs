@@ -2909,7 +2909,7 @@ fn inline_math_interleaved_with_text_in_same_paragraph() {
 /// Compile a .typ to PDF via Typst's native renderer (ground truth).
 fn typst_to_pdf(typ_path: &Path) -> Vec<u8> {
     let world = typort_core::TyportWorld::new(typ_path).unwrap();
-    let paged = typst::compile::<typst::layout::PagedDocument>(&world)
+    let paged = typst::compile::<typst_layout::PagedDocument>(&world)
         .output
         .unwrap();
     typst_pdf::pdf(&paged, &typst_pdf::PdfOptions::default()).unwrap()

@@ -6,7 +6,7 @@ use typst_layout::PagedDocument;
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub(super) fn extract_images_from_paged(paged: &PagedDocument) -> Vec<ImageData> {
     let mut images = Vec::new();
-    for page in &paged.pages {
+    for page in paged.pages() {
         collect_frame_images(&page.frame, &mut images);
     }
     images
@@ -45,7 +45,7 @@ fn collect_frame_images(frame: &Frame, images: &mut Vec<ImageData>) {
 /// `<figure>`s pull from here, `<img>` tags pull from `extract_images_from_paged`.
 pub(super) fn extract_figure_rasters_from_paged(paged: &PagedDocument) -> Vec<ImageData> {
     let mut out = Vec::new();
-    for page in &paged.pages {
+    for page in paged.pages() {
         collect_figure_rasters(&page.frame, &mut out);
     }
     out
@@ -84,7 +84,10 @@ pub(super) fn frame_has_curve(frame: &Frame) -> bool {
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn rasterize_frame(frame: &Frame) -> Option<ImageData> {
     use typst::foundations::{Content, Smart};
+    use typst::layout::{Abs, Sides};
+    use typst::utils::Scalar;
     use typst_layout::Page;
+    use typst_render::RenderOptions;
 
     let size = frame.size();
     let (width_pt, height_pt) = (size.x.to_pt(), size.y.to_pt());
@@ -95,12 +98,20 @@ fn rasterize_frame(frame: &Frame) -> Option<ImageData> {
     let pixel_per_pt = 150.0 / 72.0;
     let page = Page {
         frame: frame.clone(),
+        // No bleed: we rasterize the figure's own footprint exactly.
+        bleed: Sides::splat(Abs::zero()),
         fill: Smart::Auto, // -> white background for raster
         numbering: None,
         supplement: Content::empty(),
         number: 1,
     };
-    let pixmap = typst_render::render(&page, pixel_per_pt);
+    // `render` now takes `&RenderOptions` (an `f32` scale was removed in 0.15);
+    // set the pixels-per-point scale on a defaulted options value.
+    let opts = RenderOptions {
+        pixel_per_pt: Scalar::new(pixel_per_pt),
+        ..RenderOptions::default()
+    };
+    let pixmap = typst_render::render(&page, &opts);
     let bytes = pixmap.encode_png().ok()?;
     Some(ImageData {
         bytes,

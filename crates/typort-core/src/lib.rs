@@ -17,7 +17,7 @@ mod tests {
     #[test]
     fn compile_hello_typ() {
         let world = TyportWorld::new(Path::new("../../tests/fixtures/hello.typ")).unwrap();
-        let result = typst::compile::<typst::layout::PagedDocument>(&world);
+        let result = typst::compile::<typst_layout::PagedDocument>(&world);
         assert!(
             result.output.is_ok(),
             "compilation failed: {:?}",
