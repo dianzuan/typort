@@ -48,6 +48,11 @@ toml = "0.8"
 # tree transitively; `local-offset` enables querying the system time zone.
 time = { version = "0.3", features = ["local-offset"] }
 
+# Font name-table access — the same crate (and version) typst-library 0.14.2
+# exposes via `Font::ttf()`, so the `&ttf_parser::Face` we read localized CJK
+# family names from is the exact type Typst hands us (no duplicate resolved).
+ttf-parser = "0.25"
+
 # Math character classification — the same crate Typst uses, so our nary
 # operand boundary (stop at a Relation-class symbol) matches Typst's own model.
 unicode-math-class = "0.1"

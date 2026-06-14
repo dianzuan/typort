@@ -10,6 +10,7 @@ use typort_ooxml::document::{
     Alignment, Document, DocumentStyle, FootnoteFormat, HeaderFooter, InlineElement,
     PageNumberFormat, PageSettings, Paragraph, ParagraphStyle, Run, SectionBreak, SectionBreakType,
 };
+use typst::World;
 use typst::layout::{Frame, FrameItem, PagedDocument, Point};
 
 /// Per-span and per-text style override maps produced by [`build_style_override_maps`].
@@ -116,6 +117,9 @@ pub fn extract_document_style(paged: &PagedDocument) -> DocumentStyle {
         body_size_half_pt,
         line_spacing,
         first_line_indent_twips,
+        // Geometry detection cannot recover em units; the source-AST override
+        // (apply_source_overrides) sets this when an em indent was declared.
+        first_line_indent_chars: None,
         first_line_indent_all: false,
         footnote_format: FootnoteFormat::default(),
         code_font,
@@ -771,14 +775,70 @@ impl SourceStyleOverrides {
 
 /// Extract style overrides from Typst source AST in a single walk.
 ///
-/// Reads `#set page(...)`, `#set text(...)`, `#set par(...)` rules.
-/// Returns overrides that should take precedence over heuristic detection.
+/// Reads `#set page(...)`, `#set text(...)`, `#set par(...)` rules, but only
+/// those in *document-global* scope: top-level of the file, or inside the
+/// closure named by a `#show:` template (whose names are passed in
+/// `template_names`). A `set text(size:)` buried in a `#block[…]` or a
+/// non-template helper closure is element-/locally-scoped and must not clobber
+/// the real global body size.
 #[must_use]
-pub fn extract_source_style_overrides(source: &str) -> SourceStyleOverrides {
+pub fn extract_source_style_overrides(
+    source: &str,
+    template_names: &[String],
+) -> SourceStyleOverrides {
     let root = typst_syntax::parse(source);
     let mut ovr = SourceStyleOverrides::default();
-    collect_set_rules(&root, &mut ovr);
+    collect_global_set_rules(&root, template_names, true, &mut ovr);
     ovr
+}
+
+/// Parse `source` and return the names of the closures applied as document
+/// templates via `#show: …` (e.g. `tmpl` for `#show: tmpl.with(...)`).
+#[must_use]
+pub fn extract_show_template_names_from_source(source: &str) -> Vec<String> {
+    let root = typst_syntax::parse(source);
+    extract_show_template_names(&root)
+}
+
+/// Collect the closure names referenced by document-wide `#show: NAME` /
+/// `#show: NAME.with(...)` rules (`selector()` is `None`). The named closure
+/// holds the document's real global `set` rules, so its body must be treated as
+/// global scope during [`collect_global_set_rules`].
+fn extract_show_template_names(root: &typst_syntax::SyntaxNode) -> Vec<String> {
+    use typst_syntax::SyntaxKind;
+    use typst_syntax::ast;
+
+    let mut names = Vec::new();
+    let mut stack = vec![root.clone()];
+    while let Some(node) = stack.pop() {
+        if node.kind() == SyntaxKind::ShowRule
+            && let Some(show) = node.cast::<ast::ShowRule<'_>>()
+            && show.selector().is_none()
+        {
+            match show.transform() {
+                // `#show: tmpl.with(...)` => FuncCall whose callee is a
+                // FieldAccess `tmpl.with`; the template is the FieldAccess target.
+                ast::Expr::FuncCall(call) => {
+                    if let ast::Expr::FieldAccess(access) = call.callee()
+                        && access.field().as_str() == "with"
+                        && let ast::Expr::Ident(ident) = access.target()
+                    {
+                        names.push(ident.as_str().to_string());
+                    } else if let ast::Expr::Ident(ident) = call.callee() {
+                        // `#show: tmpl()` => bare ident callee.
+                        names.push(ident.as_str().to_string());
+                    }
+                }
+                // `#show: tmpl` => the transform is the ident itself.
+                ast::Expr::Ident(ident) => names.push(ident.as_str().to_string()),
+                _ => {}
+            }
+        }
+        for child in node.children() {
+            stack.push(child.clone());
+        }
+    }
+    names
 }
 
 /// A `#set par(hanging-indent: …)` rule recovered from the source: the byte
@@ -867,43 +927,72 @@ fn collect_import_paths(node: &typst_syntax::SyntaxNode, paths: &mut Vec<String>
     }
 }
 
-fn collect_set_rules(node: &typst_syntax::SyntaxNode, ovr: &mut SourceStyleOverrides) {
+/// Walk the AST collecting only document-global `set`/`#page(...)` rules into
+/// `ovr`. `in_global_scope` tracks whether the current node is at file top-level
+/// or inside a `#show:` template closure body; set rules nested in content
+/// blocks or helper closures are skipped (still recursed for nested templates).
+fn collect_global_set_rules(
+    node: &typst_syntax::SyntaxNode,
+    template_names: &[String],
+    in_global_scope: bool,
+    ovr: &mut SourceStyleOverrides,
+) {
     use typst_syntax::SyntaxKind;
+    use typst_syntax::ast;
 
-    // Skip SetRule nodes inside ShowRule — those apply to specific elements,
-    // not to the document globally.
-    if node.kind() == SyntaxKind::ShowRule {
-        return;
+    match node.kind() {
+        // A show rule's recipe applies to specific elements, not globally — and
+        // its own `set` rules are element-scoped. Don't descend.
+        SyntaxKind::ShowRule => return,
+        // A content block (`[...]` / `#block[...]`) introduces a local scope.
+        SyntaxKind::ContentBlock => {
+            for child in node.children() {
+                collect_global_set_rules(child, template_names, false, ovr);
+            }
+            return;
+        }
+        // A `#let NAME(...) = …` closure. The show-template closure holds the
+        // real document globals; any other closure is a local helper.
+        SyntaxKind::LetBinding => {
+            if let Some(binding) = node.cast::<ast::LetBinding<'_>>()
+                && let ast::LetBindingKind::Closure(name) = binding.kind()
+            {
+                let child_global = template_names.iter().any(|t| t == name.as_str());
+                for child in node.children() {
+                    collect_global_set_rules(child, template_names, child_global, ovr);
+                }
+                return;
+            }
+        }
+        _ => {}
     }
 
-    if node.kind() == SyntaxKind::SetRule
-        && let Some(set) = node.cast::<typst_syntax::ast::SetRule<'_>>()
-    {
-        let target_name = match set.target() {
-            typst_syntax::ast::Expr::Ident(ident) => Some(ident.as_str().to_string()),
-            _ => None,
-        };
-        if let Some(name) = target_name {
-            match name.as_str() {
+    if in_global_scope {
+        if node.kind() == SyntaxKind::SetRule
+            && let Some(set) = node.cast::<ast::SetRule<'_>>()
+            && let ast::Expr::Ident(ident) = set.target()
+        {
+            match ident.as_str() {
                 "page" => parse_page_args(set.args(), ovr),
                 "text" => parse_text_args(set.args(), ovr),
                 "par" => parse_par_args(set.args(), ovr),
                 _ => {}
             }
         }
-    }
 
-    // Also honor the `#page(...)` function-call form (e.g. `#page(columns: 2)[…]`),
-    // not just `#set page(...)`. Its named args carry the same page settings.
-    if node.kind() == SyntaxKind::FuncCall
-        && let Some(call) = node.cast::<typst_syntax::ast::FuncCall<'_>>()
-        && matches!(call.callee(), typst_syntax::ast::Expr::Ident(i) if i.as_str() == "page")
-    {
-        parse_page_args(call.args(), ovr);
+        // Also honor the `#page(...)` function-call form (e.g.
+        // `#page(columns: 2)[…]`), not just `#set page(...)`. Its named args
+        // carry the same page settings.
+        if node.kind() == SyntaxKind::FuncCall
+            && let Some(call) = node.cast::<ast::FuncCall<'_>>()
+            && matches!(call.callee(), ast::Expr::Ident(i) if i.as_str() == "page")
+        {
+            parse_page_args(call.args(), ovr);
+        }
     }
 
     for child in node.children() {
-        collect_set_rules(child, ovr);
+        collect_global_set_rules(child, template_names, in_global_scope, ovr);
     }
 }
 
@@ -1409,7 +1498,7 @@ fn default_margin_pt(page_width: f64, page_height: f64) -> f64 {
 /// falls back to Typst's default margin (`2.5/21 * min(w, h)`).
 ///
 /// Returns `(body_top, body_bottom)` in pt — the y-range of the body zone.
-fn find_body_zone(
+pub(super) fn find_body_zone(
     page_width: f64,
     page_height: f64,
     margin_top_pt: Option<f64>,
@@ -1976,6 +2065,260 @@ fn strip_redundant_heading_run(run: &mut Run, style_size: u32) {
     }
 }
 
+/// Windows language IDs (LCIDs) for the localized font-name records that match a
+/// document's declared East-Asian language tag, in preference order. Returns an
+/// empty list for non-CJK tags (no localized name to prefer over the typographic
+/// English family). Drives [`localize_cjk_font_names`].
+fn cjk_localized_lang_ids(lang_tag: &str) -> Vec<u16> {
+    let tag = lang_tag.to_ascii_lowercase();
+    let mut subtags = tag.split(['-', '_']);
+    let primary = subtags.next().unwrap_or("");
+    let rest: Vec<&str> = subtags.collect();
+    match primary {
+        "zh" => {
+            // Traditional-script regions/script subtag prefer the Taiwan/HK/Macau
+            // name records; everything else (CN, SG, Hans, or a bare `zh`) is
+            // Simplified and prefers the PRC record. The English typographic
+            // family stays the fallback if neither localized record exists.
+            let traditional = rest
+                .iter()
+                .any(|p| matches!(*p, "tw" | "hk" | "mo" | "hant"));
+            if traditional {
+                vec![0x0404, 0x0C04, 0x1404, 0x0804]
+            } else {
+                vec![0x0804, 0x1004, 0x0404]
+            }
+        }
+        "ja" => vec![0x0411],
+        "ko" => vec![0x0412],
+        _ => Vec::new(),
+    }
+}
+
+/// Rewrite every East-Asian font name in `doc` to its localized form using
+/// `name_map` (rendered English family → localized display name). Typst exposes
+/// these CJK fonts only by their English typographic name (e.g. `SimSun`), so the
+/// `w:eastAsia` strings that reach Word are English; Word/users expect the
+/// localized name (`宋体`). Latin (`w:ascii`) fonts and families absent from the
+/// map are left untouched. A no-op when `name_map` is empty.
+fn localize_cjk_font_names(doc: &mut Document, name_map: &HashMap<String, String>) {
+    if name_map.is_empty() {
+        return;
+    }
+    if let Some(localized) = name_map.get(&doc.style.body_font_east_asia) {
+        doc.style.body_font_east_asia = localized.clone();
+    }
+    for element in &mut doc.body.elements {
+        localize_block_element(element, name_map);
+    }
+    for footnote in &mut doc.footnotes {
+        for inline in &mut footnote.content {
+            if let InlineElement::Text(run) = inline {
+                localize_run_font(run, name_map);
+            }
+        }
+    }
+}
+
+/// Remap a single run's East-Asian font via `name_map`. Latin (`font_ascii`) is
+/// never touched — only `w:eastAsia` carries the localizable CJK family.
+fn localize_run_font(run: &mut Run, name_map: &HashMap<String, String>) {
+    if let Some(family) = &run.font_east_asia
+        && let Some(localized) = name_map.get(family)
+    {
+        run.font_east_asia = Some(localized.clone());
+    }
+}
+
+fn localize_paragraph_fonts(para: &mut Paragraph, name_map: &HashMap<String, String>) {
+    for inline in &mut para.inlines {
+        match inline {
+            InlineElement::Text(run) => localize_run_font(run, name_map),
+            InlineElement::Hyperlink { runs, .. } => {
+                for run in runs {
+                    localize_run_font(run, name_map);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn localize_block_element(
+    element: &mut typort_ooxml::document::BlockElement,
+    name_map: &HashMap<String, String>,
+) {
+    match element {
+        typort_ooxml::document::BlockElement::Paragraph(p) => {
+            localize_paragraph_fonts(p, name_map);
+        }
+        typort_ooxml::document::BlockElement::Table(t) => {
+            for row in &mut t.rows {
+                for cell in &mut row.cells {
+                    for para in &mut cell.paragraphs {
+                        localize_paragraph_fonts(para, name_map);
+                    }
+                }
+            }
+        }
+        typort_ooxml::document::BlockElement::BibliographyBlock { paragraphs } => {
+            for p in paragraphs {
+                localize_paragraph_fonts(p, name_map);
+            }
+        }
+    }
+}
+
+/// The localized FAMILY (name ID 1) string from a font's name table for the first
+/// matching Windows language id in `lang_ids`, or `None` if the face carries no
+/// such localized record (then the English typographic family is kept).
+fn localized_family_from_face(face: &ttf_parser::Face, lang_ids: &[u16]) -> Option<String> {
+    for &want in lang_ids {
+        for entry in face.names() {
+            if entry.name_id == ttf_parser::name_id::FAMILY
+                && entry.platform_id == ttf_parser::PlatformId::Windows
+                && entry.language_id == want
+                && let Some(name) = entry.to_string()
+            {
+                return Some(name);
+            }
+        }
+    }
+    None
+}
+
+/// Translate every East-Asian font name in `doc` to the localized display name
+/// Word shows for the document's declared language (e.g. `SimSun` → `宋体`).
+///
+/// Typst indexes these CJK fonts only by their English typographic family
+/// (`info.family`), so both the source-declared body default *and* the rendered
+/// per-run families that reach `w:eastAsia` are English. The localized name lives
+/// in each font's own `name` table; we read it from the **font book** (not the
+/// rendered frames) so it works even when Typst substitutes a different face at
+/// render time — e.g. Typst's known `SimSun`→fallback substitution (typst#6205),
+/// where the body previews in Noto Serif SC yet the author clearly meant `SimSun`.
+///
+/// A no-op for non-CJK documents and for fonts that carry no differing localized
+/// name (then the English family is kept). Pure-string translation only — it
+/// never changes which glyphs Word renders, just the font *name* in the box.
+pub fn localize_cjk_fonts(world: &dyn World, doc: &mut Document) {
+    let lang_ids = cjk_localized_lang_ids(&doc.style.lang_east_asia);
+    if lang_ids.is_empty() {
+        return;
+    }
+    let mut name_map: HashMap<String, String> = HashMap::new();
+    for family in collect_cjk_font_names(doc) {
+        if let Some(localized) = localized_name_via_book(world, &family, &lang_ids)
+            && localized != family
+        {
+            name_map.insert(family, localized);
+        }
+    }
+    localize_cjk_font_names(doc, &name_map);
+}
+
+/// The distinct East-Asian font family names currently in `doc`: the body default
+/// plus every per-run `font_east_asia` override (body, tables, bibliography,
+/// hyperlinks, footnotes).
+fn collect_cjk_font_names(doc: &Document) -> HashSet<String> {
+    let mut names = HashSet::new();
+    names.insert(doc.style.body_font_east_asia.clone());
+    let visit_run = |run: &Run, names: &mut HashSet<String>| {
+        if let Some(f) = &run.font_east_asia {
+            names.insert(f.clone());
+        }
+    };
+    for element in &doc.body.elements {
+        for_each_run_in_block(element, &mut |r| visit_run(r, &mut names));
+    }
+    for footnote in &doc.footnotes {
+        for inline in &footnote.content {
+            if let InlineElement::Text(run) = inline
+                && let Some(f) = &run.font_east_asia
+            {
+                names.insert(f.clone());
+            }
+        }
+    }
+    names
+}
+
+/// Walk every text/hyperlink run in a block element, applying `f`.
+fn for_each_run_in_block(element: &typort_ooxml::document::BlockElement, f: &mut dyn FnMut(&Run)) {
+    let visit_para = |para: &Paragraph, f: &mut dyn FnMut(&Run)| {
+        for inline in &para.inlines {
+            match inline {
+                InlineElement::Text(run) => f(run),
+                InlineElement::Hyperlink { runs, .. } => {
+                    for run in runs {
+                        f(run);
+                    }
+                }
+                _ => {}
+            }
+        }
+    };
+    match element {
+        typort_ooxml::document::BlockElement::Paragraph(p) => visit_para(p, f),
+        typort_ooxml::document::BlockElement::Table(t) => {
+            for row in &t.rows {
+                for cell in &row.cells {
+                    for para in &cell.paragraphs {
+                        visit_para(para, f);
+                    }
+                }
+            }
+        }
+        typort_ooxml::document::BlockElement::BibliographyBlock { paragraphs } => {
+            for p in paragraphs {
+                visit_para(p, f);
+            }
+        }
+    }
+}
+
+/// Look up `family` in the font book and read its localized FAMILY name for the
+/// first matching `lang_ids` entry. Works for any installed font regardless of
+/// whether it was selected during rendering.
+fn localized_name_via_book(world: &dyn World, family: &str, lang_ids: &[u16]) -> Option<String> {
+    // The book keys families by their lowercased English typographic name, and
+    // Typst's suffix-trimming can group distinct files under one key (e.g.
+    // `SimSun-ExtB` lands under `SimSun` — and it carries no localized record).
+    // So scan every variant and take the first that advertises a localized name,
+    // rather than the arbitrary first variant.
+    //
+    // But weight variants of one design can also share a key while carrying
+    // DISTINCT English families: "Noto Serif SC Light" groups under "Noto Serif
+    // SC", and its localized record would mislabel the requested family with the
+    // weight name. So prefer a variant whose English typographic family (name ID
+    // 1, LCID 0x0409) equals the requested family, and skip variants whose
+    // English family differs from it.
+    world
+        .book()
+        .select_family(&family.to_lowercase())
+        .filter_map(|index| world.font(index))
+        .filter(|font| {
+            english_family_from_face(font.ttf()).is_none_or(|eng| eng.eq_ignore_ascii_case(family))
+        })
+        .find_map(|font| localized_family_from_face(font.ttf(), lang_ids))
+}
+
+/// The English typographic FAMILY (name ID 1, LCID 0x0409) of a face, or `None`
+/// if it carries no such record. Used to skip same-keyed weight variants whose
+/// English family differs from the requested one (e.g. "Noto Serif SC Light").
+fn english_family_from_face(face: &ttf_parser::Face) -> Option<String> {
+    face.names().into_iter().find_map(|entry| {
+        if entry.name_id == ttf_parser::name_id::FAMILY
+            && entry.platform_id == ttf_parser::PlatformId::Windows
+            && entry.language_id == 0x0409
+        {
+            entry.to_string()
+        } else {
+            None
+        }
+    })
+}
+
 /// Build per-span and per-text style override maps from paged run styles.
 ///
 /// Compares each rendered run against the detected baselines (font + size)
@@ -2339,6 +2682,83 @@ mod tests {
     use super::*;
 
     #[test]
+    fn cjk_localized_lang_ids_zh_cn_prefers_prc() {
+        // zh-CN must prefer the PRC localized-name record (LCID 0x0804 → 宋体).
+        assert_eq!(
+            cjk_localized_lang_ids("zh-CN").first().copied(),
+            Some(0x0804)
+        );
+    }
+
+    #[test]
+    fn cjk_localized_lang_ids_non_cjk_is_empty() {
+        // A Latin document has no localized CJK name to prefer.
+        assert!(cjk_localized_lang_ids("en-US").is_empty());
+    }
+
+    #[test]
+    fn localize_cjk_font_names_remaps_body_default_and_runs() {
+        // At this pipeline stage a zh-CN document carries English CJK family names
+        // (SimSun/SimHei). The localized-name map translates them to what Word
+        // shows in its font box; Latin fonts and unmapped families stay as-is.
+        let mut doc = Document::new();
+        doc.style.body_font_ascii = "Times New Roman".to_string();
+        doc.style.body_font_east_asia = "SimSun".to_string();
+
+        let mut para = Paragraph::new();
+        let mut heading_run = Run::new("黑体标题");
+        heading_run.font_east_asia = Some("SimHei".to_string());
+        para.push_run(heading_run);
+        let mut latin_run = Run::new("Latin");
+        latin_run.font_ascii = Some("Arial".to_string());
+        para.push_run(latin_run);
+        let mut unmapped_run = Run::new("仿宋");
+        unmapped_run.font_east_asia = Some("FangSong".to_string());
+        para.push_run(unmapped_run);
+        doc.body
+            .elements
+            .push(typort_ooxml::document::BlockElement::Paragraph(para));
+
+        let name_map = HashMap::from([
+            ("SimSun".to_string(), "宋体".to_string()),
+            ("SimHei".to_string(), "黑体".to_string()),
+        ]);
+        localize_cjk_font_names(&mut doc, &name_map);
+
+        assert_eq!(
+            doc.style.body_font_east_asia, "宋体",
+            "body default SimSun → 宋体"
+        );
+        let runs: Vec<&Run> = doc
+            .body
+            .elements
+            .iter()
+            .flat_map(|e| {
+                if let typort_ooxml::document::BlockElement::Paragraph(p) = e {
+                    p.text_runs().collect::<Vec<_>>()
+                } else {
+                    Vec::new()
+                }
+            })
+            .collect();
+        assert_eq!(
+            runs[0].font_east_asia.as_deref(),
+            Some("黑体"),
+            "per-run SimHei → 黑体"
+        );
+        assert_eq!(
+            runs[1].font_ascii.as_deref(),
+            Some("Arial"),
+            "Latin ascii font is left untouched"
+        );
+        assert_eq!(
+            runs[2].font_east_asia.as_deref(),
+            Some("FangSong"),
+            "a family absent from the map is left untouched"
+        );
+    }
+
+    #[test]
     fn collect_hanging_indent_rules_records_set_and_reset() {
         // A non-zero rule then a reset (0em) rule are both recorded, in source
         // order, with the reset flagged `nonzero == false`.
@@ -2487,7 +2907,7 @@ mod tests {
     #[test]
     fn source_ast_extracts_text_size_and_par_spacing() {
         let source = r#"#set text(font: "Linux Libertine", size: 10.5pt)"#;
-        let ovr = extract_source_style_overrides(source);
+        let ovr = extract_source_style_overrides(source, &[]);
         assert_eq!(ovr.text_size_half_pt, Some(21));
         assert_eq!(
             ovr.text_font.as_deref(),
@@ -2498,7 +2918,7 @@ mod tests {
     #[test]
     fn source_ast_extracts_par_settings() {
         let source = r#"#set par(first-line-indent: 2em, spacing: 1.5em, justify: true)"#;
-        let ovr = extract_source_style_overrides(source);
+        let ovr = extract_source_style_overrides(source, &[]);
         assert_eq!(ovr.first_line_indent_em, Some(2.0));
         assert_eq!(ovr.par_spacing_em, Some(1.5));
         assert_eq!(ovr.justify, Some(true));
@@ -2507,7 +2927,7 @@ mod tests {
     #[test]
     fn source_ast_extracts_page_margin() {
         let source = r#"#set page(margin: 2cm)"#;
-        let ovr = extract_source_style_overrides(source);
+        let ovr = extract_source_style_overrides(source, &[]);
         let expected = pt_to_twips(2.0_f64 * 72.0 / 2.54);
         assert_eq!(ovr.margin_top, Some(expected));
         assert_eq!(ovr.margin_left, Some(expected));
@@ -2516,7 +2936,7 @@ mod tests {
     #[test]
     fn source_ast_complex_paper_pattern() {
         let source = r#"#set par(leading: 1.5em, first-line-indent: 2em)"#;
-        let ovr = extract_source_style_overrides(source);
+        let ovr = extract_source_style_overrides(source, &[]);
         assert!(
             ovr.first_line_indent_em.is_some(),
             "first-line-indent should be detected, got None"
@@ -2526,5 +2946,53 @@ mod tests {
             "first-line-indent should be > 0"
         );
         assert!(ovr.par_leading_em.is_some(), "leading should be detected");
+    }
+
+    #[test]
+    fn source_ast_scope_aware_show_template_body_size() {
+        // The real global body size lives inside the show-template closure;
+        // a 9pt helper closure and a 9pt nested block must NOT win.
+        let body = r#"
+#let helper() = {
+  set text(size: 9pt)
+  [helper text]
+}
+#let tmpl(body) = {
+  set text(size: 12pt)
+  body
+}
+= Heading
+Body paragraph.
+#block[
+  #set text(size: 9pt)
+  A small block.
+]
+"#;
+
+        let with_call = format!("{body}\n#show: tmpl.with()");
+        let names = extract_show_template_names_from_source(&with_call);
+        assert_eq!(names, vec!["tmpl".to_string()]);
+        let ovr = extract_source_style_overrides(&with_call, &names);
+        assert_eq!(
+            ovr.text_size_half_pt,
+            Some(24),
+            "show-template body size (12pt) must win over helper/block 9pt"
+        );
+
+        // Bare `#show: tmpl` form resolves identically.
+        let bare = format!("{body}\n#show: tmpl");
+        let bare_names = extract_show_template_names_from_source(&bare);
+        assert_eq!(bare_names, vec!["tmpl".to_string()]);
+        let ovr_bare = extract_source_style_overrides(&bare, &bare_names);
+        assert_eq!(ovr_bare.text_size_half_pt, Some(24));
+
+        // No template at all: a bare top-level `#set text` still resolves.
+        let top_level = r#"#set text(size: 10.5pt)
+= Heading
+Body."#;
+        let top_names = extract_show_template_names_from_source(top_level);
+        assert!(top_names.is_empty());
+        let ovr_top = extract_source_style_overrides(top_level, &top_names);
+        assert_eq!(ovr_top.text_size_half_pt, Some(21));
     }
 }

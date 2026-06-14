@@ -1,0 +1,15 @@
+[journal]
+name = "中国软科学"
+
+[page]
+margin_top_cm = 1.8
+margin_bottom_cm = 2.1
+margin_left_cm = 2.1
+margin_right_cm = 2.0
+
+[font]
+body_size_pt = 10.5
+heading1_size_pt = 10.5
+
+[footnote]
+format = "circled"

@@ -341,6 +341,19 @@ pub(super) fn extract_lines_from_all_pages(paged: &PagedDocument) -> Vec<FrameLi
         let mut text_items = Vec::new();
         collect_text_items_with_pos(&page.frame, Point::zero(), &mut text_items);
 
+        // Drop header/footer chrome (running heads, page numbers) before it
+        // becomes a candidate body line. We use the *same* margin boundary that
+        // `detect_page_numbering`/`extract_footer` use to LOCATE the footer, so
+        // anything outside the body zone is by definition margin content — never
+        // in-body text. Passing `None, None` matches that boundary exactly.
+        let (body_top, body_bottom) = super::page::find_body_zone(
+            page.frame.width().to_pt(),
+            page.frame.height().to_pt(),
+            None,
+            None,
+        );
+        text_items.retain(|item| body_top <= item.y && item.y <= body_bottom);
+
         let mut y_groups: BTreeMap<i64, Vec<&FrameTextItem>> = BTreeMap::new();
         for item in &text_items {
             let y_key = (item.y / 8.0).round() as i64;

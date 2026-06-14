@@ -188,6 +188,9 @@ pub struct Run {
     pub size_half_pt: Option<u32>,
     /// Source span for cross-referencing with `PagedDocument` styling.
     pub span: Option<typst_syntax::Span>,
+    /// A forced line break (`\` in Typst): the writer emits `<w:r><w:br/></w:r>`
+    /// and ignores `text`. Kept distinct so it never coalesces with text runs.
+    pub line_break: bool,
 }
 
 impl Run {
@@ -209,6 +212,16 @@ impl Run {
             font_east_asia: None,
             size_half_pt: None,
             span: None,
+            line_break: false,
+        }
+    }
+
+    /// A forced line break run (`<w:br/>`); its text is empty.
+    #[must_use]
+    pub fn line_break() -> Self {
+        Self {
+            line_break: true,
+            ..Self::new("")
         }
     }
 }
@@ -642,6 +655,10 @@ pub struct DocumentStyle {
     pub body_size_half_pt: u32,
     pub line_spacing: u32,
     pub first_line_indent_twips: u32,
+    /// East-Asian character-based first-line indent = `round(em × 100)`. `Some`
+    /// only for em-based source indents (e.g. `2em` → `Some(200)`); `None` for
+    /// absolute (pt/cm) indents, which keep emitting only `w:firstLine` twips.
+    pub first_line_indent_chars: Option<u32>,
     /// Whether `#set par(first-line-indent: (amount: …, all: true))` was declared,
     /// i.e. indent EVERY paragraph including the first one after a heading (the
     /// Chinese-typography convention). `false` (the Typst default) suppresses the
@@ -690,6 +707,7 @@ impl Default for DocumentStyle {
             body_size_half_pt: 22,      // Typst default: 11pt = 22 half-points
             line_spacing: 276,          // ~13.8pt: typical rendered line pitch for 11pt body
             first_line_indent_twips: 0, // Typst default: no indent
+            first_line_indent_chars: None,
             first_line_indent_all: false,
             footnote_format: FootnoteFormat::default(),
             code_font: "Courier New".to_string(),

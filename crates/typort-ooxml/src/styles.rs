@@ -131,8 +131,16 @@ fn write_style_normal<W: Write>(w: &mut Writer<W>, style: &DocumentStyle) -> io:
                     .with_attribute(("w:before", sp_before.as_str()))
                     .with_attribute(("w:after", sp_after.as_str()))
                     .write_empty()?;
-                ppr.create_element("w:ind")
-                    .with_attribute(("w:firstLine", indent.as_str()))
+                let mut ind = ppr.create_element("w:ind");
+                // East-Asian char-based first-line indent: Word prefers
+                // firstLineChars over firstLine, so emit it first and keep the
+                // twips as a fallback. Absolute indents emit only firstLine.
+                let chars_str;
+                if let Some(chars) = style.first_line_indent_chars {
+                    chars_str = chars.to_string();
+                    ind = ind.with_attribute(("w:firstLineChars", chars_str.as_str()));
+                }
+                ind.with_attribute(("w:firstLine", indent.as_str()))
                     .write_empty()?;
                 Ok(())
             })?;

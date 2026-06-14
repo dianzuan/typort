@@ -97,8 +97,10 @@ fn coalesce_inlines(inlines: &mut Vec<InlineElement>) {
         }
         fold_whitespace_runs(&mut merged);
         // Drop any now-empty text runs left behind by folding a space into a
-        // neighbour.
-        merged.retain(|inline| !matches!(inline, InlineElement::Text(run) if run.text.is_empty()));
+        // neighbour — but keep line-break runs, which are intentionally empty.
+        merged.retain(
+            |inline| !matches!(inline, InlineElement::Text(run) if run.text.is_empty() && !run.line_break),
+        );
         *inlines = merged;
     }
 
@@ -150,6 +152,7 @@ fn same_run_formatting(a: &Run, b: &Run) -> bool {
         && a.font_ascii == b.font_ascii
         && a.font_east_asia == b.font_east_asia
         && a.size_half_pt == b.size_half_pt
+        && a.line_break == b.line_break
 }
 
 /// A run whose text is non-empty and entirely whitespace.

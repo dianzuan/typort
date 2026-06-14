@@ -821,21 +821,32 @@ fn write_paragraph<W: Write>(
                     })?;
                 }
                 // Emit indent: left indent (blockquote), hanging (bibliography), list, or suppress first-line
+                // When the Normal style carries an East-Asian char-based
+                // first-line indent (firstLineChars), a per-paragraph override
+                // that zeroes firstLine must also zero firstLineChars, else
+                // Word's char-based value wins and the zeroing is ignored. When
+                // None, emit exactly the historical attribute set (byte-identical).
+                let zero_chars = ctx.doc_style.first_line_indent_chars.is_some();
                 if let Some(left) = para.left_indent {
                     let left_str = left.to_string();
-                    ppr.create_element("w:ind")
-                        .with_attribute(("w:left", left_str.as_str()))
-                        .with_attribute(("w:firstLine", "0"))
-                        .write_empty()?;
+                    let mut ind = ppr.create_element("w:ind");
+                    ind = ind.with_attribute(("w:left", left_str.as_str()));
+                    if zero_chars {
+                        ind = ind.with_attribute(("w:firstLineChars", "0"));
+                    }
+                    ind.with_attribute(("w:firstLine", "0")).write_empty()?;
                 } else if has_hanging {
                     // Bibliography hanging indent: 2em computed from body font size
                     let bib_indent = ctx.doc_style.body_size_half_pt * 10 * 2;
                     let bib_indent_str = bib_indent.to_string();
-                    ppr.create_element("w:ind")
+                    let mut ind = ppr.create_element("w:ind");
+                    ind = ind
                         .with_attribute(("w:left", bib_indent_str.as_str()))
-                        .with_attribute(("w:hanging", bib_indent_str.as_str()))
-                        .with_attribute(("w:firstLine", "0"))
-                        .write_empty()?;
+                        .with_attribute(("w:hanging", bib_indent_str.as_str()));
+                    if zero_chars {
+                        ind = ind.with_attribute(("w:firstLineChars", "0"));
+                    }
+                    ind.with_attribute(("w:firstLine", "0")).write_empty()?;
                 } else if has_list {
                     // List indent: left = 2em, hanging = 1em, computed from body font size
                     let list_left = ctx.doc_style.body_size_half_pt * 10 * 2;
@@ -847,9 +858,11 @@ fn write_paragraph<W: Write>(
                         .with_attribute(("w:hanging", list_hanging_str.as_str()))
                         .write_empty()?;
                 } else if suppress_indent || has_eq_number {
-                    ppr.create_element("w:ind")
-                        .with_attribute(("w:firstLine", "0"))
-                        .write_empty()?;
+                    let mut ind = ppr.create_element("w:ind");
+                    if zero_chars {
+                        ind = ind.with_attribute(("w:firstLineChars", "0"));
+                    }
+                    ind.with_attribute(("w:firstLine", "0")).write_empty()?;
                 }
                 // Emit spacing override
                 if let Some(before) = para.spacing_before {
@@ -972,11 +985,23 @@ fn write_tab<W: Write>(writer: &mut Writer<W>) -> io::Result<()> {
     Ok(())
 }
 
+/// Write a forced line break run: `<w:r><w:br/></w:r>`.
+fn write_line_break<W: Write>(writer: &mut Writer<W>) -> io::Result<()> {
+    writer.create_element("w:r").write_inner_content(|w| {
+        w.create_element("w:br").write_empty()?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
 fn write_run<W: Write>(
     writer: &mut Writer<W>,
     run: &crate::document::Run,
     doc_style: &crate::document::DocumentStyle,
 ) -> io::Result<()> {
+    if run.line_break {
+        return write_line_break(writer);
+    }
     writer.create_element("w:r").write_inner_content(|w| {
         let has_font_override = run.font_ascii.is_some() || run.font_east_asia.is_some();
         let has_rpr = run.bold

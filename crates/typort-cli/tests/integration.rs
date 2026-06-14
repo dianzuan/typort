@@ -3398,6 +3398,29 @@ fn doc_title_conversion_is_deterministic() {
     );
 }
 
+/// Regression (page.rs scope-aware source-AST set-rule collection): the global
+/// body size must come from the `#show:` template closure's `set text(size:)`
+/// (12pt), not from a `set text(size: 9pt)` buried in a non-template helper
+/// closure or a nested `#block[…]`. Before the fix, `collect_set_rules` was
+/// scope-blind and first-wins, so the 9pt helper/block size clobbered the real
+/// global 12pt.
+#[test]
+fn body_size_from_show_template_not_nested_block() {
+    let styles = fixture_styles_xml("edge_body_size_show_template");
+    let normal_start = styles
+        .find(r#"w:styleId="Normal""#)
+        .expect("Normal style present");
+    let normal = &styles[normal_start
+        ..styles[normal_start..]
+            .find("</w:style>")
+            .map_or(styles.len(), |e| normal_start + e)];
+    assert!(
+        normal.contains(r#"w:sz w:val="24""#),
+        "global body size must be the show-template 12pt (Normal w:sz=24), \
+         not the 9pt helper/block size: {normal}"
+    );
+}
+
 /// Regression (figure rasterization + recovery.rs): a vector-drawing figure
 /// (Bézier curve + an inner text label) must rasterize to a single embedded
 /// image with its label baked into the pixels — not recovered into the body as
@@ -3514,6 +3537,59 @@ fn issue_caption_not_duplicated_by_recovery() {
             "caption {caption:?} should appear exactly once, found {count} (recovery duplicate?)"
         );
     }
+}
+
+#[test]
+fn issue_show_caption_inplace_keeps_document_order() {
+    // A custom `show figure.caption: it => [...]` rule makes Typst HTML export emit
+    // each caption as a nested inline `caption` Tag inside the figure body `<p>`
+    // (not a `<figcaption>` element). Without a "caption" arm in handle_inline_tag,
+    // the captions were find_tag_end-skipped, then re-scraped from Paged geometry by
+    // recovery and hoisted/merged to the top — torn from their figures and out of
+    // order. The "caption" arm emits each caption as its own block in document order.
+    let xml = fixture_doc_xml("issue_show_caption_inplace");
+
+    // Document-order positions of the body prose and the two captions. `str::find`
+    // returns the byte offset of the first occurrence, i.e. document order in the XML.
+    let before = xml
+        .find("must remain first")
+        .expect("intro body paragraph present");
+    let alpha = xml
+        .find("Caption alpha one")
+        .expect("first caption text present");
+    let between = xml
+        .find("must keep its slot")
+        .expect("inter-figure body paragraph present");
+    let beta = xml
+        .find("Caption beta two")
+        .expect("second caption text present");
+    let after = xml
+        .find("near the end")
+        .expect("trailing body paragraph present");
+
+    // Captions must stay interleaved with their surrounding prose, not hoisted.
+    assert!(
+        before < alpha && alpha < between,
+        "first caption must sit between the intro and the inter-figure paragraph \
+         (before={before}, alpha={alpha}, between={between})"
+    );
+    assert!(
+        between < beta && beta < after,
+        "second caption must sit between the inter-figure and trailing paragraph \
+         (between={between}, beta={beta}, after={after})"
+    );
+
+    // And recovery must not duplicate the now-in-place captions.
+    assert_eq!(
+        xml.matches("Caption alpha one").count(),
+        1,
+        "first caption should appear exactly once (recovery duplicate?)"
+    );
+    assert_eq!(
+        xml.matches("Caption beta two").count(),
+        1,
+        "second caption should appear exactly once (recovery duplicate?)"
+    );
 }
 
 #[test]
@@ -4891,6 +4967,115 @@ fn issue_cjk_font_east_asia() {
     );
 }
 
+/// CJK fonts declared by English family name must reach Word as the localized
+/// display name (`SimSun` → `宋体`, `SimHei` → `黑体`, `KaiTi` → `楷体`).
+///
+/// This translation reads each font's own name table, so it only fires when the
+/// font is actually installed. CI installs no CJK fonts (see CLAUDE.md), so the
+/// test gates each assertion on availability: with the font present it asserts
+/// the localized name; absent, it asserts the documented no-op (the English name
+/// is kept) and notes the skip. Both branches assert — it never silently passes.
+#[test]
+fn issue_cjk_font_localized_name() {
+    use typst::World as _;
+
+    let path = "../../tests/fixtures/issue_cjk_font_localized_name.typ";
+    let world = typort_core::TyportWorld::new(std::path::Path::new(path)).unwrap();
+    let installed = |family: &str| {
+        world
+            .book()
+            .select_family(&family.to_lowercase())
+            .next()
+            .is_some()
+    };
+    let (simsun, simhei, kaiti) = (installed("SimSun"), installed("SimHei"), installed("KaiTi"));
+
+    let doc = typort_core::convert::convert(&world).unwrap();
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, std::io::Cursor::new(&mut buf)).unwrap();
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(archive.by_name("word/document.xml").unwrap()).unwrap();
+    let styles_xml = std::io::read_to_string(archive.by_name("word/styles.xml").unwrap()).unwrap();
+
+    // Body default (styles.xml) — the bulk of the document inherits it.
+    if simsun {
+        assert!(
+            styles_xml.contains(r#"w:eastAsia="宋体""#),
+            "SimSun body default must localize to 宋体, got styles: {styles_xml}"
+        );
+        assert!(
+            !styles_xml.contains(r#"w:eastAsia="SimSun""#),
+            "no raw English SimSun should remain once localized"
+        );
+    } else {
+        assert!(
+            styles_xml.contains(r#"w:eastAsia="SimSun""#),
+            "without SimSun installed the English name is kept (no-op); CI skip"
+        );
+        eprintln!("note: SimSun not installed — localized-name assertion skipped (expected on CI)");
+    }
+
+    // Per-run overrides (document.xml): heading 黑体, KaiTi span 楷体.
+    if simhei {
+        assert!(
+            doc_xml.contains(r#"w:eastAsia="黑体""#),
+            "SimHei heading run must localize to 黑体, got: {doc_xml}"
+        );
+    }
+    if kaiti {
+        assert!(
+            doc_xml.contains(r#"w:eastAsia="楷体""#),
+            "KaiTi span must localize to 楷体, got: {doc_xml}"
+        );
+    }
+}
+
+/// A CJK-only fallback font list `#set text(font: ("NSimSun", "Noto Serif SC"))`
+/// must not let the never-rendered glyph-fallback (`Noto Serif SC`) become the
+/// `w:eastAsia` body default. The positional "fonts[0]=Latin, fonts[1]=CJK" split
+/// would pick `Noto Serif SC` (then localize it to the weight name
+/// `Noto Serif SC Light`), clobbering the geometry-detected rendered CJK font
+/// (`NSimSun`). The fix cross-checks the declared list against the detected fonts.
+#[test]
+fn issue_cjk_fallback_list_font() {
+    use typst::World as _;
+
+    let path = "../../tests/fixtures/issue_cjk_fallback_list_font.typ";
+    let world = typort_core::TyportWorld::new(std::path::Path::new(path)).unwrap();
+    let nsimsun_installed = world.book().select_family("nsimsun").next().is_some();
+
+    let doc = typort_core::convert::convert(&world).unwrap();
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, std::io::Cursor::new(&mut buf)).unwrap();
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(&buf)).unwrap();
+    let styles_xml = std::io::read_to_string(archive.by_name("word/styles.xml").unwrap()).unwrap();
+
+    // Font-INDEPENDENT key regression: the never-rendered fallback must never
+    // reach eastAsia, in any form (raw or localized weight name). FAILS before
+    // the fix (eastAsia="Noto Serif SC Light"), PASSES after.
+    assert!(
+        !styles_xml.contains("Noto Serif SC"),
+        "the never-rendered CJK fallback must not become the eastAsia body default, got styles: {styles_xml}"
+    );
+
+    // Font-DEPENDENT: with NSimSun installed it localizes to 新宋体; on CI (no
+    // CJK fonts) the raw declared primary is kept. Both branches assert.
+    if nsimsun_installed {
+        assert!(
+            styles_xml.contains(r#"w:eastAsia="新宋体""#),
+            "NSimSun body default must localize to 新宋体, got styles: {styles_xml}"
+        );
+    } else {
+        assert!(
+            styles_xml.contains(r#"w:eastAsia="NSimSun""#),
+            "without NSimSun installed the raw primary is kept; CI skip"
+        );
+        eprintln!(
+            "note: NSimSun not installed — localized-name assertion skipped (expected on CI)"
+        );
+    }
+}
+
 #[test]
 fn issue_list_in_blockquote() {
     let xml = fixture_doc_xml("issue_list_in_blockquote");
@@ -5940,6 +6125,29 @@ fn first_line_indent_all_indents_paragraph_after_heading() {
 }
 
 #[test]
+fn em_first_line_indent_emits_char_based_chars() {
+    // An em-based `first-line-indent` (2em) must emit the East-Asian
+    // char-based `w:firstLineChars="200"` BEFORE the absolute `w:firstLine`
+    // fallback in the Normal style. Word prefers firstLineChars when both are
+    // present, so character-width indents survive a font change.
+    // See tests/fixtures/issue_first_line_indent_chars.typ.
+    let styles_xml = fixture_styles_xml("issue_first_line_indent_chars");
+    let normal_start = styles_xml
+        .find(r#"w:styleId="Normal""#)
+        .expect("Normal style present");
+    let normal = &styles_xml[normal_start
+        ..styles_xml[normal_start..]
+            .find("</w:style>")
+            .map_or(styles_xml.len(), |e| normal_start + e)];
+    // Asserts both the value (200 = 2em × 100) AND the attribute ordering
+    // (firstLineChars before firstLine).
+    assert!(
+        normal.contains(r#"w:firstLineChars="200" w:firstLine="#),
+        "Normal style must emit char-based firstLineChars before firstLine:\n{normal}"
+    );
+}
+
+#[test]
 fn superscript_marker_size_does_not_leak_to_body_reference() {
     // A `#super[1]` affiliation marker renders small; its size must not be
     // generalized (by same-text matching) onto a body "[1]" reference marker.
@@ -6066,6 +6274,22 @@ fn citations_link_to_their_bibliography_entry() {
 }
 
 #[test]
+fn forced_line_break_emits_w_br_not_glued_text() {
+    // A `\` line break inside a paragraph must become a real <w:br/>, not be dropped
+    // (which glues "...line" and "Second..." into "lineSecond"). See
+    // tests/fixtures/edge_line_break.typ.
+    let doc_xml = fixture_doc_xml("edge_line_break");
+    assert!(
+        doc_xml.contains("<w:br/>"),
+        "a forced line break must emit <w:br/>:\n{doc_xml}"
+    );
+    assert!(
+        !doc_xml.contains("lineSecond"),
+        "words must not glue across the line break:\n{doc_xml}"
+    );
+}
+
+#[test]
 fn mixed_image_formats_stay_aligned() {
     // A GIF (unsupported raster) between two SVGs must not desync the image FIFO:
     // dropping it used to shift every later image onto the wrong caption. Re-encoding
@@ -6122,11 +6346,95 @@ fn table_cells_do_not_inherit_body_first_line_indent() {
         .find("</w:tbl>")
         .map_or(doc_xml.len(), |e| tbl_start + e);
     let table = &doc_xml[tbl_start..tbl_end];
-    // Every cell paragraph suppresses the indent (firstLine="0").
+    // Every cell paragraph suppresses the indent (firstLine="0"). complex_paper
+    // declares an em-based first-line indent, so the Normal style carries
+    // `firstLineChars`; the cell override must zero BOTH the char-based and the
+    // twips value, else Word's char-based indent would win.
     let cell_paras = table.matches("<w:p>").count();
-    let suppressed = table.matches(r#"<w:ind w:firstLine="0"/>"#).count();
+    let suppressed = table
+        .matches(r#"<w:ind w:firstLineChars="0" w:firstLine="0"/>"#)
+        .count();
     assert!(
         suppressed >= cell_paras && cell_paras > 0,
         "all {cell_paras} cell paragraphs must suppress first-line indent, got {suppressed}"
+    );
+}
+
+#[test]
+fn page_number_footer_does_not_leak_into_body() {
+    // Regression: `#set page(numbering: "i")` renders footer page numbers (ii, iii,
+    // iv, …) in the bottom margin. The recovery line scraper had no body-zone
+    // y-filter, so it scraped that footer text as candidate body lines; the `<2
+    // chars` guard only hid single-character pages, so multi-char ones survived
+    // and were emitted as centered bare-number paragraphs. The fix filters every
+    // page's text items to the body zone (the same margin boundary the footer
+    // detector uses to LOCATE the footer) before they become candidate lines.
+    // See tests/fixtures/edge_page_number_not_in_body.typ.
+    let world = typort_core::TyportWorld::new(Path::new(
+        "../../tests/fixtures/edge_page_number_not_in_body.typ",
+    ))
+    .unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    // Collect each body paragraph's joined run text (w:t only).
+    let para_texts: Vec<String> = doc_xml
+        .match_indices("<w:p>")
+        .map(|(start, _)| {
+            let end = doc_xml[start..]
+                .find("</w:p>")
+                .map_or(doc_xml.len(), |e| start + e);
+            let block = &doc_xml[start..end];
+            let mut t = String::new();
+            let mut rest = block;
+            while let Some(o) = rest.find("<w:t") {
+                let after = &rest[o..];
+                if let Some(gt) = after.find('>') {
+                    let content = &after[gt + 1..];
+                    if let Some(close) = content.find("</w:t>") {
+                        t.push_str(&content[..close]);
+                        rest = &content[close..];
+                        continue;
+                    }
+                }
+                break;
+            }
+            t
+        })
+        .collect();
+
+    // A bare page-number paragraph is 1..=4 chars drawn from roman-numeral
+    // letters and decimal digits only (matches `^[ivxlcdm0-9]{1,4}$`,
+    // case-insensitive). No body paragraph may be one — the footer "ii"/"iii"/"iv"
+    // this fixture renders must be stripped, not surface as centered text.
+    let is_bare_page_number = |t: &str| {
+        let t = t.trim();
+        let n = t.chars().count();
+        (1..=4).contains(&n)
+            && t.chars().all(|c| {
+                matches!(
+                    c.to_ascii_lowercase(),
+                    'i' | 'v' | 'x' | 'l' | 'c' | 'd' | 'm'
+                ) || c.is_ascii_digit()
+            })
+    };
+    let leaked: Vec<&String> = para_texts
+        .iter()
+        .filter(|t| is_bare_page_number(t))
+        .collect();
+    assert!(
+        leaked.is_empty(),
+        "footer page numbers must not leak into body as bare-number paragraphs, found: {leaked:?}\nall paragraphs: {para_texts:?}"
+    );
+
+    // The legitimate footer field must still be present (page numbering intact).
+    let footer_xml = std::io::read_to_string(reader.by_name("word/footer1.xml").unwrap()).unwrap();
+    assert!(
+        footer_xml.contains(" PAGE "),
+        "footer1.xml should retain the PAGE field: {footer_xml}"
     );
 }

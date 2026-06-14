@@ -2662,6 +2662,7 @@ dependencies = [
  "resvg",
  "time",
  "tiny-skia",
+ "ttf-parser",
  "typort-math",
  "typort-ooxml",
  "typort-presets",

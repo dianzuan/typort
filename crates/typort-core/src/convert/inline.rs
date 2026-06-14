@@ -7,7 +7,7 @@ use typort_ooxml::document::Run;
 use typst::foundations::Content;
 use typst_library::foundations::{SequenceElem, SymbolElem};
 use typst_library::model::{EmphElem, ParElem, StrongElem};
-use typst_library::text::{SmallcapsElem, SpaceElem, SubElem, SuperElem, TextElem};
+use typst_library::text::{LinebreakElem, SmallcapsElem, SpaceElem, SubElem, SuperElem, TextElem};
 
 /// Formatting state accumulated while walking the Content tree.
 #[derive(Clone, Default)]
@@ -83,6 +83,10 @@ fn walk_content(content: &Content, ctx: &InlineCtx, runs: &mut Vec<Run>) {
             run.span = Some(sp);
         }
         runs.push(run);
+    } else if content.to_packed::<LinebreakElem>().is_some() {
+        // A forced line break (`\`): emit a real break run so the surrounding words
+        // don't glue together.
+        runs.push(Run::line_break());
     } else if content.to_packed::<SpaceElem>().is_some() {
         // Merge a space into the previous run when possible, otherwise emit a new run.
         if let Some(last) = runs.last_mut() {

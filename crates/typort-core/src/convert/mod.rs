@@ -103,19 +103,8 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
     }
 
     // 3b. Override with authoritative values from source AST
-    let main_text = world.main_source().text();
-    let mut source_overrides = page::extract_source_style_overrides(main_text);
-
-    // Also scan imported files for set rules (e.g., template libraries
-    // like lib.typ that contain `set text(font: ...)` inside functions).
-    for import_path in page::extract_import_paths(main_text) {
-        let abs_path = world.root().join(import_path.trim_start_matches('/'));
-        if let Ok(content) = std::fs::read_to_string(&abs_path) {
-            let import_overrides = page::extract_source_style_overrides(&content);
-            source_overrides.merge_from(&import_overrides);
-        }
-    }
-    apply_source_overrides(&source_overrides, &mut doc);
+    let source_overrides = gather_source_overrides(world);
+    apply_source_overrides(&source_overrides, &mut doc, paged_doc.is_some());
 
     // Note: page column count comes solely from the source AST
     // (`#set page(columns:)` / `#page(columns:)`, parsed above). There is no
@@ -213,6 +202,13 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
         page::apply_styles_from_paged(paged, &mut doc);
     }
 
+    // 12a-bis. Translate the English CJK family names Typst exposes (e.g. SimSun)
+    //          into the localized name Word shows for the document's declared
+    //          language (宋体). Reads each font's own name table via the font
+    //          book, so it fixes the source-declared body default even when Typst
+    //          substituted a different face at render time (typst#6205).
+    page::localize_cjk_fonts(world, &mut doc);
+
     // 12c. Post-processing: detect small caps from source text
     apply_smallcaps_from_source(world, &mut doc);
 
@@ -267,7 +263,108 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
 }
 
 /// Apply authoritative values from source AST, overriding heuristic guesses.
-fn apply_source_overrides(ovr: &page::SourceStyleOverrides, doc: &mut Document) {
+/// Resolve the declared first-line indent (Typst default: 0pt) onto the style.
+///
+/// An em-based indent additionally yields a char-based `firstLineChars`
+/// (`round(em × 100)`) that Word prefers, with the twips kept as a fallback.
+/// Absolute (pt/cm) indents emit only twips (`first_line_indent_chars = None`).
+fn apply_first_line_indent(ovr: &page::SourceStyleOverrides, doc: &mut Document, body_pt: f64) {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    {
+        let indent = if let Some(em) = ovr.first_line_indent_em {
+            doc.style.first_line_indent_chars = Some((em * 100.0).round() as u32);
+            Some((em * body_pt * 20.0).round() as u32)
+        } else {
+            doc.style.first_line_indent_chars = None;
+            ovr.first_line_indent_twips
+        };
+        doc.style.first_line_indent_twips = indent.unwrap_or(0);
+    }
+}
+
+/// Split the source `#set text(font: …)` list into ASCII and East-Asian body
+/// defaults.
+///
+/// The legacy convention `font: ("Times New Roman", "SimSun")` assumes the first
+/// entry is Latin and the second CJK. That positional split breaks for a CJK-only
+/// fallback list like `("NSimSun", "Noto Serif SC")`, where BOTH entries are CJK
+/// and the second is just a glyph-coverage fallback that may never render. So the
+/// source list is authoritative over WHICH declared name to emit, but geometry
+/// (already detected into `doc.style` before this runs) decides WHICH entry
+/// actually fired.
+///
+/// The cross-check only applies when a `PagedDocument` was compiled (`has_geometry`).
+/// Without it, `doc.style` still holds the Default 宋体/Times New Roman, which
+/// won't match declared names, so the HTML-only path keeps the legacy positional
+/// split.
+fn apply_body_font_split(fonts: &[String], doc: &mut Document, has_geometry: bool) {
+    if fonts.len() < 2 {
+        if let Some(f) = fonts.first() {
+            doc.style.body_font_ascii.clone_from(f);
+            doc.style.body_font_east_asia.clone_from(f);
+        }
+        return;
+    }
+    if !has_geometry {
+        doc.style.body_font_ascii.clone_from(&fonts[0]);
+        doc.style.body_font_east_asia.clone_from(&fonts[1]);
+        return;
+    }
+
+    // ASCII: the declared name that matches the rendered Latin font, else fonts[0].
+    let ascii = fonts
+        .iter()
+        .find(|f| f.eq_ignore_ascii_case(&doc.style.body_font_ascii))
+        .unwrap_or(&fonts[0])
+        .clone();
+
+    // EAST-ASIA: prefer the declared name geometry says actually fired — the
+    // first list entry equal to the rendered CJK font. That keeps `NSimSun` from
+    // a `("NSimSun", "Noto Serif SC")` list rather than the never-rendered
+    // `Noto Serif SC` fallback.
+    //
+    // If NO declared entry matches the rendered CJK font, Typst substituted a
+    // face outside the list (the typst#6205 case, e.g. `SimSun` previews as a
+    // system Mincho). The author's declared CJK name should still win over that
+    // substitution, so fall back to the first declared entry that isn't the Latin
+    // (ASCII) slot — the legacy positional choice — not the rendered fallback.
+    let east_asia = fonts
+        .iter()
+        .find(|f| f.eq_ignore_ascii_case(&doc.style.body_font_east_asia))
+        .or_else(|| fonts.iter().find(|f| !f.eq_ignore_ascii_case(&ascii)))
+        .unwrap_or(&fonts[1])
+        .clone();
+
+    doc.style.body_font_ascii = ascii;
+    doc.style.body_font_east_asia = east_asia;
+}
+
+/// Gather authoritative style overrides from the source AST: the main file plus
+/// every `#import`ed file. Only document-global `set` rules count — those at a
+/// file's top level or inside the closure named by the document's `#show:`
+/// template (a `set text(size:)` buried in a `#block` or a non-template helper
+/// closure is local and ignored). Imported files reuse the main file's template
+/// names so a template library that defines the closure honors its own globals.
+fn gather_source_overrides(world: &TyportWorld) -> page::SourceStyleOverrides {
+    let main_text = world.main_source().text();
+    let template_names = page::extract_show_template_names_from_source(main_text);
+    let mut overrides = page::extract_source_style_overrides(main_text, &template_names);
+
+    for import_path in page::extract_import_paths(main_text) {
+        let abs_path = world.root().join(import_path.trim_start_matches('/'));
+        if let Ok(content) = std::fs::read_to_string(&abs_path) {
+            let import_overrides = page::extract_source_style_overrides(&content, &template_names);
+            overrides.merge_from(&import_overrides);
+        }
+    }
+    overrides
+}
+
+fn apply_source_overrides(
+    ovr: &page::SourceStyleOverrides,
+    doc: &mut Document,
+    has_geometry: bool,
+) {
     // Page margins
     if let Some(v) = ovr.margin_top {
         doc.page_settings.margin_top = v;
@@ -288,16 +385,8 @@ fn apply_source_overrides(ovr: &page::SourceStyleOverrides, doc: &mut Document) 
     }
 
     // Body text font — split into ASCII and East-Asian defaults.
-    // Convention: `font: ("Times New Roman", "SimSun")` means the first entry
-    // is the Latin font and the second is the CJK font.
     if let Some(fonts) = &ovr.text_font {
-        if fonts.len() >= 2 {
-            doc.style.body_font_ascii.clone_from(&fonts[0]);
-            doc.style.body_font_east_asia.clone_from(&fonts[1]);
-        } else if let Some(f) = fonts.first() {
-            doc.style.body_font_ascii.clone_from(f);
-            doc.style.body_font_east_asia.clone_from(f);
-        }
+        apply_body_font_split(fonts, doc, has_geometry);
     }
 
     // Body text size
@@ -310,16 +399,7 @@ fn apply_source_overrides(ovr: &page::SourceStyleOverrides, doc: &mut Document) 
     // Resolve em-based values using actual body size
     let body_pt = f64::from(doc.style.body_size_half_pt) / 2.0;
 
-    // First-line indent (Typst default: 0pt)
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    {
-        let indent = if let Some(em) = ovr.first_line_indent_em {
-            Some((em * body_pt * 20.0).round() as u32)
-        } else {
-            ovr.first_line_indent_twips
-        };
-        doc.style.first_line_indent_twips = indent.unwrap_or(0);
-    }
+    apply_first_line_indent(ovr, doc, body_pt);
     if let Some(all) = ovr.first_line_indent_all {
         doc.style.first_line_indent_all = all;
     }
@@ -1261,6 +1341,26 @@ fn handle_inline_tag(
             collect_par_inlines(&children[i + 1..end], ctx, para);
             end
         }
+        "caption" => {
+            // A custom `show figure.caption` rule makes Typst emit the caption as a
+            // nested inline `caption` tag (not a `<figcaption>` element). Descend and
+            // emit it as its own block here (rather than find_tag_end-skipping) so it
+            // stays in document order and recovery dedups it instead of hoisting it —
+            // same treatment as the "par" arm above and the default figcaption path.
+            let end = find_tag_end(children, i, tag.location());
+            let text = collect_flat_text(&children[i + 1..end]);
+            if !text.trim().is_empty() {
+                if !para.inlines.is_empty() {
+                    let prev = std::mem::take(para);
+                    ctx.doc.add_paragraph(prev);
+                }
+                let mut cap = Paragraph::new();
+                cap.alignment = Some(Alignment::Center);
+                cap.push_run(Run::new(text.trim()));
+                ctx.doc.add_paragraph(cap);
+            }
+            end
+        }
         _ => {
             // Skip unknown or non-inline tags
             find_tag_end(children, i, tag.location())
@@ -1338,6 +1438,11 @@ fn handle_inline_html_element(elem: &HtmlElement, ctx: &mut WalkCtx, para: &mut 
                 run.subscript = true;
                 para.push_run(run);
             }
+        }
+        "br" => {
+            // A forced line break (`\`) — without this it falls into the default arm
+            // (no children) and the surrounding words glue together.
+            para.push_run(Run::line_break());
         }
         _ => {
             collect_par_inlines(&elem.children, ctx, para);

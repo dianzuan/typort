@@ -20,6 +20,43 @@ pub struct TyportWorld {
     package_storage: PackageStorage,
 }
 
+/// Build the system font book, dropping any `…-ExtB` (Unicode Extension-B) face.
+///
+/// Workaround for [typst#6205](https://github.com/typst/typst/issues/6205)
+/// (fixed in typst 0.15): `typographic_family()` strips the `-ExtB` suffix of a
+/// name like `SimSun-ExtB` as if it were an `ExtraBold` style keyword and merges
+/// that face into the `SimSun` family. The family then holds two weight-400 faces
+/// and `font: "SimSun"` non-deterministically selects the Ext-B face — which lacks
+/// the basic CJK block — so Typst falls back to an unrelated font (e.g. `LiSu`),
+/// rendering the body in the wrong typeface. Excluding Ext-B faces from the book
+/// makes the base family resolve to its real face. Trade-off: drops Unicode
+/// Extension-B ideographs (a rarely-used block); on typst ≥ 0.15 this is moot.
+fn search_fonts_without_ext_b() -> (FontBook, Vec<FontSlot>) {
+    let Fonts { book, fonts } = Fonts::searcher().include_system_fonts(true).search();
+    let mut filtered_book = FontBook::new();
+    let mut filtered_fonts = Vec::with_capacity(fonts.len());
+    for (index, slot) in fonts.into_iter().enumerate() {
+        // `book.info(index)` is the cheap, already-parsed FontInfo (no font load).
+        if let Some(info) = book.info(index) {
+            // Drop a Unicode Extension-B-only CJK subset face (e.g. SimSun-ExtB):
+            // it covers Ext-B (U+20000…) but NOT the basic CJK block (U+4E00…).
+            // typst strips its "-ExtB" suffix (mistaken for an "ExtraBold" style)
+            // and merges it into the base family ("SimSun"), so that family ends up
+            // holding a near-empty face that shadows the real one and makes
+            // `font: "SimSun"` resolve to it (then fall back to e.g. LiSu) — the
+            // resolution gets the body font wrong (typst#6205). We can't match by
+            // family name (both faces now report "SimSun"), so detect the subset by
+            // coverage. The real base face covers U+4E00, so it is kept.
+            if info.coverage.contains(0x2_0000) && !info.coverage.contains(0x4E00) {
+                continue;
+            }
+            filtered_book.push(info.clone());
+            filtered_fonts.push(slot);
+        }
+    }
+    (filtered_book, filtered_fonts)
+}
+
 impl TyportWorld {
     /// Create a new world that compiles the given `.typ` file.
     ///
@@ -33,7 +70,7 @@ impl TyportWorld {
         let content = std::fs::read_to_string(&abs_path)?;
         let source = Source::new(FileId::new(None, vpath), content);
 
-        let Fonts { book, fonts } = Fonts::searcher().include_system_fonts(true).search();
+        let (book, fonts) = search_fonts_without_ext_b();
 
         let library = Library::builder()
             .with_features([Feature::Html].into_iter().collect())
