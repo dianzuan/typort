@@ -2261,7 +2261,7 @@ fn inline_highlight_produces_text() {
 #[test]
 fn inline_smallcaps_text_preserved() {
     let doc_xml = inline_formatting_doc_xml();
-    // SmallcapsElem doesn't have the Tagged trait in Typst 0.14.2, so it won't
+    // SmallcapsElem doesn't have the Tagged trait in Typst 0.15, so it won't
     // produce Tag::Start/Tag::End. The text content is preserved but the
     // formatting is not yet applied.  When Typst adds Tagged to SmallcapsElem,
     // the handler will automatically start emitting w:smallCaps.

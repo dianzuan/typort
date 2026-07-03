@@ -246,6 +246,7 @@ mod tests {
             given_name: Some("John".into()),
             prefix: None,
             suffix: None,
+            comma_suffix: false,
             alias: None,
         };
         let mapped = map_person(&person);

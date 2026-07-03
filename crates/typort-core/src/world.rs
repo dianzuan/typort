@@ -103,9 +103,11 @@ impl TyportWorld {
     fn resolve_path(&self, id: FileId) -> FileResult<PathBuf> {
         match id.root() {
             // `obtain` may download the package; its `PackageError` converts into
-            // a `FileError` via the `From` impl, so `?` is enough.
-            VirtualRoot::Package(spec) => Ok(self.packages.obtain(spec)?.resolve(id.vpath())),
-            VirtualRoot::Project => Ok(id.vpath().realize(&self.root)),
+            // a `FileError` via the `From` impl, so `?` is enough. Same for the
+            // `RealizeError` from `resolve`/`realize` (0.15: paths that would
+            // lexically escape the root are rejected instead of realized).
+            VirtualRoot::Package(spec) => Ok(self.packages.obtain(spec)?.resolve(id.vpath())?),
+            VirtualRoot::Project => Ok(id.vpath().realize(&self.root)?),
         }
     }
 }

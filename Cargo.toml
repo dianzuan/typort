@@ -18,23 +18,23 @@ homepage = "https://github.com/dianzuan/typort"
 
 [workspace.dependencies]
 # Typst ecosystem
-typst = "0.15.0-rc.1"
-typst-library = "0.15.0-rc.1"
-typst-syntax = "0.15.0-rc.1"
-typst-kit = { version = "0.15.0-rc.1", default-features = false, features = ["embedded-fonts", "scan-fonts", "system-packages", "system-downloader", "vendor-openssl"] }
-typst-utils = "0.15.0-rc.1"
-typst-realize = "0.15.0-rc.1"
-typst-html = "0.15.0-rc.1"
-typst-pdf = "0.15.0-rc.1"
-typst-render = "0.15.0-rc.1"
-typst-layout = "0.15.0-rc.1"
+typst = "0.15.0"
+typst-library = "0.15.0"
+typst-syntax = "0.15.0"
+typst-kit = { version = "0.15.0", default-features = false, features = ["embedded-fonts", "scan-fonts", "system-packages", "system-downloader", "vendor-openssl"] }
+typst-utils = "0.15.0"
+typst-realize = "0.15.0"
+typst-html = "0.15.0"
+typst-pdf = "0.15.0"
+typst-render = "0.15.0"
+typst-layout = "0.15.0"
 
 # SVG rasterization. Pinned to match typst 0.15's usvg/tiny-skia (usvg 0.47,
 # tiny-skia 0.12), so the `usvg::Tree` from `Image::tree()` is the exact type
 # `resvg::render` accepts (otherwise two incompatible usvg versions resolve).
 resvg = { version = "0.47", default-features = false }
 tiny-skia = "0.12"
-# Pinned to the version typst-library 0.14.2 decodes rasters with, so the
+# Pinned to the version typst-library 0.15 decodes rasters with, so the
 # `DynamicImage` types match. Only the PNG encoder is needed (re-encoding
 # already-decoded GIF/WebP/Pixel rasters to PNG).
 image = { version = "0.25", default-features = false, features = ["png"] }
@@ -51,7 +51,7 @@ toml = "0.8"
 # tree transitively; `local-offset` enables querying the system time zone.
 time = { version = "0.3", features = ["local-offset"] }
 
-# Font name-table access — the same crate (and version) typst-library 0.14.2
+# Font name-table access — the same crate (and version) typst-library 0.15
 # exposes via `Font::ttf()`, so the `&ttf_parser::Face` we read localized CJK
 # family names from is the exact type Typst hands us (no duplicate resolved).
 ttf-parser = "0.25"
@@ -62,7 +62,7 @@ unicode-math-class = "0.1"
 
 # Math glyph styling — the same crate Typst uses to map a base letter + variant
 # (bold/bb/cal/upright) to its styled Unicode codepoint (R -> ℝ, e -> 𝒆). Pinned
-# to the version typst-library 0.14.2 depends on so no duplicate is resolved.
+# to the version typst-library 0.15 depends on so no duplicate is resolved.
 codex = "0.3"
 
 # CLI
@@ -74,5 +74,6 @@ typort-ooxml = { version = "0.1.0", path = "crates/typort-ooxml" }
 typort-math = { version = "0.1.0", path = "crates/typort-math" }
 typort-presets = { version = "0.1.0", path = "crates/typort-presets" }
 
-# Bibliography
-hayagriva = "0.9.1"
+# Bibliography — the same version typst-library 0.15 uses, so only one copy
+# resolves (typort re-parses .bib/.yaml itself; see convert/bibliography.rs).
+hayagriva = "0.10.1"

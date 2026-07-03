@@ -98,7 +98,7 @@ cargo fmt --all -- --check
 
 - **OMML** does not support math coloring, extensible arrows, or strikethrough/cancel
 - **Word** forces Cambria Math font in math zones
-- **Ruby annotations** (`w:ruby`) — Typst 0.14.2 has no native ruby support
+- **Ruby annotations** (`w:ruby`) — Typst 0.15 has no native ruby support
 
 ## License
 
