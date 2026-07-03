@@ -59,10 +59,13 @@ has no semantic HTML representation:
   headers/footers (which live in the page-margin zones), page breaks, and page
   numbering only come into being once the document is laid out — i.e. only from
   Paged.
-- **Math would be an image.** The HTML target renders equations to **SVG**, which
-  is useless for editable equations. typort instead pulls the original
-  `EquationElem` Content tree through the **introspector** and converts it to OMML
-  (`typort-math`). This is the clearest case of "HTML can't do it, go around it."
+- **Math is MathML, not OMML.** The HTML target (typst 0.15) renders equations to
+  **MathML** `<math>` elements — semantic, but not what Word edits. typort still
+  pulls the original `EquationElem` Content tree through the **introspector** and
+  converts it to OMML (`typort-math`); the HTML walk skips the `<math>` node so
+  the equation's glyphs aren't re-emitted as duplicate literal text
+  (`convert/mod.rs`, `"math"` arm). MathML→OMML transliteration is a possible
+  future alternative, but the Content tree is the richer source today.
 
 ### Why Paged alone is not enough
 
