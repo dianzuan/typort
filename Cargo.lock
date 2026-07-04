@@ -2653,6 +2653,7 @@ dependencies = [
 name = "typort-core"
 version = "0.1.1"
 dependencies = [
+ "base64",
  "hayagriva",
  "image",
  "resvg",

@@ -5,6 +5,7 @@ use typort_ooxml::document::{
     Alignment, BlockElement, CellContent, Document, InlineElement, Paragraph, ParagraphStyle, Run,
     Table, TableBorders,
 };
+use typst::foundations::NativeElement;
 use typst::introspection::{Introspector, Location};
 use typst::layout::{Frame, FrameItem, Point};
 use typst_html::HtmlNode;
@@ -40,7 +41,8 @@ struct FrameTextItem {
 /// Recover content that exists in the `PagedDocument` but was lost from the `HtmlDocument` DOM.
 #[allow(clippy::too_many_lines)]
 pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document) {
-    let all_page_lines = extract_lines_from_all_pages(paged);
+    let margins = super::page::MarginsPt::from_settings(&doc.page_settings);
+    let all_page_lines = extract_lines_from_all_pages(paged, margins);
     if all_page_lines.is_empty() {
         return;
     }
@@ -154,8 +156,7 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
         let short_line_exact = short_line
             && doc.body.elements.iter().any(|e| {
                 if let BlockElement::Paragraph(p) = e {
-                    let t = p.text_content();
-                    t.trim() == line.text.trim()
+                    paragraph_matches_short_line(p, line.text.trim())
                 } else {
                     false
                 }
@@ -237,7 +238,9 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
         }
         // A line that is only citation/footnote markers (e.g. "[1][2][5]") holds
         // no recoverable prose — those marks are already emitted as citations.
-        if strip_citation_markers(&line.text).trim().is_empty() {
+        // (Computed once; the CJK-projection check below reuses it.)
+        let line_sans_citations = strip_citation_markers(&line.text);
+        if line_sans_citations.trim().is_empty() {
             continue;
         }
         // CJK-projection match: strip citation markers, then project to CJK
@@ -248,8 +251,10 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
         // it projects into the CJK string identically on both the paged and emitted
         // sides (e.g. "三、引言" → "三引言"), so it never defeats the match.
         {
-            let norm = strip_citation_markers(&line.text);
-            let line_cjk: String = norm.chars().filter(|c| is_cjk_ideograph(*c)).collect();
+            let line_cjk: String = line_sans_citations
+                .chars()
+                .filter(|c| is_cjk_ideograph(*c))
+                .collect();
             let cjk_len = line_cjk.chars().count();
             let has_math = line.text.chars().any(|c| {
                 ('\u{1D400}'..='\u{1D7FF}').contains(&c) || ('\u{2200}'..='\u{22FF}').contains(&c)
@@ -320,7 +325,10 @@ fn cluster_by_x<'a>(
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
-pub(super) fn extract_lines_from_all_pages(paged: &PagedDocument) -> Vec<FrameLine> {
+pub(super) fn extract_lines_from_all_pages(
+    paged: &PagedDocument,
+    margins: super::page::MarginsPt,
+) -> Vec<FrameLine> {
     let mut all_lines = Vec::new();
 
     let body_size = paged.pages().first().map_or(10.5, |p| {
@@ -345,14 +353,15 @@ pub(super) fn extract_lines_from_all_pages(paged: &PagedDocument) -> Vec<FrameLi
 
         // Drop header/footer chrome (running heads, page numbers) before it
         // becomes a candidate body line. We use the *same* margin boundary that
-        // `detect_page_numbering`/`extract_footer` use to LOCATE the footer, so
-        // anything outside the body zone is by definition margin content — never
-        // in-body text. Passing `None, None` matches that boundary exactly.
+        // `detect_page_numbering`/`extract_footer` use to LOCATE the footer —
+        // the document's resolved margins — so anything outside the body zone
+        // is by definition margin content, and body content inside small
+        // author margins (`#set page(margin: 1cm)`) is never thrown away.
         let (body_top, body_bottom) = super::page::find_body_zone(
             page.frame.width().to_pt(),
             page.frame.height().to_pt(),
-            None,
-            None,
+            Some(margins.top),
+            Some(margins.bottom),
         );
         text_items.retain(|item| body_top <= item.y && item.y <= body_bottom);
 
@@ -538,6 +547,41 @@ fn is_cjk_ideograph(c: char) -> bool {
     matches!(c, '\u{4E00}'..='\u{9FFF}' | '\u{3400}'..='\u{4DBF}')
 }
 
+/// Exact-match a short paged line against a paragraph — as the whole paragraph
+/// text, or as any of its forced-line-break segments. A paragraph `a \ b`
+/// renders as two paged lines "a" and "b"; neither equals the concatenated
+/// `text_content()`, so a whole-paragraph comparison alone re-injects each
+/// segment as a centered orphan duplicate. Matching stays exact (never
+/// substring) so a short placed line that merely occurs inside longer body
+/// prose is still recovered.
+fn paragraph_matches_short_line(p: &Paragraph, line: &str) -> bool {
+    if p.text_content().trim() == line {
+        return true;
+    }
+    let mut segment = String::new();
+    for inline in &p.inlines {
+        match inline {
+            InlineElement::Text(run) => {
+                if run.line_break {
+                    if segment.trim() == line {
+                        return true;
+                    }
+                    segment.clear();
+                } else {
+                    segment.push_str(&run.text);
+                }
+            }
+            InlineElement::Hyperlink { runs, .. } => {
+                for run in runs {
+                    segment.push_str(&run.text);
+                }
+            }
+            _ => {}
+        }
+    }
+    segment.trim() == line
+}
+
 /// Remove inline citation/footnote markers like `[12]`, `[1,2]` or `[1-3]` from a
 /// line. Such marks are already emitted as citations/footnote refs, so a paged
 /// line is not "missing" merely because it carries (or is made entirely of) them.
@@ -618,10 +662,7 @@ fn collect_cells_from_table(table: &Table, out: &mut Vec<String>) {
 }
 
 fn push_cell_text(para: &Paragraph, out: &mut Vec<String>) {
-    let text: String = strip_math_italic(&para.full_text_content())
-        .chars()
-        .filter(|c| !c.is_whitespace())
-        .collect();
+    let text = cancel_whitespace(&strip_math_italic(&para.full_text_content()));
     if text.chars().count() >= 2 {
         out.push(text);
     }
@@ -636,10 +677,8 @@ fn line_matches_table_cells(line: &FrameLine, cells: &[String]) -> bool {
         .x_clusters
         .iter()
         .map(|c| {
-            strip_math_italic(&c.runs.iter().map(|r| r.text.as_str()).collect::<String>())
-                .chars()
-                .filter(|ch| !ch.is_whitespace())
-                .collect::<String>()
+            let joined: String = c.runs.iter().map(|r| r.text.as_str()).collect();
+            cancel_whitespace(&strip_math_italic(&joined))
         })
         .filter(|t| t.chars().count() >= 3)
         .collect();
@@ -994,11 +1033,13 @@ pub(super) fn insert_horizontal_rules_from_paged(
     paged: &PagedDocument,
     doc: &mut Document,
     element_page_map: &[usize],
-    source: &str,
+    sources: &[String],
 ) {
     // Only recover rules the source actually declares with `#line()`; without one,
-    // a wide line in the geometry is a table border or a footnote separator.
-    if !source_declares_line_rule(source) {
+    // a wide line in the geometry is a table border or a footnote separator. The
+    // declaration may live in ANY reachable source file — a template imported by
+    // the main file draws its separators just as authoritatively.
+    if !sources.iter().any(|s| source_declares_line_rule(s)) {
         return;
     }
     let total_pages = paged.pages().len();
@@ -1167,51 +1208,126 @@ pub(super) fn merge_same_line_paragraphs(doc: &mut Document, _paged: &PagedDocum
 /// three-line). Per-table stroke reconstruction would need Typst's grid-line
 /// resolution (auto hline positions / `set`-rule strokes live outside the queried
 /// element), so this geometry signal is used instead.
+/// Per-table rule evidence harvested from the paged frames: horizontal rule
+/// thicknesses (eighths of a point) and whether any cell-height vertical line
+/// is drawn inside the table.
+#[derive(Default)]
+struct TableRules {
+    sizes: Vec<u32>,
+    has_vertical: bool,
+}
+
+/// Style each top-level table from the rules Typst actually drew FOR THAT
+/// TABLE. The paged frames carry the introspection `Tag::Start`/`Tag::End`
+/// brackets of every `TableElem`, so rule shapes are attributed to the table
+/// whose bracket is open where they are painted — a footnote separator or an
+/// author `#line()` (outside any bracket) can no longer restyle tables, and a
+/// boxed table elsewhere no longer disables a genuine three-line table.
+///
+/// Per table: vertical lines → boxed (leave `borders` unset; the writer draws
+/// a uniform grid), horizontal rules only → three-line (thick top/bottom,
+/// thin header separator), no rules at all → the author drew the table
+/// borderless (`stroke: none`); emit explicit nil borders so the writer's
+/// uniform-grid fallback doesn't invent a box.
 pub(super) fn detect_three_line_tables(paged: &PagedDocument, doc: &mut Document) {
-    let has_table = doc
+    let body_table_count = doc
         .body
         .elements
         .iter()
-        .any(|e| matches!(e, BlockElement::Table(_)));
-    if !has_table {
+        .filter(|e| matches!(e, BlockElement::Table(_)))
+        .count();
+    if body_table_count == 0 {
         return;
     }
 
-    let mut rule_sizes: Vec<u32> = Vec::new();
-    let mut has_vertical = false;
+    let mut stack: Vec<Location> = Vec::new();
+    let mut order: Vec<Location> = Vec::new();
+    let mut per_table: HashMap<Location, TableRules> = HashMap::new();
     for page in paged.pages() {
-        collect_table_rule_sizes(&page.frame, &mut rule_sizes, &mut has_vertical);
+        collect_table_rules(&page.frame, &mut stack, &mut order, &mut per_table);
     }
-    if has_vertical || rule_sizes.is_empty() {
+
+    // Document order of top-level paged tables must line up with the body's
+    // table order; when it doesn't (a table the HTML walk dropped, or vice
+    // versa), attribution would be misaligned — degrade to the writer's
+    // uniform fallback rather than stamp the wrong table.
+    if order.len() != body_table_count {
         return;
     }
 
-    rule_sizes.sort_unstable();
-    let thin = *rule_sizes.first().unwrap();
-    let thick = *rule_sizes.last().unwrap();
-
+    let mut locs = order.iter();
     for el in &mut doc.body.elements {
-        if let BlockElement::Table(t) = el {
+        let BlockElement::Table(t) = el else { continue };
+        let Some(rules) = locs.next().and_then(|loc| per_table.get(loc)) else {
+            continue;
+        };
+        if rules.has_vertical {
+            // Boxed grid: keep `borders` unset — the writer's uniform fallback.
+            continue;
+        }
+        if rules.sizes.is_empty() {
+            // No rules drawn: `stroke: none`. Explicit nil borders on every side.
             t.borders = Some(TableBorders {
-                top: Some(thick),
-                bottom: Some(thick),
+                top: None,
+                bottom: None,
                 left: None,
                 right: None,
                 inside_h: None,
                 inside_v: None,
-                header_sep: Some(thin),
-                header_rows: 1,
+                header_sep: None,
+                header_rows: 0,
             });
+            continue;
         }
+        let thin = *rules.sizes.iter().min().expect("non-empty");
+        let thick = *rules.sizes.iter().max().expect("non-empty");
+        t.borders = Some(TableBorders {
+            top: Some(thick),
+            bottom: Some(thick),
+            left: None,
+            right: None,
+            inside_h: None,
+            inside_v: None,
+            header_sep: Some(thin),
+            header_rows: 1,
+        });
     }
 }
 
-/// Collect horizontal rule thicknesses (in eighths of a point) and flag whether
-/// any table-height vertical line is drawn, walking nested frame groups.
-fn collect_table_rule_sizes(frame: &Frame, sizes: &mut Vec<u32>, has_vertical: &mut bool) {
+/// Depth-first, in-paint-order walk attributing rule shapes to the innermost
+/// open `TableElem` tag bracket. Only top-level brackets are recorded in
+/// `order`/`per_table`; rules inside nested tables still count toward the
+/// outer table's evidence (they ARE lines drawn within its region), and rules
+/// outside every bracket are ignored entirely.
+fn collect_table_rules(
+    frame: &Frame,
+    stack: &mut Vec<Location>,
+    order: &mut Vec<Location>,
+    per_table: &mut HashMap<Location, TableRules>,
+) {
+    use typst::introspection::Tag;
     for (_pos, item) in frame.items() {
         match item {
+            FrameItem::Tag(Tag::Start(content, _)) => {
+                if content.elem() == typst_library::model::TableElem::ELEM
+                    && let Some(loc) = content.location()
+                {
+                    if stack.is_empty() {
+                        order.push(loc);
+                        per_table.entry(loc).or_default();
+                    }
+                    stack.push(loc);
+                }
+            }
+            FrameItem::Tag(Tag::End(loc, ..)) => {
+                if stack.last() == Some(loc) {
+                    stack.pop();
+                }
+            }
             FrameItem::Shape(shape, _) => {
+                let Some(&owner) = stack.first() else {
+                    continue; // not inside any table — footnote separator, #line(), …
+                };
                 if let typst::visualize::Geometry::Line(end) = &shape.geometry {
                     let dx = end.x.to_pt().abs();
                     let dy = end.y.to_pt().abs();
@@ -1221,17 +1337,18 @@ fn collect_table_rule_sizes(frame: &Frame, sizes: &mut Vec<u32>, has_vertical: &
                     }
                     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                     let sz = ((thickness_pt * 8.0).round() as u32).max(2);
+                    let rules = per_table.entry(owner).or_default();
                     if dy < 0.5 && dx >= 40.0 {
                         // A wide, flat rule — a horizontal table line.
-                        sizes.push(sz);
+                        rules.sizes.push(sz);
                     } else if dx < 0.5 && dy >= 8.0 {
                         // A vertical line tall enough to be a cell border → boxed grid.
-                        *has_vertical = true;
+                        rules.has_vertical = true;
                     }
                 }
             }
             FrameItem::Group(group) => {
-                collect_table_rule_sizes(&group.frame, sizes, has_vertical);
+                collect_table_rules(&group.frame, stack, order, per_table);
             }
             _ => {}
         }

@@ -58,24 +58,12 @@ pub(super) fn find_footnote_id_in_range(children: &[HtmlNode]) -> Option<u32> {
 /// misses it. Recursively gather all descendant text (the number `N` regardless of
 /// the `<sup>`/`<a>` order) and parse it as a decimal or circled number.
 fn noteref_number(elem: &typst_html::HtmlElement) -> Option<u32> {
-    let mut text = String::new();
-    collect_descendant_text(&elem.children, &mut text);
+    let text = super::collect_deep_text(&elem.children);
     let trimmed = text.trim();
     if let Ok(n) = trimmed.parse() {
         return Some(n);
     }
     parse_circled_number(trimmed)
-}
-
-/// Append all descendant text leaves of `children` to `out`, in document order.
-fn collect_descendant_text(children: &[HtmlNode], out: &mut String) {
-    for child in children {
-        match child {
-            HtmlNode::Text(t, _) => out.push_str(t),
-            HtmlNode::Element(elem) => collect_descendant_text(&elem.children, out),
-            _ => {}
-        }
-    }
 }
 
 pub(super) fn parse_circled_number(s: &str) -> Option<u32> {
@@ -190,8 +178,7 @@ pub(super) fn detect_footnote_format(children: &[HtmlNode], doc: &mut Document) 
                 // `<sup>`-child scan never matches. Read all descendant text (the
                 // number, regardless of `<sup>`/`<a>` order) and test it — the same
                 // approach `noteref_number` already uses.
-                let mut text = String::new();
-                collect_descendant_text(&elem.children, &mut text);
+                let text = super::collect_deep_text(&elem.children);
                 if parse_circled_number(text.trim()).is_some() {
                     doc.style.footnote_format = FootnoteFormat::CircledNumber;
                     return;

@@ -107,8 +107,8 @@ for the exact order.
                     │   3b   AST overrides (authoritative)          │
                     │   4-7  walk HTML tags → emit BlockElements,   │
                     │        querying introspector for detail;      │
-                    │        images consumed FIFO; page breaks      │
-                    │        inserted from a precomputed set        │
+                    │        <img> content decoded from src data-   │
+                    │        URLs; figure rasters keyed by Location │
                     │   9    headers/footers/page numbering (Paged) │
                     │   10   recover layout-only content (Paged)    │
                     │   11   title/author metadata; bibliography    │
@@ -133,8 +133,10 @@ Two design properties worth knowing:
   `if let Some(paged)`, so if only HTML compiles, conversion still produces a
   (less-styled) document.
 - **HTML drives order.** The HTML tag walk (`walk_tags`) defines document order.
-  Paged data is matched back onto it — by introspection `Location`, by FIFO queue
-  (images), or by geometric y-position (recovered content).
+  Paged data is matched back onto it — by introspection `Location` (figure
+  rasters, table detail), by content hash (image display sizes), or by geometric
+  y-position (recovered content). Image bytes themselves need no matching: they
+  travel inside each `<img>`'s src data-URL.
 
 ## Crate layout
 
@@ -154,12 +156,14 @@ crates/
 | `world.rs` | `TyportWorld`: implements Typst's `World` trait (source, system fonts, `@preview` package download, `Feature::Html`). |
 | `convert/mod.rs` | The pipeline + the HTML tag walker + most element converters. |
 | `convert/page.rs` | Reverse-engineers page settings and styles from Paged geometry; parses AST `set`-rule overrides (incl. `par(hanging-indent:)`); normalizes math-fallback fonts; strips redundant heading run props. |
-| `convert/recovery.rs` | Recovers layout-only content HTML dropped; page breaks; horizontal rules; same-line paragraph merging. |
+| `convert/recovery.rs` | Recovers layout-only content HTML dropped; horizontal rules; per-table border styling from each table's own paged tag bracket; same-line paragraph merging. |
 | `convert/coalesce.rs` | Final pass: merges adjacent runs with identical effective `rPr` and folds whitespace-only runs, undoing the per-text-node run shattering. |
 | `convert/table_width.rs` | Turns a `TableElem`'s declared column `TrackSizings` (fr/rel/auto) into per-cell `w:tcW` percentages. |
+| `convert/table_align.rs` | Faithful table-cell alignment from the semantic `TableElem`: horizontal → cell-paragraph `w:jc`, vertical → `w:vAlign`. |
+| `convert/breaks.rs` | Explicit `#pagebreak()`/`#colbreak()` recovery from the source AST (both are consumed at compile time), positioned by run spans and following `#include` chains. |
 | `convert/bibliography.rs` | Citation data via the semantic `BibliographyElem` (+ re-parsing `.bib`/`.yml` with hayagriva). |
 | `convert/footnote.rs` | Footnote bodies from the HTML `doc-endnotes` section. |
-| `convert/image.rs` | Embedded image bytes from Paged frames; rasterizes SVG `<img>` (via `resvg`) and whole drawing canvases — CeTZ plots/diagrams, detected by a Bézier-curve signature — to PNG (via `typst-render`). |
+| `convert/image.rs` | Image content decoded from each `<img>`'s base64 src data-URL (typst-html 0.15 embeds the bytes in the DOM); Paged frames contribute display sizes (by content hash) and drawing-canvas rasters keyed by their figure's `Location`. |
 | `convert/inline.rs` | Inline formatting (bold/italic/…) → styled runs. |
 
 ## The IR: `typort_ooxml::Document`

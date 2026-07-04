@@ -5,6 +5,7 @@
 //! Also detects section breaks, headers/footers, and column layouts.
 
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 use typort_ooxml::document::{
     Alignment, Document, DocumentStyle, FootnoteFormat, HeaderFooter, InlineElement,
@@ -169,7 +170,10 @@ fn detect_first_line_indent(paged: &PagedDocument, body_pt: f64) -> u32 {
         return pt_to_twips(body_pt * 2.0);
     }
 
-    // Group by y (lines), find the left-most x per line
+    // Group by y (lines), find the left-most x per line.
+    // Default-margin body zone: this runs during style extraction, before the
+    // source AST margins are resolved. It only shapes an indent heuristic that
+    // `#set par(first-line-indent:)` overrides anyway.
     let page_width = page.frame.width().to_pt();
     let (body_top, body_bottom) =
         find_body_zone(page_width, page.frame.height().to_pt(), None, None);
@@ -270,6 +274,8 @@ fn detect_justification(paged: &PagedDocument) -> String {
     for page in paged.pages().iter().take(3) {
         let page_width = page.frame.width().to_pt();
         let page_height = page.frame.height().to_pt();
+        // Default-margin body zone (see detect_first_line_indent): style-time
+        // heuristic only, overridden by `#set par(justify:)` when declared.
         let (body_top, body_bottom) = find_body_zone(page_width, page_height, None, None);
         collect_right_edges(
             &page.frame,
@@ -452,9 +458,14 @@ fn collect_footnote_text_sizes(frame: &Frame, haystack: &str, out: &mut HashMap<
     for (_, item) in frame.items() {
         match item {
             FrameItem::Text(t) => {
-                let frag: String = t.text.chars().filter(|c| !c.is_whitespace()).collect();
-                if frag.chars().count() >= 3 && haystack.contains(frag.as_str()) {
-                    *out.entry(pt_to_half_pt(t.size.to_pt())).or_insert(0) += t.glyphs.len();
+                // Gate on length BEFORE allocating the filtered copy — most
+                // runs on a page are short shaped fragments, and this walk
+                // visits every text item on every page.
+                if t.text.chars().filter(|c| !c.is_whitespace()).count() >= 3 {
+                    let frag: String = t.text.chars().filter(|c| !c.is_whitespace()).collect();
+                    if haystack.contains(frag.as_str()) {
+                        *out.entry(pt_to_half_pt(t.size.to_pt())).or_insert(0) += t.glyphs.len();
+                    }
                 }
             }
             FrameItem::Group(group) => collect_footnote_text_sizes(&group.frame, haystack, out),
@@ -947,6 +958,77 @@ fn collect_import_paths(node: &typst_syntax::SyntaxNode, paths: &mut Vec<String>
     for child in node.children() {
         collect_import_paths(child, paths);
     }
+}
+
+/// String-literal `#import`/`#include` targets of a parsed source (one level).
+fn collect_module_paths(node: &typst_syntax::SyntaxNode, paths: &mut Vec<String>) {
+    use typst_syntax::SyntaxKind;
+    match node.kind() {
+        SyntaxKind::ModuleImport => {
+            if let Some(import) = node.cast::<typst_syntax::ast::ModuleImport<'_>>()
+                && let typst_syntax::ast::Expr::Str(s) = import.source()
+            {
+                paths.push(s.get().to_string());
+            }
+        }
+        SyntaxKind::ModuleInclude => {
+            if let Some(include) = node.cast::<typst_syntax::ast::ModuleInclude<'_>>()
+                && let typst_syntax::ast::Expr::Str(s) = include.source()
+            {
+                paths.push(s.get().to_string());
+            }
+        }
+        _ => {}
+    }
+    for child in node.children() {
+        collect_module_paths(child, paths);
+    }
+}
+
+/// The text of every local source file reachable from the main source through
+/// string-literal `#import`/`#include` chains, the main text itself first.
+/// Package imports (`@preview/...`) are skipped, cycles are visited once, and
+/// paths resolve the way Typst resolves them: relative to the importing file's
+/// directory, or to `root` when they start with `/`. Consumers that scan the
+/// AST for a declaration (e.g. a template-drawn `#line()`) must scan ALL of
+/// these — a declaration living in an imported template is just as
+/// authoritative as one in the main file.
+#[must_use]
+pub fn collect_reachable_source_texts(
+    root: &Path,
+    main_dir: &Path,
+    main_text: &str,
+) -> Vec<String> {
+    let mut texts = vec![main_text.to_string()];
+    let mut visited: HashSet<PathBuf> = HashSet::new();
+    let mut stack: Vec<(PathBuf, String)> = vec![(main_dir.to_path_buf(), main_text.to_string())];
+
+    while let Some((dir, text)) = stack.pop() {
+        let mut paths = Vec::new();
+        collect_module_paths(&typst_syntax::parse(&text), &mut paths);
+        for path in paths {
+            if path.starts_with('@') {
+                continue; // package import — not a local file
+            }
+            let resolved = if let Some(rooted) = path.strip_prefix('/') {
+                root.join(rooted)
+            } else {
+                dir.join(&path)
+            };
+            let canonical = resolved.canonicalize().unwrap_or(resolved);
+            if !visited.insert(canonical.clone()) {
+                continue;
+            }
+            if let Ok(content) = std::fs::read_to_string(&canonical) {
+                let next_dir = canonical
+                    .parent()
+                    .map_or_else(|| root.to_path_buf(), Path::to_path_buf);
+                texts.push(content.clone());
+                stack.push((next_dir, content));
+            }
+        }
+    }
+    texts
 }
 
 /// Walk the AST collecting only document-global `set`/`#page(...)` rules into
@@ -1513,6 +1595,28 @@ fn default_margin_pt(page_width: f64, page_height: f64) -> f64 {
 
 /// Identify the body content zone using margin-based boundaries.
 ///
+/// Resolved top/bottom page margins in pt — the same values the docx writes to
+/// `w:pgMar` (paged default overridden by `#set page(margin:)` from the source
+/// AST). Body-zone consumers take this so their header/footer boundary tracks
+/// the document's actual margins: with author margins smaller than Typst's
+/// default, using the default boundary silently drops real body content.
+#[derive(Clone, Copy)]
+pub struct MarginsPt {
+    pub top: f64,
+    pub bottom: f64,
+}
+
+impl MarginsPt {
+    /// Read the resolved margins from the document's `PageSettings`.
+    #[must_use]
+    pub fn from_settings(settings: &PageSettings) -> Self {
+        Self {
+            top: f64::from(settings.margin_top) / 20.0,
+            bottom: f64::from(settings.margin_bottom) / 20.0,
+        }
+    }
+}
+
 /// Typst renders headers in the top margin area and footers in the
 /// bottom margin area. We use the actual margins as the boundary
 /// to separate these zones.
@@ -1542,14 +1646,14 @@ pub(super) fn find_body_zone(
 
 /// Extract header content from the top margin area of the first page.
 #[must_use]
-pub fn extract_header(paged: &PagedDocument) -> Option<HeaderFooter> {
-    extract_margin_zone(paged, MarginZone::Top)
+pub fn extract_header(paged: &PagedDocument, margins: MarginsPt) -> Option<HeaderFooter> {
+    extract_margin_zone(paged, MarginZone::Top, margins)
 }
 
 /// Extract footer content from the bottom margin area of the first page.
 #[must_use]
-pub fn extract_footer(paged: &PagedDocument) -> Option<HeaderFooter> {
-    extract_margin_zone(paged, MarginZone::Bottom)
+pub fn extract_footer(paged: &PagedDocument, margins: MarginsPt) -> Option<HeaderFooter> {
+    extract_margin_zone(paged, MarginZone::Bottom, margins)
 }
 
 enum MarginZone {
@@ -1558,7 +1662,11 @@ enum MarginZone {
 }
 
 #[allow(clippy::needless_pass_by_value)]
-fn extract_margin_zone(paged: &PagedDocument, zone: MarginZone) -> Option<HeaderFooter> {
+fn extract_margin_zone(
+    paged: &PagedDocument,
+    zone: MarginZone,
+    margins: MarginsPt,
+) -> Option<HeaderFooter> {
     let page = paged.pages().first()?;
     let page_width = page.frame.width().to_pt();
     let page_height = page.frame.height().to_pt();
@@ -1566,7 +1674,12 @@ fn extract_margin_zone(paged: &PagedDocument, zone: MarginZone) -> Option<Header
     let mut fragments = Vec::new();
     collect_text_fragments(&page.frame, Point::zero(), &mut fragments);
 
-    let (body_top, body_bottom) = find_body_zone(page_width, page_height, None, None);
+    let (body_top, body_bottom) = find_body_zone(
+        page_width,
+        page_height,
+        Some(margins.top),
+        Some(margins.bottom),
+    );
 
     let mut items: Vec<&TextFragment> = fragments
         .iter()
@@ -1618,13 +1731,16 @@ fn extract_margin_zone(paged: &PagedDocument, zone: MarginZone) -> Option<Header
 /// A single footer "i" (a word) or "5" (a static label) would be misclassified
 /// without multi-page verification.
 #[must_use]
-pub fn detect_page_numbering(paged: &PagedDocument) -> Option<PageNumberFormat> {
+pub fn detect_page_numbering(
+    paged: &PagedDocument,
+    margins: MarginsPt,
+) -> Option<PageNumberFormat> {
     if paged.pages().is_empty() {
         return None;
     }
 
     // Extract footer text from the first page
-    let first_footer = extract_footer_text_from_page(&paged.pages()[0].frame)?;
+    let first_footer = extract_footer_text_from_page(&paged.pages()[0].frame, margins)?;
     let first_trimmed = first_footer.trim();
 
     // Try to classify the text as a page number format
@@ -1632,7 +1748,7 @@ pub fn detect_page_numbering(paged: &PagedDocument) -> Option<PageNumberFormat> 
 
     // If we have a second page, verify consecutiveness to avoid false positives
     if paged.pages().len() >= 2 {
-        let second_footer = extract_footer_text_from_page(&paged.pages()[1].frame);
+        let second_footer = extract_footer_text_from_page(&paged.pages()[1].frame, margins);
         match second_footer {
             Some(ref text) => {
                 let second_trimmed = text.trim();
@@ -1693,14 +1809,19 @@ fn page_number_value(s: &str, fmt: &PageNumberFormat) -> u32 {
 }
 
 /// Extract footer text from a single page frame (text in the bottom margin zone).
-fn extract_footer_text_from_page(frame: &Frame) -> Option<String> {
+fn extract_footer_text_from_page(frame: &Frame, margins: MarginsPt) -> Option<String> {
     let page_width = frame.width().to_pt();
     let page_height = frame.height().to_pt();
 
     let mut fragments = Vec::new();
     collect_text_fragments(frame, Point::zero(), &mut fragments);
 
-    let (_body_top, body_bottom) = find_body_zone(page_width, page_height, None, None);
+    let (_body_top, body_bottom) = find_body_zone(
+        page_width,
+        page_height,
+        Some(margins.top),
+        Some(margins.bottom),
+    );
 
     let footer_items: Vec<&TextFragment> = fragments
         .iter()
@@ -2134,16 +2255,7 @@ fn localize_cjk_font_names(doc: &mut Document, name_map: &HashMap<String, String
     if let Some(localized) = name_map.get(&doc.style.body_font_east_asia) {
         doc.style.body_font_east_asia = localized.clone();
     }
-    for element in &mut doc.body.elements {
-        localize_block_element(element, name_map);
-    }
-    for footnote in &mut doc.footnotes {
-        for inline in &mut footnote.content {
-            if let InlineElement::Text(run) = inline {
-                localize_run_font(run, name_map);
-            }
-        }
-    }
+    doc.for_each_run_mut(&mut |run| localize_run_font(run, name_map));
 }
 
 /// Remap a single run's East-Asian font via `name_map`. Latin (`font_ascii`) is
@@ -2153,45 +2265,6 @@ fn localize_run_font(run: &mut Run, name_map: &HashMap<String, String>) {
         && let Some(localized) = name_map.get(family)
     {
         run.font_east_asia = Some(localized.clone());
-    }
-}
-
-fn localize_paragraph_fonts(para: &mut Paragraph, name_map: &HashMap<String, String>) {
-    for inline in &mut para.inlines {
-        match inline {
-            InlineElement::Text(run) => localize_run_font(run, name_map),
-            InlineElement::Hyperlink { runs, .. } => {
-                for run in runs {
-                    localize_run_font(run, name_map);
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-fn localize_block_element(
-    element: &mut typort_ooxml::document::BlockElement,
-    name_map: &HashMap<String, String>,
-) {
-    match element {
-        typort_ooxml::document::BlockElement::Paragraph(p) => {
-            localize_paragraph_fonts(p, name_map);
-        }
-        typort_ooxml::document::BlockElement::Table(t) => {
-            for row in &mut t.rows {
-                for cell in &mut row.cells {
-                    for para in &mut cell.paragraphs {
-                        localize_paragraph_fonts(para, name_map);
-                    }
-                }
-            }
-        }
-        typort_ooxml::document::BlockElement::BibliographyBlock { paragraphs } => {
-            for p in paragraphs {
-                localize_paragraph_fonts(p, name_map);
-            }
-        }
     }
 }
 
@@ -2249,58 +2322,12 @@ pub fn localize_cjk_fonts(world: &dyn World, doc: &mut Document) {
 fn collect_cjk_font_names(doc: &Document) -> HashSet<String> {
     let mut names = HashSet::new();
     names.insert(doc.style.body_font_east_asia.clone());
-    let visit_run = |run: &Run, names: &mut HashSet<String>| {
+    doc.for_each_run(&mut |run| {
         if let Some(f) = &run.font_east_asia {
             names.insert(f.clone());
         }
-    };
-    for element in &doc.body.elements {
-        for_each_run_in_block(element, &mut |r| visit_run(r, &mut names));
-    }
-    for footnote in &doc.footnotes {
-        for inline in &footnote.content {
-            if let InlineElement::Text(run) = inline
-                && let Some(f) = &run.font_east_asia
-            {
-                names.insert(f.clone());
-            }
-        }
-    }
+    });
     names
-}
-
-/// Walk every text/hyperlink run in a block element, applying `f`.
-fn for_each_run_in_block(element: &typort_ooxml::document::BlockElement, f: &mut dyn FnMut(&Run)) {
-    let visit_para = |para: &Paragraph, f: &mut dyn FnMut(&Run)| {
-        for inline in &para.inlines {
-            match inline {
-                InlineElement::Text(run) => f(run),
-                InlineElement::Hyperlink { runs, .. } => {
-                    for run in runs {
-                        f(run);
-                    }
-                }
-                _ => {}
-            }
-        }
-    };
-    match element {
-        typort_ooxml::document::BlockElement::Paragraph(p) => visit_para(p, f),
-        typort_ooxml::document::BlockElement::Table(t) => {
-            for row in &t.rows {
-                for cell in &row.cells {
-                    for para in &cell.paragraphs {
-                        visit_para(para, f);
-                    }
-                }
-            }
-        }
-        typort_ooxml::document::BlockElement::BibliographyBlock { paragraphs } => {
-            for p in paragraphs {
-                visit_para(p, f);
-            }
-        }
-    }
 }
 
 /// Look up `family` in the font book and read its localized FAMILY name for the
@@ -2330,29 +2357,15 @@ fn localized_name_via_book(world: &dyn World, family: &str, lang_ids: &[u16]) ->
             // can still read its name table for localized CJK family names.
             let face = ttf_parser::Face::parse(font.data(), font.index()).ok()?;
             // Skip variants whose English typographic family differs from the
-            // requested one (e.g. a same-keyed "Noto Serif SC Light").
-            if english_family_from_face(&face).is_some_and(|eng| !eng.eq_ignore_ascii_case(family))
+            // requested one (e.g. a same-keyed "Noto Serif SC Light"). The
+            // English family is the same FAMILY lookup with the en-US LCID.
+            if localized_family_from_face(&face, &[0x0409])
+                .is_some_and(|eng| !eng.eq_ignore_ascii_case(family))
             {
                 return None;
             }
             localized_family_from_face(&face, lang_ids)
         })
-}
-
-/// The English typographic FAMILY (name ID 1, LCID 0x0409) of a face, or `None`
-/// if it carries no such record. Used to skip same-keyed weight variants whose
-/// English family differs from the requested one (e.g. "Noto Serif SC Light").
-fn english_family_from_face(face: &ttf_parser::Face) -> Option<String> {
-    face.names().into_iter().find_map(|entry| {
-        if entry.name_id == ttf_parser::name_id::FAMILY
-            && entry.platform_id == ttf_parser::PlatformId::Windows
-            && entry.language_id == 0x0409
-        {
-            entry.to_string()
-        } else {
-            None
-        }
-    })
 }
 
 /// Build per-span and per-text style override maps from paged run styles.
@@ -2489,16 +2502,32 @@ fn apply_override_to_run(
         .span
         .and_then(|s| span_overrides.get(&s))
         .and_then(|entries| {
-            // Prefer exact text match, then substring match, then first entry
+            // Prefer exact text match, then substring match. Substring is only
+            // meaningful for runs with visible text — a bare space is a
+            // substring of nearly every paged fragment. Falling back blindly
+            // to the first entry is safe only when the span is unambiguous
+            // (one entry): generated content (e.g. bibliography entries) puts
+            // MANY differently-styled runs on one shared span, where "first
+            // entry" would smear one fragment's style across the whole block.
             entries
                 .iter()
                 .find(|(text, _)| text == &run.text)
                 .or_else(|| {
-                    entries.iter().find(|(text, _)| {
-                        run.text.contains(text.as_str()) || text.contains(run.text.as_str())
-                    })
+                    if run.text.trim().is_empty() {
+                        return None;
+                    }
+                    // Among substring matches take the LONGEST fragment — the
+                    // most specific one. "First match" let a short run like
+                    // "in " adopt the style of whichever unrelated fragment
+                    // happened to come first in paint order.
+                    entries
+                        .iter()
+                        .filter(|(text, _)| {
+                            run.text.contains(text.as_str()) || text.contains(run.text.as_str())
+                        })
+                        .max_by_key(|(text, _)| text.len())
                 })
-                .or_else(|| entries.first())
+                .or_else(|| (entries.len() == 1).then(|| &entries[0]))
                 .map(|(_, ovr)| ovr)
         })
         .or_else(|| {
@@ -2557,25 +2586,9 @@ fn apply_overrides_to_elements(
     text_overrides: &HashMap<String, Vec<RunStyleOverride>>,
 ) {
     for element in elements.iter_mut() {
-        match element {
-            typort_ooxml::document::BlockElement::Paragraph(p) => {
-                apply_overrides_to_paragraph(p, span_overrides, text_overrides);
-            }
-            typort_ooxml::document::BlockElement::Table(t) => {
-                for row in &mut t.rows {
-                    for cell in &mut row.cells {
-                        for para in &mut cell.paragraphs {
-                            apply_overrides_to_paragraph(para, span_overrides, text_overrides);
-                        }
-                    }
-                }
-            }
-            typort_ooxml::document::BlockElement::BibliographyBlock { paragraphs } => {
-                for p in paragraphs {
-                    apply_overrides_to_paragraph(p, span_overrides, text_overrides);
-                }
-            }
-        }
+        typort_ooxml::document::for_each_paragraph_in_block_mut(element, &mut |p| {
+            apply_overrides_to_paragraph(p, span_overrides, text_overrides);
+        });
     }
 }
 

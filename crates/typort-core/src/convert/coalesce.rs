@@ -12,10 +12,13 @@
 //! Only plain `Text` runs merge. Any other inline (footnote ref, math, image,
 //! bookmark, cross-reference, hyperlink, break, tab, citation) is an opaque
 //! boundary the merge never crosses, so hyperlink / bookmark / footnote / math /
-//! drawing structure is preserved bit-for-bit.
+//! drawing structure is preserved bit-for-bit. A forced line break is a `Text`
+//! run with `line_break` set — the writer emits exactly one `<w:br/>` per such
+//! run, so break runs are atomic here too: they never merge (two adjacent
+//! breaks must stay two `<w:br/>`s) and never absorb folded whitespace.
 
 use typort_ooxml::document::{
-    BlockElement, CellContent, Document, InlineElement, Paragraph, Run, Table,
+    Document, InlineElement, Paragraph, Run, for_each_paragraph_in_block_mut,
 };
 
 /// Merge adjacent equally-formatted text runs across the whole document.
@@ -24,7 +27,7 @@ use typort_ooxml::document::{
 /// bibliography blocks), every footnote body, and the header/footer.
 pub fn coalesce_runs(doc: &mut Document) {
     for element in &mut doc.body.elements {
-        coalesce_block(element);
+        for_each_paragraph_in_block_mut(element, &mut coalesce_paragraph);
     }
 
     for footnote in &mut doc.footnotes {
@@ -39,34 +42,6 @@ pub fn coalesce_runs(doc: &mut Document) {
     if let Some(footer) = doc.footer.as_mut() {
         for para in &mut footer.paragraphs {
             coalesce_paragraph(para);
-        }
-    }
-}
-
-fn coalesce_block(element: &mut BlockElement) {
-    match element {
-        BlockElement::Paragraph(para) => coalesce_paragraph(para),
-        BlockElement::Table(table) => coalesce_table(table),
-        BlockElement::BibliographyBlock { paragraphs } => {
-            for para in paragraphs {
-                coalesce_paragraph(para);
-            }
-        }
-    }
-}
-
-fn coalesce_table(table: &mut Table) {
-    for row in &mut table.rows {
-        for cell in &mut row.cells {
-            for para in &mut cell.paragraphs {
-                coalesce_paragraph(para);
-            }
-            for content in &mut cell.content {
-                match content {
-                    CellContent::Paragraph(para) => coalesce_paragraph(para),
-                    CellContent::Table(nested) => coalesce_table(nested),
-                }
-            }
         }
     }
 }
@@ -138,8 +113,14 @@ fn coalesce_run_vec(runs: &mut Vec<Run>) {
 ///
 /// Mirrors the `has_rpr` field set in `typort_ooxml::writer::write_run` exactly;
 /// if a new styled field is added there, add it here too.
+///
+/// A line-break run never merges with anything: the writer emits one `<w:br/>`
+/// per such run, so merging two adjacent breaks would delete a forced blank
+/// line the author wrote (`#linebreak()#linebreak()` / `\ \`).
 fn same_run_formatting(a: &Run, b: &Run) -> bool {
-    a.bold == b.bold
+    !a.line_break
+        && !b.line_break
+        && a.bold == b.bold
         && a.italic == b.italic
         && a.superscript == b.superscript
         && a.subscript == b.subscript
@@ -152,7 +133,6 @@ fn same_run_formatting(a: &Run, b: &Run) -> bool {
         && a.font_ascii == b.font_ascii
         && a.font_east_asia == b.font_east_asia
         && a.size_half_pt == b.size_half_pt
-        && a.line_break == b.line_break
 }
 
 /// A run whose text is non-empty and entirely whitespace.
@@ -192,10 +172,12 @@ fn fold_whitespace_runs(inlines: &mut [InlineElement]) {
             continue;
         }
 
-        // Prefer folding into the PREVIOUS text run if present.
+        // Prefer folding into the PREVIOUS text run if present. Never fold into
+        // a line-break run — the writer ignores its text, swallowing the space.
         if i > 0
             && let InlineElement::Text(prev) = &inlines[i - 1]
             && !renders_on_whitespace(prev)
+            && !prev.line_break
         {
             let space_text = run_text(&inlines[i]);
             if let InlineElement::Text(prev_mut) = &mut inlines[i - 1] {
@@ -206,10 +188,11 @@ fn fold_whitespace_runs(inlines: &mut [InlineElement]) {
             continue;
         }
 
-        // Otherwise fold into the NEXT text run.
+        // Otherwise fold into the NEXT text run (same line-break caveat).
         if i + 1 < inlines.len()
             && let InlineElement::Text(next) = &inlines[i + 1]
             && !renders_on_whitespace(next)
+            && !next.line_break
         {
             let space_text = run_text(&inlines[i]);
             if let InlineElement::Text(next_mut) = &mut inlines[i + 1] {

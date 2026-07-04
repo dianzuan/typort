@@ -6,6 +6,7 @@
 //! `FootnoteElem`, etc. without parsing HTML tags.
 
 mod bibliography;
+mod breaks;
 mod coalesce;
 mod footnote;
 mod image;
@@ -15,7 +16,7 @@ mod recovery;
 mod table_align;
 mod table_width;
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 
 use std::str::FromStr;
 use typort_ooxml::document::{
@@ -58,11 +59,16 @@ struct WalkCtx<'a> {
     html_doc: &'a HtmlDocument,
     doc: &'a mut Document,
     eq_state: &'a mut EquationState,
-    image_queue: &'a mut VecDeque<ImageData>,
-    /// Rasterized vector-drawing canvases (`CeTZ` plots etc.), in page order.
-    /// Consumed by drawing `<figure>`s; kept separate from `image_queue` (which
-    /// serves `<img>` tags) so the two FIFOs never interleave.
-    figure_queue: &'a mut VecDeque<ImageData>,
+    /// On-page display sizes (EMU) by image-content hash, from the paged
+    /// frames. Image CONTENT comes from each `<img>`'s own src data-URL, so
+    /// there is no positional queue to desync — this map only answers "how
+    /// large did Typst draw these bytes".
+    image_sizes: &'a HashMap<u64, (u64, u64)>,
+    /// Rasterized vector-drawing canvases, keyed by their owning figure's
+    /// introspection `Location` (a drawing body is dropped from the HTML
+    /// export, so its pixels come from the paged frames). Keyed — not a FIFO —
+    /// so a raster can only ever land on its own figure.
+    figure_rasters: &'a mut HashMap<typst::introspection::Location, ImageData>,
     bookmarks: &'a mut HashSet<String>,
     /// Citation keys declared by the bibliography. A `<ref>` whose target is one
     /// of these is a citation (rendered as a marker like `[27]`), not a
@@ -118,17 +124,18 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
     let body = find_body(html_doc.root()).unwrap_or_else(|| html_doc.root());
     footnote::extract_add_and_size_footnotes(&mut doc, &body.children, paged_doc.as_ref());
 
-    // 5. Extract images from PagedDocument for embedding. Two FIFOs: raster/SVG
-    //    images (for <img>), and rasterized vector drawings (for drawing figures).
-    let (mut image_queue, mut figure_queue): (VecDeque<ImageData>, VecDeque<ImageData>) =
-        if let Some(paged) = &paged_doc {
-            (
-                image::extract_images_from_paged(paged).into(),
-                image::extract_figure_rasters_from_paged(paged).into(),
-            )
-        } else {
-            (VecDeque::new(), VecDeque::new())
-        };
+    // 5. From the PagedDocument: on-page image display sizes keyed by content
+    //    hash (content itself comes from each <img>'s src data-URL during the
+    //    walk), and drawing-canvas rasters keyed by their figure's Location.
+    //    Both keyed — no positional queues to desync.
+    let (image_sizes, mut figure_rasters) = if let Some(paged) = &paged_doc {
+        (
+            image::collect_image_sizes(paged),
+            image::extract_figure_rasters(paged),
+        )
+    } else {
+        (HashMap::new(), HashMap::new())
+    };
 
     // 7. Walk the HTML tree's Tag sequence. Explicit `#pagebreak()` breaks are
     //    recovered from the source AST afterwards (step 12b); automatic page-flow
@@ -147,8 +154,8 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
             html_doc: &html_doc,
             doc: &mut doc,
             eq_state: &mut eq_state,
-            image_queue: &mut image_queue,
-            figure_queue: &mut figure_queue,
+            image_sizes: &image_sizes,
+            figure_rasters: &mut figure_rasters,
             bookmarks: &mut bookmarks,
             bib_keys: &bib_keys,
         };
@@ -159,19 +166,23 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
     footnote::detect_footnote_format(&body.children, &mut doc);
 
     // 9. Extract headers and footers from PagedDocument (before content
-    //    recovery so header/footer text is not misidentified as missing body content)
+    //    recovery so header/footer text is not misidentified as missing body content).
+    //    All margin-zone consumers share the RESOLVED margins (paged default
+    //    overridden by `#set page(margin:)`, applied in step 3b above), so a
+    //    small author margin never misfiles body text as header/footer.
     if let Some(paged) = &paged_doc {
+        let margins = page::MarginsPt::from_settings(&doc.page_settings);
         if doc.header.is_none() {
-            doc.header = page::extract_header(paged);
+            doc.header = page::extract_header(paged, margins);
         }
         // 9a. Detect page numbering before extracting footer.
         // If the footer is just a page number, set page_numbering instead of
         // static footer text, so the writer generates a PAGE field code.
-        if let Some(fmt) = page::detect_page_numbering(paged) {
+        if let Some(fmt) = page::detect_page_numbering(paged, margins) {
             doc.page_numbering = Some(fmt);
             // Don't set doc.footer — the writer will generate a PAGE field footer
         } else if doc.footer.is_none() {
-            doc.footer = page::extract_footer(paged);
+            doc.footer = page::extract_footer(paged, margins);
         }
     }
 
@@ -213,16 +224,12 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
     // 12c. Post-processing: detect small caps from source text
     apply_smallcaps_from_source(world, &mut doc);
 
-    // 12c-bis. Post-processing: insert column breaks from source text.
-    // ColbreakElem is consumed during compilation (queryable in neither the
-    // HtmlDocument nor PagedDocument), so detect `#colbreak()` in the source AST
-    // and re-insert it after the paragraph it followed.
-    apply_column_breaks_from_source(world, &mut doc);
-
-    // 12c. Recover explicit `#pagebreak()` from the source AST (same reason as
-    //       colbreak: it is consumed during compilation). Automatic page-flow
-    //       boundaries are intentionally not turned into hard breaks.
-    apply_page_breaks_from_source(world, &mut doc);
+    // 12c-bis. Recover explicit `#pagebreak()`/`#colbreak()` from the source
+    //          AST (both are consumed during compilation, queryable in neither
+    //          the HtmlDocument nor the PagedDocument), positioned by run
+    //          spans and following `#include` chains. Automatic page-flow
+    //          boundaries are intentionally not turned into hard breaks.
+    breaks::apply_breaks_from_source(world, &mut doc);
 
     // 12d. Build element→page mapping from block tag locations for precise
     //       section break and horizontal rule placement.
@@ -241,10 +248,20 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
     }
 
     // 14. Insert horizontal rules from geometry (internally gated on a source
-    //     `#line()`, so table borders / footnote separators aren't invented).
+    //     `#line()` in ANY reachable file — main or imported/included template —
+    //     so table borders / footnote separators aren't invented).
     let main_src = world.main_source().text();
     if let Some(paged) = &paged_doc {
-        recovery::insert_horizontal_rules_from_paged(paged, &mut doc, &element_page_map, main_src);
+        let main_dir = world
+            .main_source()
+            .id()
+            .vpath()
+            .realize(world.root())
+            .ok()
+            .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
+            .unwrap_or_else(|| world.root().to_path_buf());
+        let sources = page::collect_reachable_source_texts(world.root(), &main_dir, main_src);
+        recovery::insert_horizontal_rules_from_paged(paged, &mut doc, &element_page_map, &sources);
     }
 
     // 15. Merge consecutive paragraphs that belong to the same visual line
@@ -271,16 +288,14 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
 /// Absolute (pt/cm) indents emit only twips (`first_line_indent_chars = None`).
 fn apply_first_line_indent(ovr: &page::SourceStyleOverrides, doc: &mut Document, body_pt: f64) {
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    {
-        let indent = if let Some(em) = ovr.first_line_indent_em {
-            doc.style.first_line_indent_chars = Some((em * 100.0).round() as u32);
-            Some((em * body_pt * 20.0).round() as u32)
-        } else {
-            doc.style.first_line_indent_chars = None;
-            ovr.first_line_indent_twips
-        };
-        doc.style.first_line_indent_twips = indent.unwrap_or(0);
-    }
+    let indent = if let Some(em) = ovr.first_line_indent_em {
+        doc.style.first_line_indent_chars = Some((em * 100.0).round() as u32);
+        Some(page::pt_to_twips(em * body_pt))
+    } else {
+        doc.style.first_line_indent_chars = None;
+        ovr.first_line_indent_twips
+    };
+    doc.style.first_line_indent_twips = indent.unwrap_or(0);
 }
 
 /// Split the source `#set text(font: …)` list into ASCII and East-Asian body
@@ -565,18 +580,18 @@ fn walk_tags(children: &[HtmlNode], ctx: &mut WalkCtx) {
                             i = end;
                         }
                         "image" => {
-                            // Consume the next image from the queue extracted from
-                            // PagedDocument. An empty placeholder (unencodable image)
-                            // still consumes its slot to keep the FIFO aligned, but
-                            // adds nothing.
-                            if let Some(img_data) = ctx.image_queue.pop_front()
-                                && !img_data.bytes.is_empty()
+                            // The <img> element inside this tag range carries the
+                            // image's own bytes in its src data-URL — decode them
+                            // directly; the paged frames only supply display size.
+                            let end = find_tag_end(children, i, tag.location());
+                            if let Some(src) = find_img_src(&children[i..=end])
+                                && let Some(img_data) =
+                                    image::image_data_from_src(&src, ctx.image_sizes)
                             {
                                 let mut para = Paragraph::new();
                                 para.add_image(img_data);
                                 ctx.doc.add_paragraph(para);
                             }
-                            let end = find_tag_end(children, i, tag.location());
                             i = end;
                         }
                         "figure" | "section" => {
@@ -603,16 +618,17 @@ fn walk_tags(children: &[HtmlNode], ctx: &mut WalkCtx) {
                                 }
                             }
                             let inner = &children[i + 1..end];
-                            // A figure whose body is neither a <table> nor an
-                            // <image> is vector line art (e.g. a CeTZ canvas).
-                            // Its shapes carry no <img>, so walking it would leak
-                            // the canvas's text labels into the body. Emit the
-                            // rasterized canvas (page-ordered in figure_queue) and
-                            // keep only the caption.
-                            let is_drawing = elem_name == "figure"
+                            // A vector-drawing body (#place'd curves, CeTZ) is
+                            // dropped from the HTML export entirely — its raster
+                            // was extracted from the paged frames, keyed by THIS
+                            // figure's location, so a quote/listing figure can
+                            // never steal another figure's canvas. Everything
+                            // else (tables, images, captions) walks normally.
+                            if elem_name == "figure"
                                 && !subtree_has_element(inner, "table")
-                                && !subtree_has_element(inner, "image");
-                            if is_drawing && let Some(img) = ctx.figure_queue.pop_front() {
+                                && !subtree_has_element(inner, "image")
+                                && let Some(img) = ctx.figure_rasters.remove(&tag.location())
+                            {
                                 let mut para = Paragraph::new();
                                 para.alignment = Some(Alignment::Center);
                                 para.add_image(img);
@@ -639,13 +655,12 @@ fn walk_tags(children: &[HtmlNode], ctx: &mut WalkCtx) {
                             let end = find_tag_end(children, i, tag.location());
                             i = end;
                         }
-                        "pagebreak" => {
-                            let mut para = Paragraph::new();
-                            para.add_page_break();
-                            ctx.doc.add_paragraph(para);
-                            let end = find_tag_end(children, i, tag.location());
-                            i = end;
-                        }
+                        // NOTE: no "pagebreak"/"colbreak" arms — in typst 0.15
+                        // both elements carry a plain `#[elem]` (no Location),
+                        // so their Tags can never appear here; explicit breaks
+                        // are recovered from the source AST (`breaks.rs`). An
+                        // arm here would double-insert if that ever changed.
+                        //
                         // Inline elements handled within par/collect_par_inlines,
                         // or should be skipped at block level. Also skip unknown tags.
                         _ => {}
@@ -669,12 +684,35 @@ fn walk_tags(children: &[HtmlNode], ctx: &mut WalkCtx) {
                     ctx.doc.add_paragraph(para);
                 }
             }
-            HtmlNode::Frame(_) => {
-                // Frame nodes are layout artifacts; skip in tag walker.
+            HtmlNode::Frame(frame) => {
+                // Layouted-opaque content (a CeTZ canvas, curve art, a rotated
+                // box): typst-html hands over the laid-out frame in document
+                // order — rasterize it in place.
+                if let Some(img) = image::rasterize_html_frame(frame) {
+                    let mut para = Paragraph::new();
+                    para.alignment = Some(Alignment::Center);
+                    para.add_image(img);
+                    ctx.doc.add_paragraph(para);
+                }
             }
         }
         i += 1;
     }
+}
+
+/// The `src` attribute of the first `<img>` element within a node range.
+fn find_img_src(children: &[HtmlNode]) -> Option<String> {
+    for node in children {
+        if let HtmlNode::Element(el) = node {
+            if tag_name(el) == "img" {
+                return get_attr_value(el, "src");
+            }
+            if let Some(src) = find_img_src(&el.children) {
+                return Some(src);
+            }
+        }
+    }
+    None
 }
 
 /// Whether every direct child of `nodes` is inline-level content (text, an inline
@@ -767,8 +805,8 @@ fn handle_html_element(elem: &HtmlElement, ctx: &mut WalkCtx) {
         "pre" => convert_code_block(elem, ctx.doc),
         "blockquote" => convert_blockquote(elem, ctx),
         "dl" => convert_term_list(elem, ctx.doc),
-        "ol" => convert_html_list(elem, ctx.doc, true),
-        "ul" => convert_html_list(elem, ctx.doc, false),
+        "ol" => convert_html_list(elem, ctx.doc, true, Some(ctx.html_doc)),
+        "ul" => convert_html_list(elem, ctx.doc, false, Some(ctx.html_doc)),
         "table" => convert_html_table(elem, None, ctx.doc, html),
         "figcaption" => {
             // Collect all figcaption content into a single paragraph
@@ -1239,7 +1277,13 @@ fn collect_par_inlines(children: &[HtmlNode], ctx: &mut WalkCtx, para: &mut Para
             HtmlNode::Element(elem) => {
                 handle_inline_html_element(elem, ctx, para);
             }
-            HtmlNode::Frame(_) => {}
+            HtmlNode::Frame(frame) => {
+                // Layouted-opaque inline content (e.g. a boxed drawing as a
+                // figure body): rasterize in place as an inline image.
+                if let Some(img) = image::rasterize_html_frame(frame) {
+                    para.add_image(img);
+                }
+            }
         }
         i += 1;
     }
@@ -1389,14 +1433,15 @@ fn handle_inline_tag(
             find_tag_end(children, i, start_loc)
         }
         "image" => {
-            // Inline image within a paragraph. An empty placeholder still consumes
-            // its FIFO slot (keeping alignment) but adds nothing.
-            if let Some(img_data) = ctx.image_queue.pop_front()
-                && !img_data.bytes.is_empty()
+            // Inline image within a paragraph: decode from the <img>'s own src
+            // data-URL (see the block-level arm).
+            let end = find_tag_end(children, i, tag.location());
+            if let Some(src) = find_img_src(&children[i..=end])
+                && let Some(img_data) = image::image_data_from_src(&src, ctx.image_sizes)
             {
                 para.add_image(img_data);
             }
-            find_tag_end(children, i, tag.location())
+            end
         }
         "ref" => {
             // Cross-reference: extract target label and display text
@@ -1460,10 +1505,8 @@ fn handle_inline_tag(
             }
             end
         }
-        "pagebreak" => {
-            para.add_page_break();
-            find_tag_end(children, i, tag.location())
-        }
+        // No "pagebreak" arm — see the block-level walker: 0.15 pagebreaks have
+        // no Location, so the Tag can't appear; breaks.rs recovers them.
         "super" | "sub" | "raw" | "underline" | "strike" | "highlight" | "overline"
         | "smallcaps" => {
             let end = find_tag_end(children, i, tag.location());
@@ -1744,7 +1787,12 @@ fn collect_html_inlines_with_doc(
                     }
                 }
             }
-            HtmlNode::Frame(_) => {}
+            HtmlNode::Frame(frame) => {
+                // Layouted-opaque inline content: rasterize in place.
+                if let Some(img) = image::rasterize_html_frame(frame) {
+                    para.add_image(img);
+                }
+            }
         }
     }
 }
@@ -1865,11 +1913,11 @@ fn handle_list(slice: &[HtmlNode], ordered: bool, ctx: &mut WalkCtx) {
         if let HtmlNode::Element(elem) = node {
             let tag = tag_name(elem);
             if (ordered && tag == "ol") || (!ordered && tag == "ul") {
-                convert_html_list(elem, ctx.doc, ordered);
+                convert_html_list(elem, ctx.doc, ordered, Some(ctx.html_doc));
                 return;
             }
             // Recurse
-            if find_and_convert_list_in_elem(elem, ctx.doc, ordered) {
+            if find_and_convert_list_in_elem(elem, ctx.doc, ordered, Some(ctx.html_doc)) {
                 return;
             }
         }
@@ -1880,15 +1928,20 @@ fn handle_list(slice: &[HtmlNode], ordered: bool, ctx: &mut WalkCtx) {
 }
 
 /// Recursively search for a `<ul>` or `<ol>` element.
-fn find_and_convert_list_in_elem(elem: &HtmlElement, doc: &mut Document, ordered: bool) -> bool {
+fn find_and_convert_list_in_elem(
+    elem: &HtmlElement,
+    doc: &mut Document,
+    ordered: bool,
+    html_doc: Option<&HtmlDocument>,
+) -> bool {
     for child in &elem.children {
         if let HtmlNode::Element(inner) = child {
             let tag = tag_name(inner);
             if (ordered && tag == "ol") || (!ordered && tag == "ul") {
-                convert_html_list(inner, doc, ordered);
+                convert_html_list(inner, doc, ordered, html_doc);
                 return true;
             }
-            if find_and_convert_list_in_elem(inner, doc, ordered) {
+            if find_and_convert_list_in_elem(inner, doc, ordered, html_doc) {
                 return true;
             }
         }
@@ -2209,7 +2262,9 @@ fn extract_cell_content_with_nested_tables(
     paragraphs: Vec<Paragraph>,
 ) -> (Vec<Paragraph>, Vec<CellContent>) {
     // Check if any child (direct or nested in a wrapper div/span) is a <table>
-    let has_nested_table = has_table_descendant(td);
+    // `subtree_has_element` also sees tables represented as flattened
+    // `Tag::Start` markers, which an element-only walk missed.
+    let has_nested_table = subtree_has_element(&td.children, "table");
     if !has_nested_table {
         return (paragraphs, Vec::new());
     }
@@ -2237,21 +2292,6 @@ fn extract_cell_content_with_nested_tables(
     };
 
     (final_paragraphs, content)
-}
-
-/// Check if an element has any `<table>` descendant.
-fn has_table_descendant(elem: &HtmlElement) -> bool {
-    for child in &elem.children {
-        if let HtmlNode::Element(el) = child {
-            if tag_name(el) == "table" {
-                return true;
-            }
-            if has_table_descendant(el) {
-                return true;
-            }
-        }
-    }
-    false
 }
 
 /// Recursively collect cell content (paragraphs and nested tables) from HTML
@@ -2284,8 +2324,11 @@ fn collect_cell_content_recursive(
                     if !para.inlines.is_empty() {
                         content.push(CellContent::Paragraph(para));
                     }
-                } else {
-                    // Recurse into wrapper elements (div, span, etc.)
+                } else if tag != "math" {
+                    // Recurse into wrapper elements (div, span, etc.). A bare
+                    // `<math>` (equation outside a `<p>`) is skipped: its OMML
+                    // comes from the sibling equation Tag below — recursing
+                    // would leak the MathML glyphs as literal cell text.
                     collect_cell_content_recursive(&el.children, html_doc, content);
                 }
             }
@@ -2297,7 +2340,29 @@ fn collect_cell_content_recursive(
                     content.push(CellContent::Paragraph(para));
                 }
             }
-            _ => {}
+            HtmlNode::Tag(tag) => {
+                // A bare equation in the cell (outside any `<p>`): convert it
+                // through the introspector like the inline collector does.
+                if let Tag::Start(c, _) = tag
+                    && c.elem().name() == "equation"
+                    && let Some(eq) = html_doc
+                        .introspector()
+                        .query_first(&typst::foundations::Selector::Location(tag.location()))
+                {
+                    let omml = typort_math::equation_to_omml(&eq);
+                    let mut para = Paragraph::new();
+                    para.add_math(omml);
+                    content.push(CellContent::Paragraph(para));
+                }
+            }
+            HtmlNode::Frame(frame) => {
+                // Layouted-opaque content in a cell: rasterize in place.
+                if let Some(img) = image::rasterize_html_frame(frame) {
+                    let mut para = Paragraph::new();
+                    para.add_image(img);
+                    content.push(CellContent::Paragraph(para));
+                }
+            }
         }
     }
 }
@@ -2334,57 +2399,71 @@ fn convert_html_table_to_model(elem: &HtmlElement, html_doc: &HtmlDocument) -> O
 }
 
 /// Convert an HTML `<ol>` or `<ul>` element into list paragraphs.
-fn convert_html_list(elem: &HtmlElement, doc: &mut Document, ordered: bool) {
-    let list_id = doc.allocate_list_id(ordered);
-    convert_html_list_at_level(elem, doc, 0, list_id);
+fn convert_html_list(
+    elem: &HtmlElement,
+    doc: &mut Document,
+    ordered: bool,
+    html_doc: Option<&HtmlDocument>,
+) {
+    // typst-html carries `#enum(start: N)` as `<ol start="N">`; Word needs it
+    // back as the numbering instance's level-0 startOverride.
+    let start = get_attr_value(elem, "start")
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(1);
+    let list_id = doc.allocate_list_id(ordered, start);
+    convert_html_list_at_level(elem, doc, 0, list_id, html_doc);
 }
 
-fn convert_html_list_at_level(elem: &HtmlElement, doc: &mut Document, level: u32, list_id: u32) {
+fn convert_html_list_at_level(
+    elem: &HtmlElement,
+    doc: &mut Document,
+    level: u32,
+    list_id: u32,
+    html_doc: Option<&HtmlDocument>,
+) {
+    let is_sublist = |c: &HtmlNode| {
+        matches!(c, HtmlNode::Element(el) if {
+            let t = tag_name(el);
+            t == "ul" || t == "ol"
+        })
+    };
     for child in &elem.children {
         if let HtmlNode::Element(li) = child
             && tag_name(li) == "li"
         {
             let mut para = Paragraph::new();
             para.list_info = Some(ListInfo { id: list_id, level });
-            // Collect only direct inline content, skipping nested sub-lists
-            let non_list_children: Vec<&HtmlNode> = li
-                .children
-                .iter()
-                .filter(|c| {
-                    if let HtmlNode::Element(el) = c {
-                        let t = tag_name(el);
-                        t != "ul" && t != "ol"
-                    } else {
-                        true
-                    }
-                })
-                .collect();
-            for c in &non_list_children {
-                match c {
-                    HtmlNode::Text(text, _) if !text.is_empty() => {
-                        para.push_run(Run::new(text.as_str()));
-                    }
-                    HtmlNode::Element(el) => {
-                        collect_html_inlines(
-                            &el.children,
+            // Route the item's direct inline content (everything but nested
+            // sub-lists) through the standard inline collector, so equation
+            // Tags produce OMML and their sibling MathML `<math>` elements are
+            // skipped — the bespoke per-child loop this replaces descended
+            // into `<math>` and leaked its glyphs as literal text. Contiguous
+            // ranges (not per-node slices) preserve the sibling context the
+            // footnote-id lookup needs.
+            let mut range_start = 0;
+            for idx in 0..=li.children.len() {
+                if idx == li.children.len() || is_sublist(&li.children[idx]) {
+                    if range_start < idx {
+                        collect_html_inlines_with_doc(
+                            &li.children[range_start..idx],
                             &mut para,
-                            tag_name(el) == "strong" || tag_name(el) == "b",
-                            tag_name(el) == "em" || tag_name(el) == "i",
-                            tag_name(el) == "code",
+                            false,
+                            false,
+                            false,
+                            html_doc,
                         );
                     }
-                    _ => {}
+                    range_start = idx + 1;
                 }
             }
             if !para.inlines.is_empty() {
                 doc.add_paragraph(para);
             }
             for li_child in &li.children {
-                if let HtmlNode::Element(sub) = li_child {
-                    let sub_tag = tag_name(sub);
-                    if sub_tag == "ul" || sub_tag == "ol" {
-                        convert_html_list_at_level(sub, doc, level + 1, list_id);
-                    }
+                if let HtmlNode::Element(sub) = li_child
+                    && is_sublist(li_child)
+                {
+                    convert_html_list_at_level(sub, doc, level + 1, list_id, html_doc);
                 }
             }
         }
@@ -2448,7 +2527,7 @@ fn convert_term_list(elem: &HtmlElement, doc: &mut Document) {
 }
 
 /// Recursively collect all text content from a node tree.
-fn collect_deep_text(children: &[HtmlNode]) -> String {
+pub(super) fn collect_deep_text(children: &[HtmlNode]) -> String {
     let mut text = String::new();
     let mut line_started = false;
     for child in children {
@@ -2800,190 +2879,6 @@ fn apply_smallcaps_from_source(world: &TyportWorld, doc: &mut Document) {
             }
         }
     }
-}
-
-/// Insert a column break after the paragraph each `#colbreak()` followed.
-///
-/// `ColbreakElem` is consumed during compilation and is queryable in neither
-/// the `HtmlDocument` nor the `PagedDocument`, so it is recovered from the
-/// source AST: for each `#colbreak()` we take the text of the markup node
-/// immediately before it as an anchor, then insert a column-break paragraph
-/// after the matching body paragraph. Anchors are consumed in order, so
-/// repeated text is handled left-to-right.
-fn apply_column_breaks_from_source(world: &TyportWorld, doc: &mut Document) {
-    let anchors = extract_colbreak_anchors(world.main_source().text());
-
-    for anchor in anchors {
-        // Find the first body paragraph whose text ends with the anchor, and
-        // insert a column-break paragraph after it.
-        let pos = doc.body.elements.iter().position(|el| {
-            if let BlockElement::Paragraph(p) = el {
-                let t = p.text_content();
-                let t = t.trim();
-                !t.is_empty() && (t == anchor || t.ends_with(anchor.as_str()))
-            } else {
-                false
-            }
-        });
-        if let Some(idx) = pos {
-            let mut br = Paragraph::new();
-            br.add_column_break();
-            doc.body
-                .elements
-                .insert(idx + 1, BlockElement::Paragraph(br));
-        }
-    }
-}
-
-/// Insert a page break after the paragraph each `#pagebreak()` followed.
-///
-/// Like `ColbreakElem`, `PagebreakElem` is consumed during compilation and is
-/// queryable in neither the `HtmlDocument` nor the `PagedDocument`, so explicit
-/// page breaks are recovered from the source AST. Automatic page-flow boundaries
-/// (a paragraph or a tall block that simply did not fit and spilled to the next
-/// page) are deliberately NOT turned into hard breaks — they reflow in Word.
-fn apply_page_breaks_from_source(world: &TyportWorld, doc: &mut Document) {
-    let anchors = extract_pagebreak_anchors(world.main_source().text());
-
-    for anchor in anchors {
-        let pos = doc.body.elements.iter().position(|el| {
-            if let BlockElement::Paragraph(p) = el {
-                let t = p.text_content();
-                let t = t.trim();
-                !t.is_empty() && (t == anchor || t.ends_with(anchor.as_str()))
-            } else {
-                false
-            }
-        });
-        if let Some(idx) = pos {
-            let mut br = Paragraph::new();
-            br.add_page_break();
-            doc.body
-                .elements
-                .insert(idx + 1, BlockElement::Paragraph(br));
-        }
-    }
-}
-
-/// Is this AST node a `#pagebreak()` function call?
-fn is_pagebreak_call(node: &typst_syntax::SyntaxNode) -> bool {
-    node.kind() == typst_syntax::SyntaxKind::FuncCall
-        && node
-            .cast::<typst_syntax::ast::FuncCall<'_>>()
-            .is_some_and(|fc| {
-                matches!(fc.callee(), typst_syntax::ast::Expr::Ident(i) if i.as_str() == "pagebreak")
-            })
-}
-
-/// Walk the AST; for each `#pagebreak()`, record the trimmed text of the markup
-/// node immediately before it (its anchor paragraph).
-/// True if `node` is a list/enum/term item (`+ …`, `- …`, `/ term: …`). Its visible
-/// text lives in a nested `Markup`, not as a direct `Text` child of the surrounding
-/// markup, so it must be descended into to find the anchor at the end of a list.
-fn is_list_item(node: &typst_syntax::SyntaxNode) -> bool {
-    matches!(
-        node.kind(),
-        typst_syntax::SyntaxKind::EnumItem
-            | typst_syntax::SyntaxKind::ListItem
-            | typst_syntax::SyntaxKind::TermItem
-    )
-}
-
-/// The last non-empty trimmed `Text` leaf within `node`, in document order — used to
-/// anchor a break to the end of a list item.
-fn last_text_in(node: &typst_syntax::SyntaxNode) -> Option<String> {
-    let mut found = None;
-    for child in node.children() {
-        if child.kind() == typst_syntax::SyntaxKind::Text {
-            let t = child.leaf_text().trim().to_string();
-            if !t.is_empty() {
-                found = Some(t);
-            }
-        } else if let Some(t) = last_text_in(child) {
-            found = Some(t);
-        }
-    }
-    found
-}
-
-fn collect_pagebreak_anchors(node: &typst_syntax::SyntaxNode, out: &mut Vec<String>) {
-    let mut last_text: Option<String> = None;
-    for child in node.children() {
-        if child.kind() == typst_syntax::SyntaxKind::Text {
-            let t = child.leaf_text().trim().to_string();
-            if !t.is_empty() {
-                last_text = Some(t);
-            }
-        } else if is_list_item(child) {
-            // A list item's text is in a nested Markup, not a direct Text child, so a
-            // following break must anchor to the item's last text — otherwise a break
-            // after a list lands before it (on the prior plain paragraph).
-            if let Some(t) = last_text_in(child) {
-                last_text = Some(t);
-            }
-        } else if is_pagebreak_call(child)
-            && let Some(t) = last_text.take()
-        {
-            out.push(t);
-        }
-        collect_pagebreak_anchors(child, out);
-    }
-}
-
-/// Collect, for each `#pagebreak()` call in the source, the trimmed text of the
-/// markup node immediately preceding it (the anchor paragraph).
-fn extract_pagebreak_anchors(source: &str) -> Vec<String> {
-    let root = typst_syntax::parse(source);
-    let mut anchors = Vec::new();
-    collect_pagebreak_anchors(&root, &mut anchors);
-    anchors
-}
-
-/// Is this AST node a `#colbreak()` function call?
-fn is_colbreak_call(node: &typst_syntax::SyntaxNode) -> bool {
-    node.kind() == typst_syntax::SyntaxKind::FuncCall
-        && node
-            .cast::<typst_syntax::ast::FuncCall<'_>>()
-            .is_some_and(|fc| {
-                matches!(fc.callee(), typst_syntax::ast::Expr::Ident(i) if i.as_str() == "colbreak")
-            })
-}
-
-/// Walk the AST; for each `#colbreak()`, record the trimmed text of the markup
-/// node immediately before it (its anchor paragraph).
-fn collect_colbreak_anchors(node: &typst_syntax::SyntaxNode, out: &mut Vec<String>) {
-    // Within each node's direct children, track the most recent Text node so a
-    // following colbreak call can use it as the anchor.
-    let mut last_text: Option<String> = None;
-    for child in node.children() {
-        if child.kind() == typst_syntax::SyntaxKind::Text {
-            let t = child.leaf_text().trim().to_string();
-            if !t.is_empty() {
-                last_text = Some(t);
-            }
-        } else if is_list_item(child) {
-            // See `collect_pagebreak_anchors`: a list item's text is nested, so anchor
-            // a following colbreak to the item's last text, not the prior paragraph.
-            if let Some(t) = last_text_in(child) {
-                last_text = Some(t);
-            }
-        } else if is_colbreak_call(child)
-            && let Some(t) = last_text.take()
-        {
-            out.push(t);
-        }
-        // Recurse for nested markup (e.g. inside #page(columns: 2)[...]).
-        collect_colbreak_anchors(child, out);
-    }
-}
-
-/// Collect, for each `#colbreak()` call in the source, the trimmed text of the
-/// markup node immediately preceding it (the anchor paragraph).
-fn extract_colbreak_anchors(source: &str) -> Vec<String> {
-    let root = typst_syntax::parse(source);
-    let mut anchors = Vec::new();
-    collect_colbreak_anchors(&root, &mut anchors);
-    anchors
 }
 
 /// Extract text content from all `smallcaps` function calls in the source AST.

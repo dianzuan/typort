@@ -287,6 +287,37 @@ impl Paragraph {
         self.inlines.push(InlineElement::Text(run));
     }
 
+    /// Apply `f` to every text run in the paragraph, including hyperlink
+    /// display runs.
+    pub fn for_each_run_mut(&mut self, f: &mut dyn FnMut(&mut Run)) {
+        for inline in &mut self.inlines {
+            match inline {
+                InlineElement::Text(run) => f(run),
+                InlineElement::Hyperlink { runs, .. } => {
+                    for run in runs {
+                        f(run);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Immutable twin of [`Self::for_each_run_mut`].
+    pub fn for_each_run(&self, f: &mut dyn FnMut(&Run)) {
+        for inline in &self.inlines {
+            match inline {
+                InlineElement::Text(run) => f(run),
+                InlineElement::Hyperlink { runs, .. } => {
+                    for run in runs {
+                        f(run);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// Get concatenated text content from all text runs.
     #[must_use]
     pub fn text_content(&self) -> String {
@@ -552,6 +583,72 @@ pub enum BlockElement {
     },
 }
 
+/// Visit every paragraph the writer serializes under a block element: plain
+/// paragraphs, bibliography blocks, and table cells — both a cell's legacy
+/// `paragraphs` vector and its `content` (paragraphs and nested tables,
+/// recursively). This is the single point of truth for that traversal:
+/// hand-rolled copies have already desynced once (walkers that skipped
+/// `cell.content` silently dropped style patches on nested-table cells).
+pub fn for_each_paragraph_in_block_mut(
+    element: &mut BlockElement,
+    f: &mut dyn FnMut(&mut Paragraph),
+) {
+    match element {
+        BlockElement::Paragraph(p) => f(p),
+        BlockElement::Table(t) => for_each_paragraph_in_table_mut(t, f),
+        BlockElement::BibliographyBlock { paragraphs } => {
+            for p in paragraphs {
+                f(p);
+            }
+        }
+    }
+}
+
+fn for_each_paragraph_in_table_mut(table: &mut Table, f: &mut dyn FnMut(&mut Paragraph)) {
+    for row in &mut table.rows {
+        for cell in &mut row.cells {
+            for para in &mut cell.paragraphs {
+                f(para);
+            }
+            for content in &mut cell.content {
+                match content {
+                    CellContent::Paragraph(p) => f(p),
+                    CellContent::Table(nested) => for_each_paragraph_in_table_mut(nested, f),
+                }
+            }
+        }
+    }
+}
+
+/// Immutable twin of [`for_each_paragraph_in_block_mut`].
+pub fn for_each_paragraph_in_block(element: &BlockElement, f: &mut dyn FnMut(&Paragraph)) {
+    match element {
+        BlockElement::Paragraph(p) => f(p),
+        BlockElement::Table(t) => for_each_paragraph_in_table(t, f),
+        BlockElement::BibliographyBlock { paragraphs } => {
+            for p in paragraphs {
+                f(p);
+            }
+        }
+    }
+}
+
+fn for_each_paragraph_in_table(table: &Table, f: &mut dyn FnMut(&Paragraph)) {
+    for row in &table.rows {
+        for cell in &row.cells {
+            for para in &cell.paragraphs {
+                f(para);
+            }
+            for content in &cell.content {
+                match content {
+                    CellContent::Paragraph(p) => f(p),
+                    CellContent::Table(nested) => for_each_paragraph_in_table(nested, f),
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Body {
     pub elements: Vec<BlockElement>,
@@ -754,8 +851,9 @@ pub struct Document {
     /// 1=ordered, 2=unordered, 3=Chinese headings are reserved).
     pub next_list_id: u32,
     /// Mapping of dynamically allocated list IDs to their abstract numbering
-    /// definition (1=ordered, 2=unordered). Used to generate `w:num` entries.
-    pub list_num_instances: Vec<(u32, u32)>,
+    /// definition (1=ordered, 2=unordered) and level-0 start value. Used to
+    /// generate `w:num` entries with a `startOverride`.
+    pub list_num_instances: Vec<(u32, u32, u32)>,
     /// Bibliography sources for Word's citation data store (customXml/item1.xml).
     pub citation_sources: Vec<CitationSource>,
 }
@@ -800,13 +898,67 @@ impl Document {
         id
     }
 
+    /// Apply `f` to every text run the writer serializes: body paragraphs
+    /// (including all table-cell content and nested tables), bibliography
+    /// blocks, footnote bodies, and header/footer paragraphs. Hyperlink
+    /// display runs are included.
+    pub fn for_each_run_mut(&mut self, f: &mut dyn FnMut(&mut Run)) {
+        for element in &mut self.body.elements {
+            for_each_paragraph_in_block_mut(element, &mut |p| p.for_each_run_mut(f));
+        }
+        for footnote in &mut self.footnotes {
+            for inline in &mut footnote.content {
+                match inline {
+                    InlineElement::Text(run) => f(run),
+                    InlineElement::Hyperlink { runs, .. } => {
+                        for run in runs {
+                            f(run);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        for hf in self.header.iter_mut().chain(self.footer.iter_mut()) {
+            for para in &mut hf.paragraphs {
+                para.for_each_run_mut(f);
+            }
+        }
+    }
+
+    /// Immutable twin of [`Self::for_each_run_mut`].
+    pub fn for_each_run(&self, f: &mut dyn FnMut(&Run)) {
+        for element in &self.body.elements {
+            for_each_paragraph_in_block(element, &mut |p| p.for_each_run(f));
+        }
+        for footnote in &self.footnotes {
+            for inline in &footnote.content {
+                match inline {
+                    InlineElement::Text(run) => f(run),
+                    InlineElement::Hyperlink { runs, .. } => {
+                        for run in runs {
+                            f(run);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        for hf in self.header.iter().chain(self.footer.iter()) {
+            for para in &hf.paragraphs {
+                para.for_each_run(f);
+            }
+        }
+    }
+
     /// Allocate a unique list numbering ID for a new top-level list.
-    /// `ordered` selects abstractNum 1 (decimal) or 2 (bullet).
-    pub fn allocate_list_id(&mut self, ordered: bool) -> u32 {
+    /// `ordered` selects abstractNum 1 (decimal) or 2 (bullet); `start` is the
+    /// list's first number (1 unless the author wrote `#enum(start: N)`).
+    pub fn allocate_list_id(&mut self, ordered: bool, start: u32) -> u32 {
         let id = self.next_list_id;
         self.next_list_id += 1;
         let abstract_num = if ordered { 1 } else { 2 };
-        self.list_num_instances.push((id, abstract_num));
+        self.list_num_instances.push((id, abstract_num, start));
         id
     }
 

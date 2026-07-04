@@ -118,13 +118,7 @@
           <w:bookmarkStart w:id="0" w:name="loc_4"/>
           <w:bookmarkEnd w:id="0"/>
           <w:r>
-            <w:rPr>
-              <w:i/>
-            </w:rPr>
-            <w:t xml:space="preserve">[1]</w:t>
-          </w:r>
-          <w:r>
-            <w:t xml:space="preserve"> J. A. Smith and J. Doe, “An Example Article on Citation Testing,” </w:t>
+            <w:t xml:space="preserve">[1] J. A. Smith and J. Doe, “An Example Article on Citation Testing,” </w:t>
           </w:r>
           <w:r>
             <w:rPr>
@@ -133,16 +127,7 @@
             <w:t xml:space="preserve">Journal of Examples</w:t>
           </w:r>
           <w:r>
-            <w:t xml:space="preserve">, vol. 42, no. 3, pp. 100–115, 2020, doi: </w:t>
-          </w:r>
-          <w:r>
-            <w:rPr>
-              <w:i/>
-            </w:rPr>
-            <w:t xml:space="preserve">10.1234/example.2020</w:t>
-          </w:r>
-          <w:r>
-            <w:t xml:space="preserve">.</w:t>
+            <w:t xml:space="preserve">, vol. 42, no. 3, pp. 100–115, 2020, doi: 10.1234/example.2020.</w:t>
           </w:r>
         </w:p>
         <w:p>
@@ -152,13 +137,7 @@
           <w:bookmarkStart w:id="1" w:name="loc_5"/>
           <w:bookmarkEnd w:id="1"/>
           <w:r>
-            <w:rPr>
-              <w:i/>
-            </w:rPr>
-            <w:t xml:space="preserve">[2]</w:t>
-          </w:r>
-          <w:r>
-            <w:t xml:space="preserve"> D. E. Knuth, </w:t>
+            <w:t xml:space="preserve">[2] D. E. Knuth, </w:t>
           </w:r>
           <w:r>
             <w:rPr>
@@ -177,13 +156,19 @@
           <w:bookmarkStart w:id="2" w:name="loc_6"/>
           <w:bookmarkEnd w:id="2"/>
           <w:r>
+            <w:t xml:space="preserve">[3] W. Wang and M. Li, </w:t>
+          </w:r>
+          <w:r>
             <w:rPr>
               <w:i/>
             </w:rPr>
-            <w:t xml:space="preserve">[3]</w:t>
+            <w:t xml:space="preserve">“A Conference Paper Example,” </w:t>
           </w:r>
           <w:r>
-            <w:t xml:space="preserve"> W. Wang and M. Li, “A Conference Paper Example,” in </w:t>
+            <w:rPr>
+              <w:i/>
+            </w:rPr>
+            <w:t xml:space="preserve">in </w:t>
           </w:r>
           <w:r>
             <w:rPr>
@@ -192,10 +177,7 @@
             <w:t xml:space="preserve">Proceedings of the International Conference</w:t>
           </w:r>
           <w:r>
-            <w:t xml:space="preserve">,  </w:t>
-          </w:r>
-          <w:r>
-            <w:t xml:space="preserve">2023, pp. 1–10.</w:t>
+            <w:t xml:space="preserve">,  2023, pp. 1–10.</w:t>
           </w:r>
         </w:p>
         <w:p>
