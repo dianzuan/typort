@@ -22,6 +22,7 @@ typort-presets.workspace = true
 resvg.workspace = true
 tiny-skia.workspace = true
 image.workspace = true
+base64.workspace = true
 hayagriva.workspace = true
 time.workspace = true
 ttf-parser.workspace = true

@@ -15,8 +15,8 @@
         <w:tblW w:w="5000" w:type="pct"/>
         <w:tblBorders>
           <w:top w:val="single" w:sz="4" w:space="0"/>
-          <w:bottom w:val="single" w:sz="4" w:space="0"/>
           <w:left w:val="single" w:sz="4" w:space="0"/>
+          <w:bottom w:val="single" w:sz="4" w:space="0"/>
           <w:right w:val="single" w:sz="4" w:space="0"/>
           <w:insideH w:val="single" w:sz="4" w:space="0"/>
           <w:insideV w:val="single" w:sz="4" w:space="0"/>

@@ -1125,19 +1125,21 @@ fn write_table<W: Write>(writer: &mut Writer<W>, table: &Table, ctx: &WriteCtx) 
                     // Per-side thicknesses: from detected `borders` when present
                     // (so a three-line table stays three-line), else a uniform grid.
                     let uniform = Some(table.border_size.unwrap_or(4));
+                    // CT_TblBorders is an xsd:sequence — child order is fixed:
+                    // top, left, bottom, right, insideH, insideV.
                     let sides: [(&str, Option<u32>); 6] = match &table.borders {
                         Some(tb) => [
                             ("w:top", tb.top),
-                            ("w:bottom", tb.bottom),
                             ("w:left", tb.left),
+                            ("w:bottom", tb.bottom),
                             ("w:right", tb.right),
                             ("w:insideH", tb.inside_h),
                             ("w:insideV", tb.inside_v),
                         ],
                         None => [
                             ("w:top", uniform),
-                            ("w:bottom", uniform),
                             ("w:left", uniform),
+                            ("w:bottom", uniform),
                             ("w:right", uniform),
                             ("w:insideH", uniform),
                             ("w:insideV", uniform),
@@ -1384,9 +1386,10 @@ fn generate_numbering_xml(writer: &mut Writer<&mut Vec<u8>>, doc: &Document) -> 
                     Ok(())
                 })?;
             // Dynamic numbering instances for each top-level list
-            for &(num_id, abstract_num_id) in &doc.list_num_instances {
+            for &(num_id, abstract_num_id, start) in &doc.list_num_instances {
                 let num_id_str = num_id.to_string();
                 let abs_id_str = abstract_num_id.to_string();
+                let start_str = start.to_string();
                 w.create_element("w:num")
                     .with_attribute(("w:numId", num_id_str.as_str()))
                     .write_inner_content(|num| {
@@ -1394,13 +1397,14 @@ fn generate_numbering_xml(writer: &mut Writer<&mut Vec<u8>>, doc: &Document) -> 
                             .with_attribute(("w:val", abs_id_str.as_str()))
                             .write_empty()?;
                         // Each top-level list is an independent instance: override the
-                        // level-0 start so Word restarts at 1, rather than continuing the
-                        // shared abstractNum's counter across distinct lists.
+                        // level-0 start so Word restarts at the list's own first number
+                        // (its `<ol start>` / `#enum(start:)`, 1 by default), rather
+                        // than continuing the shared abstractNum's counter.
                         num.create_element("w:lvlOverride")
                             .with_attribute(("w:ilvl", "0"))
                             .write_inner_content(|ovr| {
                                 ovr.create_element("w:startOverride")
-                                    .with_attribute(("w:val", "1"))
+                                    .with_attribute(("w:val", start_str.as_str()))
                                     .write_empty()?;
                                 Ok(())
                             })?;
