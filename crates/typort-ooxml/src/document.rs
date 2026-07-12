@@ -228,20 +228,40 @@ impl Run {
     /// See [`RunFormat`].
     #[must_use]
     pub fn format_key(&self) -> RunFormat<'_> {
+        // Exhaustive destructure (no `..`): adding a field to `Run` fails to
+        // compile HERE until you decide whether it belongs in the key.
+        let Run {
+            text: _,
+            span: _,
+            line_break: _,
+            bold,
+            italic,
+            superscript,
+            subscript,
+            monospace,
+            underline,
+            strikethrough,
+            highlight_color,
+            smallcaps,
+            color,
+            font_ascii,
+            font_east_asia,
+            size_half_pt,
+        } = self;
         RunFormat {
-            bold: self.bold,
-            italic: self.italic,
-            superscript: self.superscript,
-            subscript: self.subscript,
-            monospace: self.monospace,
-            underline: self.underline,
-            strikethrough: self.strikethrough,
-            highlight_color: self.highlight_color.as_deref(),
-            smallcaps: self.smallcaps,
-            color: self.color.as_deref(),
-            font_ascii: self.font_ascii.as_deref(),
-            font_east_asia: self.font_east_asia.as_deref(),
-            size_half_pt: self.size_half_pt,
+            bold: *bold,
+            italic: *italic,
+            superscript: *superscript,
+            subscript: *subscript,
+            monospace: *monospace,
+            underline: *underline,
+            strikethrough: *strikethrough,
+            highlight_color: highlight_color.as_deref(),
+            smallcaps: *smallcaps,
+            color: color.as_deref(),
+            font_ascii: font_ascii.as_deref(),
+            font_east_asia: font_east_asia.as_deref(),
+            size_half_pt: *size_half_pt,
         }
     }
 }
@@ -250,9 +270,11 @@ impl Run {
 ///
 /// Single source of truth shared by `writer::write_run` (has-rPr gate via
 /// `is_plain`) and run coalescing (merge-eligibility via `PartialEq`).
-/// Adding a styled field to `Run`? Add it HERE and both sites follow.
-/// `text`, `span`, and `line_break` are deliberately not part of the key
-/// (line breaks are handled before either site consults the key).
+/// Adding a styled field to `Run`? Add it HERE and to `format_key()`'s
+/// exhaustive destructure — the compiler will enforce this at `format_key()`
+/// until the new field is classified. `text`, `span`, and `line_break` are
+/// deliberately not part of the key (line breaks are handled before either site
+/// consults the key).
 #[derive(Debug, PartialEq, Eq, Default)]
 #[allow(clippy::struct_excessive_bools)] // mirrors Run's independent style toggles
 pub struct RunFormat<'a> {
