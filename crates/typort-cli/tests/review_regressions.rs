@@ -4,42 +4,8 @@
 //! `tests/fixtures/`. Kept as a separate integration-test file on purpose —
 //! CLAUDE.md asks new test areas not to grow `integration.rs` further.
 
-use std::io::Cursor;
-use std::path::PathBuf;
-
-/// Convert `tests/fixtures/<fixture>.typ` and return the named docx part.
-fn fixture_part(fixture: &str, part: &str) -> String {
-    let path = PathBuf::from(format!("../../tests/fixtures/{fixture}.typ"));
-    let world = typort_core::TyportWorld::new(&path).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    std::io::read_to_string(reader.by_name(part).unwrap()).unwrap()
-}
-
-/// Convert `tests/fixtures/<fixture>.typ` and return `word/document.xml`.
-fn fixture_doc_xml(fixture: &str) -> String {
-    fixture_part(fixture, "word/document.xml")
-}
-
-/// Return the single `<w:p>...</w:p>` block that contains `needle`.
-fn paragraph_containing<'a>(doc_xml: &'a str, needle: &str) -> &'a str {
-    let pos = doc_xml
-        .find(needle)
-        .unwrap_or_else(|| panic!("document should contain {needle:?}"));
-    let start = doc_xml[..pos]
-        .rfind("<w:p>")
-        .or_else(|| doc_xml[..pos].rfind("<w:p "))
-        .expect("paragraph start");
-    let end = doc_xml[pos..]
-        .find("</w:p>")
-        .map(|e| pos + e)
-        .expect("paragraph end");
-    &doc_xml[start..end]
-}
+mod common;
+use common::{fixture_doc_xml, fixture_part, paragraph_containing};
 
 // ---------------------------------------------------------------------------
 // Paged style patches must reach nested-table cell content
