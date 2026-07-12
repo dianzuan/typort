@@ -6069,6 +6069,38 @@ fn complex_paper_handwritten_refs_get_hanging_indent() {
     );
 }
 
+#[test]
+fn variable_font_weight_bold_detection() {
+    // Variable fonts (typst 0.15) report continuous weights; the paged-side bold
+    // detection (weight >= 700, convert/page.rs) must see the instantiated
+    // instance's weight, not the file default. Fonts vendored in tests/fonts.
+    let path = "../../tests/fixtures/variable_font_weight.typ";
+    let fonts = std::path::PathBuf::from("../../tests/fonts");
+    let world =
+        typort_core::TyportWorld::with_font_dirs(std::path::Path::new(path), &[fonts]).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(&doc, std::io::Cursor::new(&mut buf)).unwrap();
+    let mut reader = zip::ZipArchive::new(std::io::Cursor::new(&buf)).unwrap();
+    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+
+    let heavy = paragraph_containing(&doc_xml, "Heavy weight paragraph.");
+    assert!(
+        heavy.contains("<w:b/>"),
+        "weight-700 VF text must be bold:\n{heavy}"
+    );
+    let light = paragraph_containing(&doc_xml, "Light weight paragraph.");
+    assert!(
+        !light.contains("<w:b/>"),
+        "weight-300 VF text must NOT be bold:\n{light}"
+    );
+    let regular = paragraph_containing(&doc_xml, "Regular weight paragraph.");
+    assert!(
+        !regular.contains("<w:b/>"),
+        "default-weight VF text must NOT be bold:\n{regular}"
+    );
+}
+
 // ===========================================================================
 // Golden snapshots: pin the exact `word/document.xml` for a curated fixture set
 // so any output-formatting drift surfaces as a reviewable diff (the suite's only
