@@ -1749,23 +1749,19 @@ pub fn detect_page_numbering(
     // If we have a second page, verify consecutiveness to avoid false positives
     if paged.pages().len() >= 2 {
         let second_footer = extract_footer_text_from_page(&paged.pages()[1].frame, margins);
-        match second_footer {
-            Some(ref text) => {
-                let second_trimmed = text.trim();
-                let fmt2 = classify_page_number(second_trimmed);
-                // Both pages must have the same format
-                if fmt2.as_ref() != Some(&fmt) {
-                    return None;
-                }
-                // Values must be consecutive (page 2 value = page 1 value + 1)
-                let val1 = page_number_value(first_trimmed, &fmt);
-                let val2 = page_number_value(second_trimmed, &fmt);
-                if val1 == 0 || val2 == 0 || val2 != val1 + 1 {
-                    return None;
-                }
-            }
-            // Second page has no footer text — can't confirm page numbering
-            None => return None,
+        // Second page has no footer text — can't confirm page numbering
+        let text = second_footer?;
+        let second_trimmed = text.trim();
+        let fmt2 = classify_page_number(second_trimmed);
+        // Both pages must have the same format
+        if fmt2.as_ref() != Some(&fmt) {
+            return None;
+        }
+        // Values must be consecutive (page 2 value = page 1 value + 1)
+        let val1 = page_number_value(first_trimmed, &fmt);
+        let val2 = page_number_value(second_trimmed, &fmt);
+        if val1 == 0 || val2 == 0 || val2 != val1 + 1 {
+            return None;
         }
     } else {
         // Single-page document: only accept a single-digit number "1" as
