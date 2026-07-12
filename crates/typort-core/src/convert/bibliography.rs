@@ -25,18 +25,26 @@ pub fn extract_bibliography_sources(
     let introspector: &dyn Introspector = &**html_doc.introspector();
     let tracked = introspector.track();
 
-    // Find the BibliographyElem to access source file paths. `find` was removed
-    // in typst 0.15; query the introspector for the element and take the first
-    // one (a document has at most one bibliography in practice).
-    let Some(content) = tracked.query_first(&BibliographyElem::ELEM.select()) else {
+    // Find every BibliographyElem to access source file paths. `find` was
+    // removed in typst 0.15, which also lifted the one-bibliography-per-document
+    // restriction: query the introspector for all matching elements and merge
+    // each one's library so every citation key in the document resolves.
+    let bib_elems = tracked.query(&BibliographyElem::ELEM.select());
+    if bib_elems.is_empty() {
         return Vec::new();
-    };
-    let Some(bib_elem) = content.to_packed::<BibliographyElem>() else {
-        return Vec::new();
-    };
+    }
 
-    // Re-parse the bibliography files to get full hayagriva Entry data
-    let library = load_bibliography_library(&bib_elem.sources.source.0, world);
+    // Re-parse the bibliography files to get full hayagriva Entry data. Keys
+    // duplicated across bibliographies keep the first occurrence encountered
+    // (see `merge_library`'s existing push-only behavior).
+    let mut library = hayagriva::Library::new();
+    for content in &bib_elems {
+        let Some(bib_elem) = content.to_packed::<BibliographyElem>() else {
+            continue;
+        };
+        let lib = load_bibliography_library(&bib_elem.sources.source.0, world);
+        merge_library(&mut library, &lib);
+    }
 
     // Get the citation keys from the introspector
     let keys = BibliographyElem::keys(tracked);
