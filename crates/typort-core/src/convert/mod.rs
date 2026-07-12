@@ -84,6 +84,38 @@ type CellSpanInfo = (usize, u32, u32);
 /// A parsed table row paired with its rowspan metadata.
 type RawTableRow = (TableRow, Vec<CellSpanInfo>);
 
+/// Inline formatting accumulated while walking HTML nodes. Bundled so the
+/// collectors thread one `Copy` value instead of three positional bools
+/// (precedent: `TableWidthCtx`, `inline::InlineCtx`).
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
+struct InlineFmt {
+    bold: bool,
+    italic: bool,
+    monospace: bool,
+}
+
+impl InlineFmt {
+    /// Formatting acquired by descending into an element with this tag name.
+    /// Accepts HTML tag names and the Typst element names ("strong"/"emph")
+    /// used by the introspection-Tag walker — one method serves both walkers
+    /// because the HTML tree and the Tag stream carry the same formatting
+    /// vocabulary under different spellings.
+    fn for_tag(self, tag: &str) -> Self {
+        Self {
+            bold: self.bold || tag == "strong" || tag == "b",
+            italic: self.italic || tag == "em" || tag == "i" || tag == "emph",
+            monospace: self.monospace || tag == "code",
+        }
+    }
+
+    fn bold() -> Self {
+        Self {
+            bold: true,
+            ..Self::default()
+        }
+    }
+}
+
 /// Convert a Typst source file to an OOXML `Document` using the tag-walker approach.
 ///
 /// # Errors
@@ -812,7 +844,7 @@ fn handle_html_element(elem: &HtmlElement, ctx: &mut WalkCtx) {
             // Collect all figcaption content into a single paragraph
             let mut para = Paragraph::new();
             para.alignment = Some(Alignment::Center);
-            collect_html_inlines(&elem.children, &mut para, false, false, false);
+            collect_html_inlines(&elem.children, &mut para, InlineFmt::default());
             if !para.inlines.is_empty() {
                 ctx.doc.add_paragraph(para);
             }
@@ -828,12 +860,18 @@ fn handle_html_element(elem: &HtmlElement, ctx: &mut WalkCtx) {
         // introspector. Only do this when an equation is actually present, so the
         // ordinary block-emphasis case keeps its original run/spacing behavior.
         "em" | "i" | "strong" | "b" | "code" if subtree_has_element(&elem.children, "equation") => {
-            let (bold, italic, mono) = match tag.as_str() {
-                "strong" | "b" => (true, false, false),
-                "code" => (false, false, true),
-                _ => (false, true, false),
+            let fmt = match tag.as_str() {
+                "strong" | "b" => InlineFmt::bold(),
+                "code" => InlineFmt {
+                    monospace: true,
+                    ..InlineFmt::default()
+                },
+                _ => InlineFmt {
+                    italic: true,
+                    ..InlineFmt::default()
+                },
             };
-            emit_inline_equation_paragraph(elem, ctx, bold, italic, mono, None);
+            emit_inline_equation_paragraph(elem, ctx, fmt, None);
         }
         "section" => {
             // Skip doc-endnotes section
@@ -898,7 +936,7 @@ fn handle_html_element(elem: &HtmlElement, ctx: &mut WalkCtx) {
         _ if children_are_inline(&elem.children)
             && subtree_has_element(&elem.children, "equation") =>
         {
-            emit_inline_equation_paragraph(elem, ctx, false, false, false, detect_alignment(elem));
+            emit_inline_equation_paragraph(elem, ctx, InlineFmt::default(), detect_alignment(elem));
         }
         _ => {
             // Check for alignment on this element and apply to child paragraphs
@@ -923,21 +961,12 @@ fn handle_html_element(elem: &HtmlElement, ctx: &mut WalkCtx) {
 fn emit_inline_equation_paragraph(
     elem: &HtmlElement,
     ctx: &mut WalkCtx,
-    bold: bool,
-    italic: bool,
-    monospace: bool,
+    fmt: InlineFmt,
     alignment: Option<Alignment>,
 ) {
     let mut para = Paragraph::new();
     para.alignment = alignment;
-    collect_html_inlines_with_doc(
-        &elem.children,
-        &mut para,
-        bold,
-        italic,
-        monospace,
-        Some(ctx.html_doc),
-    );
+    collect_html_inlines_with_doc(&elem.children, &mut para, fmt, Some(ctx.html_doc));
     if !para.inlines.is_empty() {
         ctx.doc.add_paragraph(para);
     }
@@ -1345,9 +1374,7 @@ fn handle_inline_tag(
                 collect_html_inlines_with_doc(
                     &children[i + 1..end],
                     &mut tmp,
-                    true,
-                    false,
-                    false,
+                    InlineFmt::bold(),
                     Some(html),
                 );
                 para.inlines.append(&mut tmp.inlines);
@@ -1372,9 +1399,10 @@ fn handle_inline_tag(
                 collect_html_inlines_with_doc(
                     &children[i + 1..end],
                     &mut tmp,
-                    false,
-                    true,
-                    false,
+                    InlineFmt {
+                        italic: true,
+                        ..InlineFmt::default()
+                    },
                     Some(html),
                 );
                 para.inlines.append(&mut tmp.inlines);
@@ -1602,30 +1630,16 @@ fn apply_inline_format(tag_name: &str, run: &mut Run) {
 fn handle_inline_html_element(elem: &HtmlElement, ctx: &mut WalkCtx, para: &mut Paragraph) {
     let tag_str = tag_name(elem);
     match tag_str.as_str() {
-        "strong" | "b" => {
-            // Pass the doc and move ALL inlines (not just text runs): a `<strong>`
-            // can wrap an inline equation (typst 0.15 nests math inside the
-            // emphasis element), which `collect_html_inlines` emits as OMML via the
+        "strong" | "b" | "em" | "i" => {
+            // Pass the doc and move ALL inlines (not just text runs): emphasis can
+            // wrap an inline equation (typst 0.15 nests math inside the emphasis
+            // element), which `collect_html_inlines` emits as OMML via the
             // introspector — `drain_text_runs` would silently drop that math.
             let mut tmp = Paragraph::new();
             collect_html_inlines_with_doc(
                 &elem.children,
                 &mut tmp,
-                true,
-                false,
-                false,
-                Some(ctx.html_doc),
-            );
-            para.inlines.append(&mut tmp.inlines);
-        }
-        "em" | "i" => {
-            let mut tmp = Paragraph::new();
-            collect_html_inlines_with_doc(
-                &elem.children,
-                &mut tmp,
-                false,
-                true,
-                false,
+                InlineFmt::default().for_tag(tag_str.as_str()),
                 Some(ctx.html_doc),
             );
             para.inlines.append(&mut tmp.inlines);
@@ -1635,9 +1649,10 @@ fn handle_inline_html_element(elem: &HtmlElement, ctx: &mut WalkCtx, para: &mut 
             collect_html_inlines_with_doc(
                 &elem.children,
                 &mut tmp,
-                false,
-                false,
-                true,
+                InlineFmt {
+                    monospace: true,
+                    ..InlineFmt::default()
+                },
                 Some(ctx.html_doc),
             );
             para.inlines.append(&mut tmp.inlines);
@@ -1659,7 +1674,7 @@ fn handle_inline_html_element(elem: &HtmlElement, ctx: &mut WalkCtx, para: &mut 
             // External hyperlink from HTML <a href="...">
             if let Some(href) = get_attr_value(elem, "href") {
                 let mut tmp = Paragraph::new();
-                collect_html_inlines(&elem.children, &mut tmp, false, false, false);
+                collect_html_inlines(&elem.children, &mut tmp, InlineFmt::default());
                 let runs = drain_text_runs(&mut tmp);
                 if !runs.is_empty() {
                     para.add_hyperlink(href, runs);
@@ -1670,7 +1685,7 @@ fn handle_inline_html_element(elem: &HtmlElement, ctx: &mut WalkCtx, para: &mut 
         }
         "sup" => {
             let mut tmp = Paragraph::new();
-            collect_html_inlines(&elem.children, &mut tmp, false, false, false);
+            collect_html_inlines(&elem.children, &mut tmp, InlineFmt::default());
             for mut run in drain_text_runs(&mut tmp) {
                 run.superscript = true;
                 para.push_run(run);
@@ -1678,7 +1693,7 @@ fn handle_inline_html_element(elem: &HtmlElement, ctx: &mut WalkCtx, para: &mut 
         }
         "sub" => {
             let mut tmp = Paragraph::new();
-            collect_html_inlines(&elem.children, &mut tmp, false, false, false);
+            collect_html_inlines(&elem.children, &mut tmp, InlineFmt::default());
             for mut run in drain_text_runs(&mut tmp) {
                 run.subscript = true;
                 para.push_run(run);
@@ -1699,14 +1714,8 @@ fn handle_inline_html_element(elem: &HtmlElement, ctx: &mut WalkCtx, para: &mut 
 ///
 /// This variant does not resolve inline equations. For table cells that may
 /// contain math, use the `_with_doc` variant instead.
-fn collect_html_inlines(
-    children: &[HtmlNode],
-    para: &mut Paragraph,
-    bold: bool,
-    italic: bool,
-    monospace: bool,
-) {
-    collect_html_inlines_with_doc(children, para, bold, italic, monospace, None);
+fn collect_html_inlines(children: &[HtmlNode], para: &mut Paragraph, fmt: InlineFmt) {
+    collect_html_inlines_with_doc(children, para, fmt, None);
 }
 
 /// Inner implementation of `collect_html_inlines` that optionally accepts an
@@ -1714,9 +1723,7 @@ fn collect_html_inlines(
 fn collect_html_inlines_with_doc(
     children: &[HtmlNode],
     para: &mut Paragraph,
-    bold: bool,
-    italic: bool,
-    monospace: bool,
+    fmt: InlineFmt,
     html_doc: Option<&HtmlDocument>,
 ) {
     for child in children {
@@ -1724,9 +1731,9 @@ fn collect_html_inlines_with_doc(
             HtmlNode::Text(text, span) => {
                 if !text.is_empty() {
                     let mut run = Run::new(text.as_str());
-                    run.bold = bold;
-                    run.italic = italic;
-                    run.monospace = monospace;
+                    run.bold = fmt.bold;
+                    run.italic = fmt.italic;
+                    run.monospace = fmt.monospace;
                     if !span.is_detached() {
                         run.span = Some(*span);
                     }
@@ -1742,9 +1749,7 @@ fn collect_html_inlines_with_doc(
                 if tag == "math" {
                     continue;
                 }
-                let new_bold = bold || tag == "strong" || tag == "b";
-                let new_italic = italic || tag == "em" || tag == "i";
-                let new_monospace = monospace || tag == "code";
+                let new_fmt = fmt.for_tag(&tag);
                 // Skip the footnote reference marker (its number is emitted by the
                 // `Tag::Start("footnote")` handler). typst 0.15 puts the
                 // `doc-noteref` role on the `<sup>` (0.14 used `<a>`), so match by
@@ -1752,14 +1757,7 @@ fn collect_html_inlines_with_doc(
                 if has_attr_value(elem, "role", "doc-noteref") {
                     continue;
                 }
-                collect_html_inlines_with_doc(
-                    &elem.children,
-                    para,
-                    new_bold,
-                    new_italic,
-                    new_monospace,
-                    html_doc,
-                );
+                collect_html_inlines_with_doc(&elem.children, para, new_fmt, html_doc);
             }
             HtmlNode::Tag(tag) => {
                 if let Tag::Start(content, _) = tag {
@@ -2182,9 +2180,10 @@ fn convert_cell_paragraphs(
         collect_html_inlines_with_doc(
             &td.children,
             &mut para,
-            is_header,
-            false,
-            false,
+            InlineFmt {
+                bold: is_header,
+                ..InlineFmt::default()
+            },
             Some(html_doc),
         );
         return vec![para];
@@ -2209,9 +2208,10 @@ fn convert_cell_paragraphs(
                 collect_html_inlines_with_doc(
                     &el.children,
                     &mut para,
-                    is_header,
-                    false,
-                    false,
+                    InlineFmt {
+                        bold: is_header,
+                        ..InlineFmt::default()
+                    },
                     Some(html_doc),
                 );
                 if !para.inlines.is_empty() {
@@ -2225,9 +2225,10 @@ fn convert_cell_paragraphs(
             collect_html_inlines_with_doc(
                 &td.children,
                 &mut para,
-                is_header,
-                false,
-                false,
+                InlineFmt {
+                    bold: is_header,
+                    ..InlineFmt::default()
+                },
                 Some(html_doc),
             );
             vec![para]
@@ -2239,9 +2240,10 @@ fn convert_cell_paragraphs(
         collect_html_inlines_with_doc(
             &td.children,
             &mut para,
-            is_header,
-            false,
-            false,
+            InlineFmt {
+                bold: is_header,
+                ..InlineFmt::default()
+            },
             Some(html_doc),
         );
         vec![para]
@@ -2316,9 +2318,7 @@ fn collect_cell_content_recursive(
                     collect_html_inlines_with_doc(
                         &el.children,
                         &mut para,
-                        false,
-                        false,
-                        false,
+                        InlineFmt::default(),
                         Some(html_doc),
                     );
                     if !para.inlines.is_empty() {
@@ -2447,9 +2447,7 @@ fn convert_html_list_at_level(
                         collect_html_inlines_with_doc(
                             &li.children[range_start..idx],
                             &mut para,
-                            false,
-                            false,
-                            false,
+                            InlineFmt::default(),
                             html_doc,
                         );
                     }
@@ -2506,7 +2504,7 @@ fn convert_term_list(elem: &HtmlElement, doc: &mut Document) {
                 "dt" => {
                     let mut para = Paragraph::new();
                     para.suppress_indent = true;
-                    collect_html_inlines(&item.children, &mut para, true, false, false);
+                    collect_html_inlines(&item.children, &mut para, InlineFmt::bold());
                     if !para.inlines.is_empty() {
                         doc.add_paragraph(para);
                     }
@@ -2515,7 +2513,7 @@ fn convert_term_list(elem: &HtmlElement, doc: &mut Document) {
                     let mut para = Paragraph::new();
                     para.left_indent = Some(doc.style.first_line_indent_twips);
                     para.suppress_indent = true;
-                    collect_html_inlines(&item.children, &mut para, false, false, false);
+                    collect_html_inlines(&item.children, &mut para, InlineFmt::default());
                     if !para.inlines.is_empty() {
                         doc.add_paragraph(para);
                     }
@@ -2593,27 +2591,21 @@ fn collect_flat_text(nodes: &[HtmlNode]) -> String {
 fn collect_formatted_runs_from_nodes(nodes: &[HtmlNode]) -> Vec<Run> {
     let mut para = Paragraph::new();
     // Walk through Tag nodes to handle strong/emph within the link's content
-    collect_formatted_runs_inner(nodes, &mut para, false, false, false);
+    collect_formatted_runs_inner(nodes, &mut para, InlineFmt::default());
     drain_text_runs(&mut para)
 }
 
 /// Inner helper for collecting formatted runs, tracking inherited formatting state.
-fn collect_formatted_runs_inner(
-    nodes: &[HtmlNode],
-    para: &mut Paragraph,
-    bold: bool,
-    italic: bool,
-    monospace: bool,
-) {
+fn collect_formatted_runs_inner(nodes: &[HtmlNode], para: &mut Paragraph, fmt: InlineFmt) {
     let mut i = 0;
     while i < nodes.len() {
         match &nodes[i] {
             HtmlNode::Text(text, span) => {
                 if !text.is_empty() {
                     let mut run = Run::new(text.as_str());
-                    run.bold = bold;
-                    run.italic = italic;
-                    run.monospace = monospace;
+                    run.bold = fmt.bold;
+                    run.italic = fmt.italic;
+                    run.monospace = fmt.monospace;
                     if !span.is_detached() {
                         run.span = Some(*span);
                     }
@@ -2625,41 +2617,25 @@ fn collect_formatted_runs_inner(
                     let elem_name = content.elem().name();
                     let end = find_tag_end(nodes, i, tag.location());
                     match elem_name {
-                        "strong" => {
+                        "strong" | "emph" => {
                             collect_formatted_runs_inner(
                                 &nodes[i + 1..end],
                                 para,
-                                true,
-                                italic,
-                                monospace,
-                            );
-                        }
-                        "emph" => {
-                            collect_formatted_runs_inner(
-                                &nodes[i + 1..end],
-                                para,
-                                bold,
-                                true,
-                                monospace,
+                                fmt.for_tag(elem_name),
                             );
                         }
                         "raw" => {
                             collect_formatted_runs_inner(
                                 &nodes[i + 1..end],
                                 para,
-                                bold,
-                                italic,
-                                true,
+                                InlineFmt {
+                                    monospace: true,
+                                    ..fmt
+                                },
                             );
                         }
                         _ => {
-                            collect_formatted_runs_inner(
-                                &nodes[i + 1..end],
-                                para,
-                                bold,
-                                italic,
-                                monospace,
-                            );
+                            collect_formatted_runs_inner(&nodes[i + 1..end], para, fmt);
                         }
                     }
                     i = end;
@@ -2667,16 +2643,8 @@ fn collect_formatted_runs_inner(
             }
             HtmlNode::Element(elem) => {
                 let tag = tag_name(elem);
-                let new_bold = bold || tag == "strong" || tag == "b";
-                let new_italic = italic || tag == "em" || tag == "i";
-                let new_monospace = monospace || tag == "code";
-                collect_formatted_runs_inner(
-                    &elem.children,
-                    para,
-                    new_bold,
-                    new_italic,
-                    new_monospace,
-                );
+                let new_fmt = fmt.for_tag(&tag);
+                collect_formatted_runs_inner(&elem.children, para, new_fmt);
             }
             HtmlNode::Frame(_) => {}
         }
@@ -3196,5 +3164,23 @@ pub(super) fn collect_block_tag_locations(children: &[HtmlNode], out: &mut Vec<L
             _ => {}
         }
         i += 1;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::InlineFmt;
+
+    #[test]
+    fn inline_fmt_for_tag_accumulates() {
+        let fmt = InlineFmt::default().for_tag("strong");
+        assert!(fmt.bold && !fmt.italic && !fmt.monospace);
+        let fmt = fmt.for_tag("em");
+        assert!(fmt.bold && fmt.italic);
+        let fmt = InlineFmt::default().for_tag("emph"); // Typst tag-name spelling
+        assert!(fmt.italic);
+        let fmt = InlineFmt::default().for_tag("code");
+        assert!(fmt.monospace);
+        assert_eq!(InlineFmt::default().for_tag("span"), InlineFmt::default());
     }
 }
