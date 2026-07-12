@@ -5796,6 +5796,44 @@ fn bibliography_body_text_preserved() {
 }
 
 #[test]
+fn multiple_bibliographies_collect_sources_from_all() {
+    let path = "../../tests/fixtures/bibliography_multiple.typ";
+    let world = typort_core::TyportWorld::new(std::path::Path::new(path)).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+    let tags: Vec<&str> = doc
+        .citation_sources
+        .iter()
+        .map(|s| s.tag.as_str())
+        .collect();
+    assert!(
+        tags.contains(&"alpha2021"),
+        "first bib's key missing: {tags:?}"
+    );
+    assert!(
+        tags.contains(&"beta2022"),
+        "second bib's key missing: {tags:?}"
+    );
+}
+
+#[test]
+fn multiple_bibliographies_render_two_blocks() {
+    let doc_xml = fixture_doc_xml("bibliography_multiple");
+    assert!(
+        doc_xml.contains("First Library Article"),
+        "first bib entry text missing"
+    );
+    assert!(
+        doc_xml.contains("Second Library Book"),
+        "second bib entry text missing"
+    );
+    let sdt_count = doc_xml.matches("<w:bibliography/>").count();
+    assert_eq!(
+        sdt_count, 2,
+        "expected one bibliography SDT per #bibliography()"
+    );
+}
+
+#[test]
 fn run_coalescing_collapses_split_line() {
     // Regression: the HTML walk emits one <w:r> per Typst text/space node, so a
     // plain line is shattered into many runs. The coalescing post-pass merges
