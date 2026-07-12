@@ -40,14 +40,20 @@ fn is_ext_b_subset(info: &FontInfo) -> bool {
 
 /// Build the font store, dropping any `…-ExtB` (Unicode Extension-B) subset face.
 ///
-/// Loads both the bundled (`embedded`) and the system fonts — matching the old
-/// `include_system_fonts(true)` behavior — then filters out the Ext-B subset
-/// faces (see [`is_ext_b_subset`]) before they enter the store, so the font book
-/// it exposes never contains them.
-fn search_fonts_without_ext_b() -> FontStore {
+/// Loads the bundled (`embedded`) and the system fonts — matching the old
+/// `include_system_fonts(true)` behavior — plus any faces found (recursively) in
+/// `extra_dirs`, then filters out the Ext-B subset faces (see
+/// [`is_ext_b_subset`]) before they enter the store, so the font book it exposes
+/// never contains them. `extra_dirs` is empty for [`TyportWorld::new`]; it exists
+/// so tests can vendor fonts under `tests/fonts/` instead of depending on what
+/// happens to be installed on the system.
+fn search_fonts_without_ext_b(extra_dirs: &[PathBuf]) -> FontStore {
     let mut store = FontStore::new();
     store.extend(filter_ext_b(fonts::embedded()));
     store.extend(filter_ext_b(fonts::system()));
+    for dir in extra_dirs {
+        store.extend(filter_ext_b(fonts::scan(dir)));
+    }
     store
 }
 
@@ -65,6 +71,20 @@ impl TyportWorld {
     /// # Errors
     /// Returns an error if the file cannot be read.
     pub fn new(path: &Path) -> std::io::Result<Self> {
+        Self::with_font_dirs(path, &[])
+    }
+
+    /// Create a new world, additionally loading fonts from `font_dirs`.
+    ///
+    /// Fonts are searched recursively in each directory and are added on top
+    /// of the embedded and system fonts `new` already loads — this is a
+    /// superset, not a replacement. Intended for tests that vendor a font
+    /// under `tests/fonts/` rather than relying on what happens to be
+    /// installed on the machine running the test.
+    ///
+    /// # Errors
+    /// Returns an error if the file cannot be read.
+    pub fn with_font_dirs(path: &Path, font_dirs: &[PathBuf]) -> std::io::Result<Self> {
         let abs_path = path.canonicalize()?;
         let root = abs_path.parent().unwrap_or(Path::new(".")).to_path_buf();
         let file_name = abs_path.file_name().unwrap_or_default().to_string_lossy();
@@ -74,7 +94,7 @@ impl TyportWorld {
         let file_id = RootedPath::new(VirtualRoot::Project, vpath).intern();
         let source = Source::new(file_id, content);
 
-        let fonts = search_fonts_without_ext_b();
+        let fonts = search_fonts_without_ext_b(font_dirs);
 
         let library = Library::builder()
             .with_features([Feature::Html].into_iter().collect())
