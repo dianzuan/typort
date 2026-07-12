@@ -111,28 +111,14 @@ fn coalesce_run_vec(runs: &mut Vec<Run>) {
 /// turns into `<w:rPr>` matches. `text` and the non-serialized `span` are
 /// deliberately ignored (the surviving run keeps the first run's span).
 ///
-/// Mirrors the `has_rpr` field set in `typort_ooxml::writer::write_run` exactly;
-/// if a new styled field is added there, add it here too.
+/// Delegates to the canonical [`RunFormat`] struct shared with `typort_ooxml::writer::write_run`;
+/// if a new styled field is added, add it to `RunFormat` and both sites follow.
 ///
 /// A line-break run never merges with anything: the writer emits one `<w:br/>`
 /// per such run, so merging two adjacent breaks would delete a forced blank
 /// line the author wrote (`#linebreak()#linebreak()` / `\ \`).
 fn same_run_formatting(a: &Run, b: &Run) -> bool {
-    !a.line_break
-        && !b.line_break
-        && a.bold == b.bold
-        && a.italic == b.italic
-        && a.superscript == b.superscript
-        && a.subscript == b.subscript
-        && a.monospace == b.monospace
-        && a.underline == b.underline
-        && a.strikethrough == b.strikethrough
-        && a.highlight_color == b.highlight_color
-        && a.smallcaps == b.smallcaps
-        && a.color == b.color
-        && a.font_ascii == b.font_ascii
-        && a.font_east_asia == b.font_east_asia
-        && a.size_half_pt == b.size_half_pt
+    !a.line_break && !b.line_break && a.format_key() == b.format_key()
 }
 
 /// A run whose text is non-empty and entirely whitespace.

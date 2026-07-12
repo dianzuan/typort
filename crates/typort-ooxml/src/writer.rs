@@ -1004,18 +1004,7 @@ fn write_run<W: Write>(
     }
     writer.create_element("w:r").write_inner_content(|w| {
         let has_font_override = run.font_ascii.is_some() || run.font_east_asia.is_some();
-        let has_rpr = run.bold
-            || run.italic
-            || run.superscript
-            || run.subscript
-            || run.monospace
-            || run.underline
-            || run.strikethrough
-            || run.highlight_color.is_some()
-            || run.smallcaps
-            || run.color.is_some()
-            || has_font_override
-            || run.size_half_pt.is_some();
+        let has_rpr = !run.format_key().is_plain();
         if has_rpr {
             w.create_element("w:rPr").write_inner_content(|rpr| {
                 if run.monospace {

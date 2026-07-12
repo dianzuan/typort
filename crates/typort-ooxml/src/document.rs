@@ -224,6 +224,59 @@ impl Run {
             ..Self::new("")
         }
     }
+
+    /// See [`RunFormat`].
+    #[must_use]
+    pub fn format_key(&self) -> RunFormat<'_> {
+        RunFormat {
+            bold: self.bold,
+            italic: self.italic,
+            superscript: self.superscript,
+            subscript: self.subscript,
+            monospace: self.monospace,
+            underline: self.underline,
+            strikethrough: self.strikethrough,
+            highlight_color: self.highlight_color.as_deref(),
+            smallcaps: self.smallcaps,
+            color: self.color.as_deref(),
+            font_ascii: self.font_ascii.as_deref(),
+            font_east_asia: self.font_east_asia.as_deref(),
+            size_half_pt: self.size_half_pt,
+        }
+    }
+}
+
+/// The complete set of `Run` fields the writer serializes into `<w:rPr>`.
+///
+/// Single source of truth shared by `writer::write_run` (has-rPr gate via
+/// `is_plain`) and run coalescing (merge-eligibility via `PartialEq`).
+/// Adding a styled field to `Run`? Add it HERE and both sites follow.
+/// `text`, `span`, and `line_break` are deliberately not part of the key
+/// (line breaks are handled before either site consults the key).
+#[derive(Debug, PartialEq, Eq, Default)]
+#[allow(clippy::struct_excessive_bools)] // mirrors Run's independent style toggles
+pub struct RunFormat<'a> {
+    pub bold: bool,
+    pub italic: bool,
+    pub superscript: bool,
+    pub subscript: bool,
+    pub monospace: bool,
+    pub underline: bool,
+    pub strikethrough: bool,
+    pub highlight_color: Option<&'a str>,
+    pub smallcaps: bool,
+    pub color: Option<&'a str>,
+    pub font_ascii: Option<&'a str>,
+    pub font_east_asia: Option<&'a str>,
+    pub size_half_pt: Option<u32>,
+}
+
+impl RunFormat<'_> {
+    /// True iff no `<w:rPr>` element is needed for this run.
+    #[must_use]
+    pub fn is_plain(&self) -> bool {
+        *self == RunFormat::default()
+    }
 }
 
 /// A footnote with its content paragraphs.
@@ -967,5 +1020,90 @@ impl Document {
         let id = u32::try_from(self.footnotes.len()).unwrap_or(u32::MAX - 3) + 2;
         self.footnotes.push(Footnote { id, content });
         id
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_key_tracks_every_styled_field() {
+        let plain = Run::new("x");
+        assert!(plain.format_key().is_plain());
+        assert_eq!(plain.format_key(), Run::new("y").format_key()); // text ignored
+
+        // Every styled field must flip both equality and is_plain.
+        let styled: Vec<Run> = vec![
+            {
+                let mut r = Run::new("x");
+                r.bold = true;
+                r
+            },
+            {
+                let mut r = Run::new("x");
+                r.italic = true;
+                r
+            },
+            {
+                let mut r = Run::new("x");
+                r.superscript = true;
+                r
+            },
+            {
+                let mut r = Run::new("x");
+                r.subscript = true;
+                r
+            },
+            {
+                let mut r = Run::new("x");
+                r.monospace = true;
+                r
+            },
+            {
+                let mut r = Run::new("x");
+                r.underline = true;
+                r
+            },
+            {
+                let mut r = Run::new("x");
+                r.strikethrough = true;
+                r
+            },
+            {
+                let mut r = Run::new("x");
+                r.highlight_color = Some("yellow".into());
+                r
+            },
+            {
+                let mut r = Run::new("x");
+                r.smallcaps = true;
+                r
+            },
+            {
+                let mut r = Run::new("x");
+                r.color = Some("FF0000".into());
+                r
+            },
+            {
+                let mut r = Run::new("x");
+                r.font_ascii = Some("Courier New".into());
+                r
+            },
+            {
+                let mut r = Run::new("x");
+                r.font_east_asia = Some("SimSun".into());
+                r
+            },
+            {
+                let mut r = Run::new("x");
+                r.size_half_pt = Some(24);
+                r
+            },
+        ];
+        for r in &styled {
+            assert!(!r.format_key().is_plain());
+            assert_ne!(r.format_key(), plain.format_key());
+        }
     }
 }
