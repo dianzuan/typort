@@ -34,16 +34,26 @@ pub fn extract_bibliography_sources(
         return Vec::new();
     }
 
-    // Re-parse the bibliography files to get full hayagriva Entry data. Keys
-    // duplicated across bibliographies keep the first occurrence encountered
-    // (see `merge_library`'s existing push-only behavior).
+    // Re-parse the bibliography files to get full hayagriva Entry data.
+    // `bib_elems` is in document order (Introspector::query iterates elements
+    // in the order Typst discovered them during layout, i.e. reading order).
+    // Typst allows the same citation key to appear in more than one
+    // `#bibliography()` call in a document (verified: compiles without error),
+    // so a key duplicated *across* bibliographies keeps the first
+    // (earliest-in-document) occurrence: `merge_library_keep_first` below skips
+    // an entry once its key is already present in the accumulator, rather than
+    // overwriting via `merge_library`/`Library::push` (last-wins, via
+    // `IndexMap::insert`). `merge_library` itself is left last-wins and reused
+    // unchanged by `load_bibliography_library` below, which merges multiple
+    // files passed to a *single* `#bibliography()` call — a different case
+    // this fix does not touch.
     let mut library = hayagriva::Library::new();
     for content in &bib_elems {
         let Some(bib_elem) = content.to_packed::<BibliographyElem>() else {
             continue;
         };
         let lib = load_bibliography_library(&bib_elem.sources.source.0, world);
-        merge_library(&mut library, &lib);
+        merge_library_keep_first(&mut library, &lib);
     }
 
     // Get the citation keys from the introspector
@@ -123,6 +133,18 @@ fn try_parse_bibliography(content: &str, prefer_bib: bool) -> Option<hayagriva::
 fn merge_library(target: &mut hayagriva::Library, source: &hayagriva::Library) {
     for entry in source.iter() {
         target.push(entry);
+    }
+}
+
+/// Merge `source` into `target`, keeping the first-seen entry on a key
+/// collision instead of `merge_library`'s last-wins overwrite. Used to combine
+/// libraries from separate `#bibliography()` calls in document order, so the
+/// earliest bibliography in reading order wins a duplicate key.
+fn merge_library_keep_first(target: &mut hayagriva::Library, source: &hayagriva::Library) {
+    for entry in source.iter() {
+        if target.get(entry.key()).is_none() {
+            target.push(entry);
+        }
     }
 }
 

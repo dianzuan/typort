@@ -5834,6 +5834,40 @@ fn multiple_bibliographies_render_two_blocks() {
 }
 
 #[test]
+fn duplicate_citation_key_across_bibliographies_keeps_first_occurrence() {
+    // Regression: typst allows the same citation key to appear in separate
+    // `#bibliography()` calls in one document (it compiles without error), but
+    // the merge that combines each bibliography's hayagriva::Library used
+    // `merge_library`, which is last-wins (`Library::push` -> `IndexMap::insert`
+    // overwrites). That silently let a later bibliography's entry clobber an
+    // earlier one's metadata for the same key. The fix keeps the first
+    // (earliest-in-document) occurrence via `merge_library_keep_first`. See
+    // tests/fixtures/bibliography_duplicate_key.typ, which cites `dup2020` in
+    // both "Part One" (bibliography A, title "First Title") and "Part Two"
+    // (bibliography B, title "Second Title").
+    let path = "../../tests/fixtures/bibliography_duplicate_key.typ";
+    let world = typort_core::TyportWorld::new(std::path::Path::new(path)).unwrap();
+    let doc = typort_core::convert::convert(&world).unwrap();
+    let dup_sources: Vec<_> = doc
+        .citation_sources
+        .iter()
+        .filter(|s| s.tag == "dup2020")
+        .collect();
+    assert!(
+        !dup_sources.is_empty(),
+        "expected at least one citation_sources entry for dup2020"
+    );
+    for src in &dup_sources {
+        assert_eq!(
+            src.title.as_deref(),
+            Some("First Title"),
+            "duplicate key across bibliographies must keep the FIRST bibliography's \
+             metadata (document order), not the last one's"
+        );
+    }
+}
+
+#[test]
 fn run_coalescing_collapses_split_line() {
     // Regression: the HTML walk emits one <w:r> per Typst text/space node, so a
     // plain line is shattered into many runs. The coalescing post-pass merges
