@@ -2008,7 +2008,7 @@ fn collect_styles_from_frame(
                     font_family: info.family.clone(),
                     size_pt: text_item.size.to_pt(),
                     color_hex: extract_non_black_color(&text_item.fill),
-                    is_bold: info.variant.weight.to_number() >= 700,
+                    is_bold: effective_weight(&text_item.font) >= 700,
                     is_italic: matches!(
                         info.variant.style,
                         typst_library::text::FontStyle::Italic
@@ -2028,6 +2028,31 @@ fn collect_styles_from_frame(
             _ => {}
         }
     }
+}
+
+/// The font weight Typst actually rendered this run with.
+///
+/// `TextItem::font` is a `FontInstance` (typst 0.15): a `Font` plus the
+/// variation coordinates it was shaped with. For a static (non-variable)
+/// font, `FontInstance::variations()` is empty, and `Font::info().variant.weight`
+/// — the single weight the face declares — is authoritative.
+///
+/// For a variable font with a `wght` axis, though, `info()` always reports the
+/// *file's default named instance* (`FontInfo::from_ttf`, computed once from the
+/// raw font data, typst-library `text/font/mod.rs`), never the per-run
+/// instantiation. The actual weight requested via `#text(weight: ...)` is
+/// resolved into `variations()` at shape time (`FontVariations::resolve` sets the
+/// `wght` axis from `variant.weight`, typst-library `text/font/variations.rs`).
+/// So for a VF run we must read the resolved `wght` coordinate — falling back to
+/// `info().variant.weight` when the font has no `wght` axis (variations empty).
+fn effective_weight(instance: &typst_library::text::FontInstance) -> u16 {
+    let wght = instance
+        .variations()
+        .0
+        .iter()
+        .find(|(tag, _)| *tag == typst_library::text::StandardAxes::WGHT)
+        .map(|&(_, value)| typst_library::text::FontWeight::from_wght(value));
+    wght.unwrap_or(instance.info().variant.weight).to_number()
 }
 
 /// Detect the most common font families (split by script) and size from
