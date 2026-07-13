@@ -231,6 +231,36 @@ fn variable_font_weight_bold_detection() {
 }
 
 #[test]
+fn variable_font_style_italic_detection() {
+    // Some variable fonts carry italics on an `ital` or `slnt` axis instead of
+    // a separate italic face. `info().variant.style` (the file-default named
+    // instance) stays Normal for such fonts even when `#text(style: "italic")`
+    // resolves a nonzero axis coordinate at shape time — the paged-side italic
+    // detection (convert/page.rs `effective_style`) must read the resolved
+    // coordinate, not the file default. Font: tests/fonts/TyportSlantTest*,
+    // a derivative of Karla with a synthetic `slnt` axis (no `ital` axis is
+    // present in either font; `slnt` is what typst resolves for an italic
+    // request when only `slnt` is available — see FontVariations::resolve).
+    let fonts = std::path::PathBuf::from("../../tests/fonts");
+    let doc_xml = crate::common::fixture_part_with_font_dirs(
+        "variable_font_style",
+        "word/document.xml",
+        &[fonts],
+    );
+
+    let slanted = paragraph_containing(&doc_xml, "Slanted paragraph.");
+    assert!(
+        slanted.contains("<w:i/>"),
+        "slnt-axis italic VF text must be italic:\n{slanted}"
+    );
+    let upright = paragraph_containing(&doc_xml, "Upright paragraph.");
+    assert!(
+        !upright.contains("<w:i/>"),
+        "upright VF text must NOT be italic:\n{upright}"
+    );
+}
+
+#[test]
 fn deliberate_digit_run_font_override_is_kept() {
     // A digits-only run the author explicitly set in a non-body font must keep
     // its w:rFonts — only a true OpenType MATH-table fallback is normalized away.
