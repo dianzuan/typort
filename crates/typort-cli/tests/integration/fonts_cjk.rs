@@ -206,15 +206,12 @@ fn variable_font_weight_bold_detection() {
     // Variable fonts (typst 0.15) report continuous weights; the paged-side bold
     // detection (weight >= 700, convert/page.rs) must see the instantiated
     // instance's weight, not the file default. Fonts vendored in tests/fonts.
-    let path = "../../tests/fixtures/variable_font_weight.typ";
     let fonts = std::path::PathBuf::from("../../tests/fonts");
-    let world =
-        typort_core::TyportWorld::with_font_dirs(std::path::Path::new(path), &[fonts]).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, std::io::Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(std::io::Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = crate::common::fixture_part_with_font_dirs(
+        "variable_font_weight",
+        "word/document.xml",
+        &[fonts],
+    );
 
     let heavy = paragraph_containing(&doc_xml, "Heavy weight paragraph.");
     assert!(

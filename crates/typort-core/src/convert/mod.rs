@@ -860,17 +860,7 @@ fn handle_html_element(elem: &HtmlElement, ctx: &mut WalkCtx) {
         // introspector. Only do this when an equation is actually present, so the
         // ordinary block-emphasis case keeps its original run/spacing behavior.
         "em" | "i" | "strong" | "b" | "code" if subtree_has_element(&elem.children, "equation") => {
-            let fmt = match tag.as_str() {
-                "strong" | "b" => InlineFmt::bold(),
-                "code" => InlineFmt {
-                    monospace: true,
-                    ..InlineFmt::default()
-                },
-                _ => InlineFmt {
-                    italic: true,
-                    ..InlineFmt::default()
-                },
-            };
+            let fmt = InlineFmt::default().for_tag(&tag);
             emit_inline_equation_paragraph(elem, ctx, fmt, None);
         }
         "section" => {
@@ -2165,6 +2155,13 @@ fn convert_cell_paragraphs(
     is_header: bool,
     html_doc: &HtmlDocument,
 ) -> Vec<Paragraph> {
+    // Every paragraph collected below shares the same formatting: bold iff this
+    // is a header cell, nothing else set.
+    let fmt = InlineFmt {
+        bold: is_header,
+        ..InlineFmt::default()
+    };
+
     // Typst's HTML export drops every equation, leaving inline math as `equation`
     // Tag siblings between the cell's <p> text fragments. The per-<p> path below
     // would consume only the <p>s — dropping those equation siblings and stacking
@@ -2177,15 +2174,7 @@ fn convert_cell_paragraphs(
         (0..td.children.len()).any(|i| is_inline_equation_at(&td.children, i, html_doc));
     if has_inline_equation {
         let mut para = Paragraph::new();
-        collect_html_inlines_with_doc(
-            &td.children,
-            &mut para,
-            InlineFmt {
-                bold: is_header,
-                ..InlineFmt::default()
-            },
-            Some(html_doc),
-        );
+        collect_html_inlines_with_doc(&td.children, &mut para, fmt, Some(html_doc));
         return vec![para];
     }
 
@@ -2205,15 +2194,7 @@ fn convert_cell_paragraphs(
                 && tag_name(el) == "p"
             {
                 let mut para = Paragraph::new();
-                collect_html_inlines_with_doc(
-                    &el.children,
-                    &mut para,
-                    InlineFmt {
-                        bold: is_header,
-                        ..InlineFmt::default()
-                    },
-                    Some(html_doc),
-                );
+                collect_html_inlines_with_doc(&el.children, &mut para, fmt, Some(html_doc));
                 if !para.inlines.is_empty() {
                     paragraphs.push(para);
                 }
@@ -2222,30 +2203,14 @@ fn convert_cell_paragraphs(
         if paragraphs.is_empty() {
             // Fallback: collect all content as one paragraph
             let mut para = Paragraph::new();
-            collect_html_inlines_with_doc(
-                &td.children,
-                &mut para,
-                InlineFmt {
-                    bold: is_header,
-                    ..InlineFmt::default()
-                },
-                Some(html_doc),
-            );
+            collect_html_inlines_with_doc(&td.children, &mut para, fmt, Some(html_doc));
             vec![para]
         } else {
             paragraphs
         }
     } else {
         let mut para = Paragraph::new();
-        collect_html_inlines_with_doc(
-            &td.children,
-            &mut para,
-            InlineFmt {
-                bold: is_header,
-                ..InlineFmt::default()
-            },
-            Some(html_doc),
-        );
+        collect_html_inlines_with_doc(&td.children, &mut para, fmt, Some(html_doc));
         vec![para]
     }
 }

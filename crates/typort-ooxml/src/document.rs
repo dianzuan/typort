@@ -278,19 +278,19 @@ impl Run {
 #[derive(Debug, PartialEq, Eq, Default)]
 #[allow(clippy::struct_excessive_bools)] // mirrors Run's independent style toggles
 pub struct RunFormat<'a> {
-    pub bold: bool,
-    pub italic: bool,
-    pub superscript: bool,
-    pub subscript: bool,
-    pub monospace: bool,
-    pub underline: bool,
-    pub strikethrough: bool,
-    pub highlight_color: Option<&'a str>,
-    pub smallcaps: bool,
-    pub color: Option<&'a str>,
-    pub font_ascii: Option<&'a str>,
-    pub font_east_asia: Option<&'a str>,
-    pub size_half_pt: Option<u32>,
+    bold: bool,
+    italic: bool,
+    superscript: bool,
+    subscript: bool,
+    monospace: bool,
+    underline: bool,
+    strikethrough: bool,
+    highlight_color: Option<&'a str>,
+    smallcaps: bool,
+    color: Option<&'a str>,
+    font_ascii: Option<&'a str>,
+    font_east_asia: Option<&'a str>,
+    size_half_pt: Option<u32>,
 }
 
 impl RunFormat<'_> {
