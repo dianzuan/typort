@@ -257,9 +257,14 @@ fn duplicate_citation_key_across_bibliographies_keeps_first_occurrence() {
         .iter()
         .filter(|s| s.tag == "dup2020")
         .collect();
-    assert!(
-        !dup_sources.is_empty(),
-        "expected at least one citation_sources entry for dup2020"
+    assert_eq!(
+        dup_sources.len(),
+        1,
+        "BibliographyElem::keys() yields one (label, ..) tuple per bibliography \
+         that defines the key, so the naive filter_map produced one CitationSource \
+         PER bibliography (same tag, same writer-derived GUID) instead of deduping \
+         by tag; expected exactly one citation_sources entry for dup2020, got: \
+         {dup_sources:?}"
     );
     for src in &dup_sources {
         assert_eq!(

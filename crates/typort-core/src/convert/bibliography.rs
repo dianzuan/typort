@@ -47,21 +47,43 @@ pub fn extract_bibliography_sources(
     // unchanged by `load_bibliography_library` below, which merges multiple
     // files passed to a *single* `#bibliography()` call — a different case
     // this fix does not touch.
-    let mut library = hayagriva::Library::new();
+    //
+    // The accumulator is seeded by MOVING the first bibliography's freshly
+    // loaded `Library` rather than merging into a fresh `Library::new()`, so
+    // the (overwhelmingly common) single-bibliography document does zero
+    // entry clones here.
+    let mut library: Option<hayagriva::Library> = None;
     for content in &bib_elems {
         let Some(bib_elem) = content.to_packed::<BibliographyElem>() else {
             continue;
         };
         let lib = load_bibliography_library(&bib_elem.sources.source.0, world);
-        merge_library_keep_first(&mut library, &lib);
+        match &mut library {
+            None => library = Some(lib),
+            Some(acc) => merge_library_keep_first(acc, &lib),
+        }
     }
+    let library = library.unwrap_or_default();
 
-    // Get the citation keys from the introspector
+    // Get the citation keys from the introspector. `BibliographyElem::keys`
+    // yields one `(label, supplement)` tuple PER bibliography that declares a
+    // given key, so a key duplicated across bibliographies (the same case
+    // `merge_library_keep_first` resolves above) yields one tuple per
+    // defining bibliography, not one overall. Without deduping here, that
+    // produced two byte-identical `CitationSource` entries (same tag, so the
+    // writer's tag-to-GUID mapping assigns the same GUID) for a single key.
+    // Dedup by tag, keeping the first (earliest-in-document) occurrence —
+    // consistent with the first-wins rule `merge_library_keep_first` applies
+    // to the underlying entries.
     let keys = BibliographyElem::keys(tracked);
+    let mut seen_tags = std::collections::HashSet::new();
 
     keys.into_iter()
         .filter_map(|(label, _)| {
             let tag = label.resolve().to_string();
+            if !seen_tags.insert(tag.clone()) {
+                return None;
+            }
             let entry = library.get(&tag)?;
             Some(entry_to_citation_source(&tag, entry))
         })
@@ -130,22 +152,47 @@ fn try_parse_bibliography(content: &str, prefer_bib: bool) -> Option<hayagriva::
     }
 }
 
-fn merge_library(target: &mut hayagriva::Library, source: &hayagriva::Library) {
+/// Merge `source` entries into `target`. There is deliberately one
+/// hand-written merge loop, shared by both call-site behaviors below via
+/// `keep_first`, rather than two near-identical loops that could drift apart:
+///
+/// - `keep_first: false` (`merge_library`): last-wins, via `Library::push` ->
+///   `IndexMap::insert`, which overwrites an existing key. Used unchanged by
+///   `load_bibliography_library` to merge multiple files passed to a
+///   *single* `#bibliography()` call.
+/// - `keep_first: true` (`merge_library_keep_first`): first-wins — an entry
+///   whose key already exists in `target` is skipped rather than overwritten,
+///   and one warning is emitted per dropped key (this file's other data-loss
+///   paths, e.g. `load_bibliography_library`'s failed-to-parse/could-not-read
+///   messages, also warn rather than silently dropping data). Used to combine
+///   libraries from separate `#bibliography()` calls in document order, so
+///   the earliest bibliography in reading order wins a duplicate key.
+fn merge_library_impl(
+    target: &mut hayagriva::Library,
+    source: &hayagriva::Library,
+    keep_first: bool,
+) {
     for entry in source.iter() {
+        if keep_first && target.get(entry.key()).is_some() {
+            eprintln!(
+                "typort: warning: citation key {:?} is defined in more than one \
+                 bibliography; keeping the entry from the earliest bibliography in \
+                 document order",
+                entry.key()
+            );
+            continue;
+        }
         target.push(entry);
     }
 }
 
-/// Merge `source` into `target`, keeping the first-seen entry on a key
-/// collision instead of `merge_library`'s last-wins overwrite. Used to combine
-/// libraries from separate `#bibliography()` calls in document order, so the
-/// earliest bibliography in reading order wins a duplicate key.
+fn merge_library(target: &mut hayagriva::Library, source: &hayagriva::Library) {
+    merge_library_impl(target, source, false);
+}
+
+/// See `merge_library_impl`'s `keep_first: true` case.
 fn merge_library_keep_first(target: &mut hayagriva::Library, source: &hayagriva::Library) {
-    for entry in source.iter() {
-        if target.get(entry.key()).is_none() {
-            target.push(entry);
-        }
-    }
+    merge_library_impl(target, source, true);
 }
 
 /// Convert a hayagriva Entry to a Word `CitationSource` with full metadata.
