@@ -2010,7 +2010,7 @@ fn collect_styles_from_frame(
                     color_hex: extract_non_black_color(&text_item.fill),
                     is_bold: effective_weight(&text_item.font) >= 700,
                     is_italic: matches!(
-                        info.variant.style,
+                        effective_style(&text_item.font),
                         typst_library::text::FontStyle::Italic
                             | typst_library::text::FontStyle::Oblique
                     ),
@@ -2030,6 +2030,24 @@ fn collect_styles_from_frame(
     }
 }
 
+/// Finds the resolved coordinate for a variation axis on a shaped
+/// `FontInstance`, if the run was actually shaped with that axis set (i.e.
+/// the font declares the axis at all). Shared by `effective_weight` and
+/// `effective_style` below, which each read a different axis (`wght` vs.
+/// `ital`/`slnt`) populated the same way at shape time —
+/// `FontVariations::resolve`, typst-library `text/font/variations.rs`.
+fn variation_coordinate(
+    instance: &typst_library::text::FontInstance,
+    tag: typst_library::text::Tag,
+) -> Option<typst_library::text::AxisValue> {
+    instance
+        .variations()
+        .0
+        .iter()
+        .find(|(t, _)| *t == tag)
+        .map(|&(_, value)| value)
+}
+
 /// The font weight Typst actually rendered this run with.
 ///
 /// `TextItem::font` is a `FontInstance` (typst 0.15): a `Font` plus the
@@ -2046,13 +2064,47 @@ fn collect_styles_from_frame(
 /// So for a VF run we must read the resolved `wght` coordinate — falling back to
 /// `info().variant.weight` when the font has no `wght` axis (variations empty).
 fn effective_weight(instance: &typst_library::text::FontInstance) -> u16 {
-    let wght = instance
-        .variations()
-        .0
-        .iter()
-        .find(|(tag, _)| *tag == typst_library::text::StandardAxes::WGHT)
-        .map(|&(_, value)| typst_library::text::FontWeight::from_wght(value));
+    let wght = variation_coordinate(instance, typst_library::text::StandardAxes::WGHT)
+        .map(typst_library::text::FontWeight::from_wght);
     wght.unwrap_or(instance.info().variant.weight).to_number()
+}
+
+/// The font style (italic/oblique/normal) Typst actually rendered this run
+/// with.
+///
+/// Same class of bug as `effective_weight`, for the axis Typst resolves
+/// italics onto instead of `wght`. `info().variant.style` is the file's
+/// default named instance and stays `Normal` for a variable font whose
+/// italics live on an `ital` or `slnt` axis rather than a separate italic
+/// face — e.g. a single upright-only VF file with a `slnt` axis, which
+/// typst's font selection (typst-library `text/font/book.rs`) deliberately
+/// serves for an italic request when no dedicated italic face exists. The
+/// actual requested style is resolved into an axis coordinate at shape time
+/// (`FontVariations::resolve`, typst-library `text/font/variations.rs`):
+///
+/// - `ital`: set to `min(axis.max, 1.0)` for an italic request — always
+///   positive when set, so any presence at `>= 0.5` signals italic (the
+///   binary-axis convention; `0.5` tolerates a font whose max is below `1.0`).
+/// - `slnt`: set to `axis.min` (if negative) or `axis.max` (if positive) —
+///   `resolve` never assigns exactly `0` to this axis, so any nonzero
+///   coordinate here means an oblique/slanted request. `resolve` only ever
+///   sets one of the two axes per run (whichever its `match` picks), so the
+///   two checks below are already mutually exclusive in practice; the
+///   `ital`-first order matches `resolve`'s own precedence when a font
+///   happens to declare both.
+///
+/// Falls back to `info().variant.style` when neither axis is present in
+/// `variations()` (a non-VF face, or a VF with no `ital`/`slnt` axis at all).
+fn effective_style(instance: &typst_library::text::FontInstance) -> typst_library::text::FontStyle {
+    use typst_library::text::{FontStyle, StandardAxes};
+
+    if variation_coordinate(instance, StandardAxes::ITAL).is_some_and(|v| v.0 >= 0.5) {
+        FontStyle::Italic
+    } else if variation_coordinate(instance, StandardAxes::SLNT).is_some_and(|v| v.0 != 0.0) {
+        FontStyle::Oblique
+    } else {
+        instance.info().variant.style
+    }
 }
 
 /// Detect the most common font families (split by script) and size from
