@@ -801,19 +801,37 @@ fn insert_missing_at_position(
                 }
             }
         } else if line.x_clusters.len() >= 2 {
-            // Multiple clusters with small gaps — join with spaces, not tabs
+            // Multiple clusters with small gaps — join with spaces, not tabs. Insert
+            // an NBSP at the boundary only when neither side already carries a
+            // whitespace character. Clusters recovered from paged text items
+            // sometimes already have a source space baked into a run's text (e.g.
+            // "上海 200433" — the space survives as the leading char of the next
+            // cluster's first run); unconditionally inserting NBSP there would
+            // double the visible gap. When neither side has whitespace, the gap is
+            // purely visual (no space character in the source) and still needs the
+            // NBSP to render.
             para.alignment = Some(Alignment::Center);
             for (idx, cluster) in line.x_clusters.iter().enumerate() {
                 if idx > 0 {
-                    let mut space_run = Run::new("\u{00a0}");
-                    if let Some(first_run) = cluster.runs.first() {
-                        space_run.size_half_pt = first_run.size_half_pt;
-                        space_run.font_ascii.clone_from(&first_run.font_ascii);
-                        space_run
-                            .font_east_asia
-                            .clone_from(&first_run.font_east_asia);
+                    let prev_has_trailing_space = line.x_clusters[idx - 1]
+                        .runs
+                        .last()
+                        .is_some_and(|r| r.text.ends_with(char::is_whitespace));
+                    let next_has_leading_space = cluster
+                        .runs
+                        .first()
+                        .is_some_and(|r| r.text.starts_with(char::is_whitespace));
+                    if !prev_has_trailing_space && !next_has_leading_space {
+                        let mut space_run = Run::new("\u{00a0}");
+                        if let Some(first_run) = cluster.runs.first() {
+                            space_run.size_half_pt = first_run.size_half_pt;
+                            space_run.font_ascii.clone_from(&first_run.font_ascii);
+                            space_run
+                                .font_east_asia
+                                .clone_from(&first_run.font_east_asia);
+                        }
+                        para.push_run(space_run);
                     }
-                    para.push_run(space_run);
                 }
                 for run in &cluster.runs {
                     para.push_run(run.clone());

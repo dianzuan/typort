@@ -485,3 +485,59 @@ fn wrapped_table_row_not_recovered_as_orphan() {
         "table cell text must appear once (in the table), not duplicated as a recovered orphan"
     );
 }
+
+#[test]
+fn recovered_cluster_join_does_not_double_existing_space() {
+    // Regression: recover_missing_content's x_clusters joiner (the "multiple
+    // clusters with small gaps" branch in recovery.rs) unconditionally inserted an
+    // NBSP run between clusters, even when the boundary already carried a source
+    // whitespace character. complex_paper.typ:13 has "上海 200433" — ONE ASCII
+    // space — but the second recovered cluster's first run text begins with that
+    // literal space (" 200433", carried over from the paged text items), so the
+    // joiner's unconditional NBSP doubled it into NBSP+space: a WPS-visible
+    // doubled gap. See tests/fixtures/complex_paper.typ:13.
+    let doc_xml = fixture_doc_xml("complex_paper");
+    let para = common::paragraph_containing(&doc_xml, "200433");
+
+    assert!(
+        !para.contains("\u{a0} "),
+        "affiliation paragraph must not have NBSP immediately followed by an ASCII space:\n{para}"
+    );
+    assert!(
+        !para.contains(" \u{a0}"),
+        "affiliation paragraph must not have an ASCII space immediately followed by NBSP:\n{para}"
+    );
+
+    // Concatenate the paragraph's <w:t> run text (runs may split the
+    // "上海" + separator + "200433" sequence across multiple w:t elements).
+    let mut text = String::new();
+    let mut rest = para;
+    while let Some(o) = rest.find("<w:t") {
+        let after = &rest[o..];
+        let Some(gt) = after.find('>') else { break };
+        let content = &after[gt + 1..];
+        let Some(close) = content.find("</w:t>") else {
+            break;
+        };
+        text.push_str(&content[..close]);
+        rest = &content[close..];
+    }
+
+    let shanghai_pos = text
+        .find("上海")
+        .expect("上海 present in affiliation paragraph");
+    let after_shanghai = &text[shanghai_pos + "上海".len()..];
+    let digits_pos = after_shanghai
+        .find("200433")
+        .expect("200433 present after 上海");
+    let between = &after_shanghai[..digits_pos];
+    assert_eq!(
+        between.chars().count(),
+        1,
+        "expected exactly one whitespace char between 上海 and 200433, got {between:?} in paragraph:\n{para}"
+    );
+    assert!(
+        between.chars().next().is_some_and(char::is_whitespace),
+        "separator between 上海 and 200433 should be whitespace, got {between:?}"
+    );
+}
