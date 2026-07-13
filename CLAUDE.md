@@ -65,11 +65,12 @@ anyone "simplify" it back to a dual-compilation description. Full detail in
   Don't `unwrap` on parsed or `Option` data derived from the document.
   `unwrap()` on infallible in-memory writes (e.g. `quick-xml` to a `Vec<u8>`) is
   tolerated but prefer a documented helper. No `todo!`/`unimplemented!` in `src`.
-- **Argument threading:** `convert/mod.rs` threads `html_doc`/state through ~20+
-  signatures, which is why `clippy.toml` raises `too-many-arguments-threshold` to
-  8. New shared state should go into a bundled context struct (a `ConvertCtx<'a>`),
-  not another positional parameter. The goal is to let that threshold drop back to
-  default.
+- **Argument threading:** shared walk state is bundled in context structs
+  (`WalkCtx<'a>` for the HTML walk, `InlineFmt` for inline formatting flags,
+  `TableWidthCtx` for table sizing) rather than positional parameters. The
+  former `clippy.toml` `too-many-arguments-threshold` override was removed once
+  that debt was repaid — new shared state goes into one of these structs, not a
+  new positional parameter.
 - **File size:** several files are large (`convert/mod.rs`, `ooxml/writer.rs`,
   `cli/tests/integration.rs`). Don't grow them reflexively — when adding a new
   element converter or a new test area, prefer a new module/file over appending.
