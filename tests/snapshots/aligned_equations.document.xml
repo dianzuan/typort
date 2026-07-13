@@ -25,43 +25,7 @@
     <w:p>
       <w:pPr>
         <w:ind w:firstLine="0"/>
-      </w:pPr><m:oMathPara>
-  <m:oMath>
-    <m:eqArr>
-      <m:e>
-        <m:r>
-          <m:t>x</m:t>
-        </m:r>
-        <m:r>
-          <m:t>&amp;</m:t>
-        </m:r>
-        <m:r>
-          <m:t>=</m:t>
-        </m:r>
-        <m:r>
-          <m:t>1</m:t>
-        </m:r>
-        <m:r>
-          <m:t>+</m:t>
-        </m:r>
-        <m:r>
-          <m:t>2</m:t>
-        </m:r>
-      </m:e>
-      <m:e>
-        <m:r>
-          <m:t>&amp;</m:t>
-        </m:r>
-        <m:r>
-          <m:t>=</m:t>
-        </m:r>
-        <m:r>
-          <m:t>3</m:t>
-        </m:r>
-      </m:e>
-    </m:eqArr>
-  </m:oMath>
-</m:oMathPara>
+      </w:pPr><m:oMathPara><m:oMath><m:eqArr><m:e><m:r><m:t>x</m:t></m:r><m:r><m:t>&amp;</m:t></m:r><m:r><m:t>=</m:t></m:r><m:r><m:t>1</m:t></m:r><m:r><m:t>+</m:t></m:r><m:r><m:t>2</m:t></m:r></m:e><m:e><m:r><m:t>&amp;</m:t></m:r><m:r><m:t>=</m:t></m:r><m:r><m:t>3</m:t></m:r></m:e></m:eqArr></m:oMath></m:oMathPara>
     </w:p>
     <w:p>
       <w:pPr>
@@ -78,95 +42,7 @@
     <w:p>
       <w:pPr>
         <w:ind w:firstLine="0"/>
-      </w:pPr><m:oMathPara>
-  <m:oMath>
-    <m:eqArr>
-      <m:e>
-        <m:r>
-          <m:t>f</m:t>
-        </m:r>
-        <m:d>
-          <m:dPr>
-            <m:begChr m:val="("/>
-            <m:endChr m:val=")"/>
-          </m:dPr>
-          <m:e>
-            <m:r>
-              <m:t>x</m:t>
-            </m:r>
-          </m:e>
-        </m:d>
-        <m:r>
-          <m:t>&amp;</m:t>
-        </m:r>
-        <m:r>
-          <m:t>=</m:t>
-        </m:r>
-        <m:sSup>
-          <m:e>
-            <m:r>
-              <m:t>x</m:t>
-            </m:r>
-          </m:e>
-          <m:sup>
-            <m:r>
-              <m:t>2</m:t>
-            </m:r>
-          </m:sup>
-        </m:sSup>
-        <m:r>
-          <m:t>+</m:t>
-        </m:r>
-        <m:r>
-          <m:t>2</m:t>
-        </m:r>
-        <m:r>
-          <m:t>x</m:t>
-        </m:r>
-        <m:r>
-          <m:t>+</m:t>
-        </m:r>
-        <m:r>
-          <m:t>1</m:t>
-        </m:r>
-      </m:e>
-      <m:e>
-        <m:r>
-          <m:t>&amp;</m:t>
-        </m:r>
-        <m:r>
-          <m:t>=</m:t>
-        </m:r>
-        <m:sSup>
-          <m:e>
-            <m:d>
-              <m:dPr>
-                <m:begChr m:val="("/>
-                <m:endChr m:val=")"/>
-              </m:dPr>
-              <m:e>
-                <m:r>
-                  <m:t>x</m:t>
-                </m:r>
-                <m:r>
-                  <m:t>+</m:t>
-                </m:r>
-                <m:r>
-                  <m:t>1</m:t>
-                </m:r>
-              </m:e>
-            </m:d>
-          </m:e>
-          <m:sup>
-            <m:r>
-              <m:t>2</m:t>
-            </m:r>
-          </m:sup>
-        </m:sSup>
-      </m:e>
-    </m:eqArr>
-  </m:oMath>
-</m:oMathPara>
+      </w:pPr><m:oMathPara><m:oMath><m:eqArr><m:e><m:r><m:t>f</m:t></m:r><m:d><m:dPr><m:begChr m:val="("/><m:endChr m:val=")"/></m:dPr><m:e><m:r><m:t>x</m:t></m:r></m:e></m:d><m:r><m:t>&amp;</m:t></m:r><m:r><m:t>=</m:t></m:r><m:sSup><m:e><m:r><m:t>x</m:t></m:r></m:e><m:sup><m:r><m:t>2</m:t></m:r></m:sup></m:sSup><m:r><m:t>+</m:t></m:r><m:r><m:t>2</m:t></m:r><m:r><m:t>x</m:t></m:r><m:r><m:t>+</m:t></m:r><m:r><m:t>1</m:t></m:r></m:e><m:e><m:r><m:t>&amp;</m:t></m:r><m:r><m:t>=</m:t></m:r><m:sSup><m:e><m:d><m:dPr><m:begChr m:val="("/><m:endChr m:val=")"/></m:dPr><m:e><m:r><m:t>x</m:t></m:r><m:r><m:t>+</m:t></m:r><m:r><m:t>1</m:t></m:r></m:e></m:d></m:e><m:sup><m:r><m:t>2</m:t></m:r></m:sup></m:sSup></m:e></m:eqArr></m:oMath></m:oMathPara>
     </w:p>
     <w:p>
       <w:pPr>
@@ -183,60 +59,7 @@
     <w:p>
       <w:pPr>
         <w:ind w:firstLine="0"/>
-      </w:pPr><m:oMathPara>
-  <m:oMath>
-    <m:eqArr>
-      <m:e>
-        <m:r>
-          <m:t>a</m:t>
-        </m:r>
-        <m:r>
-          <m:t>&amp;</m:t>
-        </m:r>
-        <m:r>
-          <m:t>=</m:t>
-        </m:r>
-        <m:r>
-          <m:t>b</m:t>
-        </m:r>
-        <m:r>
-          <m:t>+</m:t>
-        </m:r>
-        <m:r>
-          <m:t>c</m:t>
-        </m:r>
-      </m:e>
-      <m:e>
-        <m:r>
-          <m:t>&amp;</m:t>
-        </m:r>
-        <m:r>
-          <m:t>=</m:t>
-        </m:r>
-        <m:r>
-          <m:t>d</m:t>
-        </m:r>
-        <m:r>
-          <m:t>+</m:t>
-        </m:r>
-        <m:r>
-          <m:t>e</m:t>
-        </m:r>
-      </m:e>
-      <m:e>
-        <m:r>
-          <m:t>&amp;</m:t>
-        </m:r>
-        <m:r>
-          <m:t>=</m:t>
-        </m:r>
-        <m:r>
-          <m:t>f</m:t>
-        </m:r>
-      </m:e>
-    </m:eqArr>
-  </m:oMath>
-</m:oMathPara>
+      </w:pPr><m:oMathPara><m:oMath><m:eqArr><m:e><m:r><m:t>a</m:t></m:r><m:r><m:t>&amp;</m:t></m:r><m:r><m:t>=</m:t></m:r><m:r><m:t>b</m:t></m:r><m:r><m:t>+</m:t></m:r><m:r><m:t>c</m:t></m:r></m:e><m:e><m:r><m:t>&amp;</m:t></m:r><m:r><m:t>=</m:t></m:r><m:r><m:t>d</m:t></m:r><m:r><m:t>+</m:t></m:r><m:r><m:t>e</m:t></m:r></m:e><m:e><m:r><m:t>&amp;</m:t></m:r><m:r><m:t>=</m:t></m:r><m:r><m:t>f</m:t></m:r></m:e></m:eqArr></m:oMath></m:oMathPara>
     </w:p>
     <w:sectPr>
       <w:footnotePr>

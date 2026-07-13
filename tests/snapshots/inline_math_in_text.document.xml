@@ -4,18 +4,10 @@
     <w:p>
       <w:r>
         <w:t xml:space="preserve">Where </w:t>
-      </w:r><m:oMath>
-  <m:r>
-    <m:t>y</m:t>
-  </m:r>
-</m:oMath>
+      </w:r><m:oMath><m:r><m:t>y</m:t></m:r></m:oMath>
       <w:r>
         <w:t xml:space="preserve"> is the dependent variable and </w:t>
-      </w:r><m:oMath>
-  <m:r>
-    <m:t>x</m:t>
-  </m:r>
-</m:oMath>
+      </w:r><m:oMath><m:r><m:t>x</m:t></m:r></m:oMath>
       <w:r>
         <w:t xml:space="preserve"> is the explanatory variable.</w:t>
       </w:r>
