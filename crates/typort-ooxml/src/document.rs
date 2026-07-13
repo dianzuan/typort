@@ -92,6 +92,9 @@ pub struct PersonName {
 /// A citation source entry for Word's bibliography data store (`customXml/item1.xml`).
 #[derive(Debug, Clone)]
 pub struct CitationSource {
+    /// Word keys sources by tag (and the writer derives the GUID from it), so
+    /// tags must be unique within a `Document` — the writer does not dedup;
+    /// producers (`extract_bibliography_sources`) own that invariant.
     pub tag: String,
     pub source_type: SourceType,
     pub authors: Vec<PersonName>,

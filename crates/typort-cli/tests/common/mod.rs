@@ -25,11 +25,9 @@ pub fn fixture_part(fixture: &str, part: &str) -> String {
 /// there is one fixture-conversion pipeline, not two.
 pub fn fixture_part_with_font_dirs(fixture: &str, part: &str, font_dirs: &[PathBuf]) -> String {
     let path = PathBuf::from(format!("../../tests/fixtures/{fixture}.typ"));
-    let world = if font_dirs.is_empty() {
-        typort_core::TyportWorld::new(&path).unwrap()
-    } else {
-        typort_core::TyportWorld::with_font_dirs(&path, font_dirs).unwrap()
-    };
+    // `TyportWorld::new` is itself `with_font_dirs(path, &[])`, so one call
+    // covers both the plain and the extra-fonts case.
+    let world = typort_core::TyportWorld::with_font_dirs(&path, font_dirs).unwrap();
     let doc = typort_core::convert::convert(&world).unwrap();
 
     let mut buf = Vec::new();
@@ -45,9 +43,7 @@ pub fn fixture_doc_xml(fixture: &str) -> String {
 }
 
 /// Convert `tests/fixtures/<fixture>.typ` and return `word/styles.xml`.
-// Unused from the `review_regressions` binary's point of view (only `integration`
-// calls it) — dead_code is evaluated per binary, since each binary compiles this
-// module separately.
+// Unused by `review_regressions`; see the per-binary dead_code note in the module doc.
 #[allow(dead_code)]
 pub fn fixture_styles_xml(fixture: &str) -> String {
     fixture_part(fixture, "word/styles.xml")
@@ -71,9 +67,7 @@ pub fn paragraph_containing<'a>(doc_xml: &'a str, needle: &str) -> &'a str {
 
 /// Concatenated `<w:t>` text of every `<w:p>` in document order.
 /// Matches both `<w:p>` and `<w:p ...>` (attribute-bearing) paragraphs.
-// Unused from the `review_regressions` binary's point of view (only `integration`
-// calls it) — dead_code is evaluated per binary, since each binary compiles this
-// module separately.
+// Unused by `review_regressions`; see the per-binary dead_code note in the module doc.
 #[allow(dead_code)]
 pub fn paragraph_texts(doc_xml: &str) -> Vec<String> {
     doc_xml

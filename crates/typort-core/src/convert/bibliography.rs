@@ -81,13 +81,21 @@ pub fn extract_bibliography_sources(
     keys.into_iter()
         .filter_map(|(label, _)| {
             let tag = label.resolve().to_string();
-            if !seen_tags.insert(tag.clone()) {
+            if seen_tags.contains(tag.as_str()) {
                 return None;
             }
             let entry = library.get(&tag)?;
-            Some(entry_to_citation_source(&tag, entry))
+            let source = entry_to_citation_source(&tag, entry);
+            seen_tags.insert(tag);
+            Some(source)
         })
         .collect()
+}
+
+/// Single emission point for this module's data-loss warnings, so a future
+/// structured-diagnostics channel (e.g. a `--strict` mode) changes one place.
+fn warn(msg: &str) {
+    eprintln!("typort: warning: {msg}");
 }
 
 /// Load and parse all bibliography source files into a hayagriva Library.
@@ -113,17 +121,17 @@ fn load_bibliography_library(sources: &[DataSource], world: &TyportWorld) -> hay
                         if let Some(parsed) = try_parse_bibliography(&content, is_bib) {
                             merge_library(&mut library, &parsed);
                         } else {
-                            eprintln!(
-                                "typort: warning: failed to parse bibliography file {}",
+                            warn(&format!(
+                                "failed to parse bibliography file {}",
                                 path.display()
-                            );
+                            ));
                         }
                     }
                     Err(e) => {
-                        eprintln!(
-                            "typort: warning: could not read bibliography file {}: {e}",
+                        warn(&format!(
+                            "could not read bibliography file {}: {e}",
                             path.display()
-                        );
+                        ));
                     }
                 }
             }
@@ -174,12 +182,11 @@ fn merge_library_impl(
 ) {
     for entry in source.iter() {
         if keep_first && target.get(entry.key()).is_some() {
-            eprintln!(
-                "typort: warning: citation key {:?} is defined in more than one \
-                 bibliography; keeping the entry from the earliest bibliography in \
-                 document order",
+            warn(&format!(
+                "citation key {:?} is defined in more than one bibliography; keeping \
+                 the entry from the earliest bibliography in document order",
                 entry.key()
-            );
+            ));
             continue;
         }
         target.push(entry);
