@@ -34,7 +34,7 @@ duplicated into tests/fonts/OFL-TyportSlantTest.txt alongside a one-line
 provenance note.
 
 Usage:
-    python3 scripts/make_slant_test_font.py
+    python3 tests/fonts/make_slant_test_font.py
 """
 
 from fontTools.otlLib.builder import buildStatTable
