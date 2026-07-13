@@ -1299,6 +1299,12 @@ pub(super) fn detect_three_line_tables(paged: &PagedDocument, doc: &mut Document
 /// `order`/`per_table`; rules inside nested tables still count toward the
 /// outer table's evidence (they ARE lines drawn within its region), and rules
 /// outside every bracket are ignored entirely.
+///
+/// NB (evaluated 2026-07-12, typst 0.15): `Selector::within` cannot replace this
+/// stack — it scopes introspector queries over *locatable elements*, while the
+/// rule strokes attributed here are plain `FrameItem::Shape`s in the paged
+/// frames, invisible to the introspector. Frame-order bracket matching is the
+/// only source that pairs a drawn line with its table.
 fn collect_table_rules(
     frame: &Frame,
     stack: &mut Vec<Location>,
