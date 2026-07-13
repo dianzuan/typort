@@ -71,9 +71,12 @@ anyone "simplify" it back to a dual-compilation description. Full detail in
   former `clippy.toml` `too-many-arguments-threshold` override was removed once
   that debt was repaid — new shared state goes into one of these structs, not a
   new positional parameter.
-- **File size:** several files are large (`convert/mod.rs`, `ooxml/writer.rs`,
-  `cli/tests/integration.rs`). Don't grow them reflexively — when adding a new
-  element converter or a new test area, prefer a new module/file over appending.
+- **File size:** several files are large (`convert/mod.rs` at 3000+ lines,
+  `ooxml/writer.rs` at 2000+ lines). Don't grow them reflexively — when adding a
+  new element converter, prefer a new module/file over appending. Tests are
+  already split this way: `crates/typort-cli/tests/integration/` is one file per
+  test area (see the Testing section below) — add a new area module rather than
+  growing an existing one.
 
 ## Testing
 
@@ -83,7 +86,7 @@ anyone "simplify" it back to a dual-compilation description. Full detail in
   ship with a fixture-based regression test** for the specific case — that code is
   the most fragile part of the system (geometry → semantics inference with magic
   thresholds; see ARCHITECTURE.md "fragile seam").
-- **Golden snapshots** (the `mod golden` in `cli/tests/integration.rs`) pin the
+- **Golden snapshots** (`crates/typort-cli/tests/integration/golden.rs`) pin the
   exact `word/document.xml` for a curated set of fixtures under `tests/snapshots/`,
   so output-formatting drift surfaces as a reviewable diff — the suite's only
   oracle for output *quality*, not just presence. After an intentional output
