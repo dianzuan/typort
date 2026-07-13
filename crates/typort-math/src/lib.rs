@@ -33,7 +33,7 @@ pub fn equation_to_omml(content: &Content) -> String {
     let body = &eq.body;
 
     let mut buf = Vec::new();
-    let mut writer = Writer::new_with_indent(&mut buf, b' ', 2);
+    let mut writer = Writer::new(&mut buf);
 
     if is_block {
         writer
@@ -955,7 +955,7 @@ mod tests {
     #[test]
     fn test_write_math_run() {
         let mut buf = Vec::new();
-        let mut writer = Writer::new_with_indent(&mut buf, b' ', 2);
+        let mut writer = Writer::new(&mut buf);
         write_math_run(&mut writer, "x").unwrap();
         let result = String::from_utf8(buf).unwrap();
         assert!(result.contains("<m:r>"));
@@ -966,7 +966,7 @@ mod tests {
     #[test]
     fn test_write_math_run_empty_string() {
         let mut buf = Vec::new();
-        let mut writer = Writer::new_with_indent(&mut buf, b' ', 2);
+        let mut writer = Writer::new(&mut buf);
         write_math_run(&mut writer, "").unwrap();
         let result = String::from_utf8(buf).unwrap();
         assert!(result.contains("<m:r>"), "should still produce m:r element");
@@ -979,7 +979,7 @@ mod tests {
     #[test]
     fn test_write_math_run_unicode() {
         let mut buf = Vec::new();
-        let mut writer = Writer::new_with_indent(&mut buf, b' ', 2);
+        let mut writer = Writer::new(&mut buf);
         write_math_run(&mut writer, "\u{03B1}").unwrap(); // alpha
         let result = String::from_utf8(buf).unwrap();
         assert!(
@@ -991,7 +991,7 @@ mod tests {
     #[test]
     fn test_write_math_run_xml_special_chars() {
         let mut buf = Vec::new();
-        let mut writer = Writer::new_with_indent(&mut buf, b' ', 2);
+        let mut writer = Writer::new(&mut buf);
         write_math_run(&mut writer, "&<>").unwrap();
         let result = String::from_utf8(buf).unwrap();
         assert!(
