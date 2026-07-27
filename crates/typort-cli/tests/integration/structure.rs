@@ -265,6 +265,69 @@ fn auto_pagination_does_not_insert_hard_breaks() {
 }
 
 #[test]
+fn pagebreak_in_an_inactive_branch_is_not_emitted() {
+    let doc_xml = fixture_doc_xml("pagebreak_in_inactive_branch");
+
+    assert!(
+        !doc_xml.contains(r#"w:type="page""#),
+        "a pagebreak() in an inactive branch must not create a Word hard break:\n{doc_xml}"
+    );
+}
+
+#[test]
+fn pagebreak_in_a_bound_false_branch_is_not_emitted() {
+    let doc_xml = fixture_doc_xml("pagebreak_in_bound_false_branch");
+
+    assert!(
+        !doc_xml.contains(r#"w:type="page""#),
+        "a pagebreak() guarded by a false source binding must not create a Word hard break:\n{doc_xml}"
+    );
+}
+
+#[test]
+fn pagebreak_boolean_binding_stays_in_its_source_scope() {
+    let doc_xml = fixture_doc_xml("pagebreak_bool_binding_scope");
+
+    assert_eq!(
+        doc_xml.matches(r#"w:type="page""#).count(),
+        1,
+        "a local false binding must not override the active outer branch:\n{doc_xml}"
+    );
+}
+
+#[test]
+fn pagebreak_in_an_unused_function_is_not_emitted() {
+    let doc_xml = fixture_doc_xml("pagebreak_in_unused_function");
+
+    assert!(
+        !doc_xml.contains(r#"w:type="page""#),
+        "a pagebreak() in an unused function must not create a Word hard break:\n{doc_xml}"
+    );
+}
+
+#[test]
+fn pagebreak_in_a_called_function_is_emitted() {
+    let doc_xml = fixture_doc_xml("pagebreak_in_called_function");
+
+    assert_eq!(
+        doc_xml.matches(r#"w:type="page""#).count(),
+        1,
+        "a called source function must preserve its explicit pagebreak exactly once:\n{doc_xml}"
+    );
+}
+
+#[test]
+fn pagebreak_in_a_repeated_include_is_emitted_for_each_occurrence() {
+    let doc_xml = fixture_doc_xml("pagebreak_include_twice");
+
+    assert_eq!(
+        doc_xml.matches(r#"w:type="page""#).count(),
+        2,
+        "including the same file twice must preserve its break twice:\n{doc_xml}"
+    );
+}
+
+#[test]
 fn pagebreak_inserts_w_br_page() {
     let doc_xml = fixture_doc_xml("pagebreak_test");
 
@@ -282,6 +345,58 @@ fn pagebreak_inserts_w_br_page() {
     assert!(
         doc_xml.contains("Second Section"),
         "document should contain 'Second Section' heading"
+    );
+}
+
+#[test]
+fn pagebreak_after_heading_recovered() {
+    let doc_xml = fixture_doc_xml("pagebreak_after_heading");
+    assert_eq!(
+        doc_xml.matches("w:type=\"page\"").count(),
+        1,
+        "a #pagebreak() following a heading must produce exactly one hard break"
+    );
+    let break_pos = doc_xml.find("w:type=\"page\"").unwrap();
+    assert!(
+        doc_xml.find("Part I").unwrap() < break_pos && break_pos < doc_xml.find("Part II").unwrap(),
+        "the break must sit between the two headings"
+    );
+}
+
+#[test]
+fn pagebreak_after_repeated_text_not_teleported() {
+    let doc_xml = fixture_doc_xml("pagebreak_repeated_text");
+    assert_eq!(doc_xml.matches("w:type=\"page\"").count(), 1);
+    let break_pos = doc_xml.find("w:type=\"page\"").unwrap();
+    let second_occurrence = doc_xml.rfind("The same closing line.").unwrap();
+    assert!(
+        break_pos > second_occurrence && break_pos < doc_xml.find("Final section.").unwrap(),
+        "the break must follow the second repeated line and precede the final section"
+    );
+}
+
+#[test]
+fn pagebreak_inside_include_recovered() {
+    let doc_xml = fixture_doc_xml("pagebreak_include");
+    assert_eq!(
+        doc_xml.matches("w:type=\"page\"").count(),
+        1,
+        "a #pagebreak() inside an #include'd chapter must be recovered"
+    );
+    let break_pos = doc_xml.find("w:type=\"page\"").unwrap();
+    assert!(
+        doc_xml.find("Chapter one text.").unwrap() < break_pos
+            && break_pos < doc_xml.find("Chapter two text.").unwrap(),
+        "the break must sit between the included chapter and following content"
+    );
+}
+
+#[test]
+fn imported_template_line_rule_recovered() {
+    let doc_xml = fixture_doc_xml("imported_line_rule");
+    assert!(
+        doc_xml.contains("w:pBdr"),
+        "a #line() drawn via an imported template must produce a horizontal rule"
     );
 }
 

@@ -732,7 +732,7 @@ fn write_paragraph<W: Write>(
                 }
             )
         });
-        let has_hanging = para.hanging_indent;
+        let has_hanging = para.hanging_indent.is_some();
         let has_hrule = para.horizontal_rule;
         let has_tab_stops = !para.tab_stops.is_empty();
         let has_spacing = para.spacing_before.is_some();
@@ -836,8 +836,17 @@ fn write_paragraph<W: Write>(
                     }
                     ind.with_attribute(("w:firstLine", "0")).write_empty()?;
                 } else if has_hanging {
-                    // Bibliography hanging indent: 2em computed from body font size
-                    let bib_indent = ctx.doc_style.body_size_half_pt * 10 * 2;
+                    // Bibliographies use the historical 2em default; source-authored
+                    // paragraph rules carry their exact converted width.
+                    let bib_indent = match para
+                        .hanging_indent
+                        .unwrap_or(crate::document::HangingIndent::Default)
+                    {
+                        crate::document::HangingIndent::Default => {
+                            ctx.doc_style.body_size_half_pt * 10 * 2
+                        }
+                        crate::document::HangingIndent::Twips(twips) => twips,
+                    };
                     let bib_indent_str = bib_indent.to_string();
                     let mut ind = ppr.create_element("w:ind");
                     ind = ind

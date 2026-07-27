@@ -313,6 +313,15 @@ pub struct Footnote {
     pub content: Vec<InlineElement>,
 }
 
+/// Paragraph hanging-indent behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HangingIndent {
+    /// Use the bibliography-compatible default of two body-font ems.
+    Default,
+    /// Use an exact source-authored width in twips.
+    Twips(u32),
+}
+
 #[derive(Debug, Clone, Default)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct Paragraph {
@@ -325,8 +334,8 @@ pub struct Paragraph {
     pub alignment: Option<Alignment>,
     /// Suppress first-line indent (e.g., first paragraph after a heading).
     pub suppress_indent: bool,
-    /// Use hanging indent (e.g., bibliography entries).
-    pub hanging_indent: bool,
+    /// Hanging indent for bibliography entries or source-authored paragraph rules.
+    pub hanging_indent: Option<HangingIndent>,
     /// Left indent in twips (e.g., 720 for block quotes).
     pub left_indent: Option<u32>,
     /// Apply `CodeBlock` style (monospace, no indent, optional shading).

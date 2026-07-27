@@ -107,6 +107,86 @@ fn recovery_keeps_centered_enumerated_line_not_over_suppressed() {
 }
 
 #[test]
+fn recovery_preserves_a_short_sentence_final_line() {
+    let doc_xml = fixture_doc_xml("recovery_short_sentence");
+
+    assert!(
+        doc_xml.contains(">OK.<"),
+        "a real layout-only short sentence must not be discarded as a wrapped tail:\n{doc_xml}"
+    );
+}
+
+#[test]
+fn recovery_preserves_a_short_math_like_text_line() {
+    let doc_xml = fixture_doc_xml("recovery_short_math_text");
+
+    assert!(
+        doc_xml.contains(">x≤y<"),
+        "a real layout-only relation must not be discarded by a math-ratio heuristic:\n{doc_xml}"
+    );
+}
+
+#[test]
+fn recovery_keeps_distinct_centered_blocks_as_separate_paragraphs() {
+    let doc_xml = fixture_doc_xml("recovery_distinct_centered_blocks");
+    let paragraphs = common::paragraph_texts(&doc_xml);
+
+    assert!(
+        paragraphs
+            .iter()
+            .any(|text| text == "First independent centered statement."),
+        "the first centered block must remain its own paragraph: {paragraphs:?}"
+    );
+    assert!(
+        paragraphs
+            .iter()
+            .any(|text| text == "Second independent centered statement."),
+        "the second centered block must remain its own paragraph: {paragraphs:?}"
+    );
+}
+
+#[test]
+fn recovery_keeps_distinct_placed_blocks_as_separate_paragraphs() {
+    let doc_xml = fixture_doc_xml("recovery_distinct_placed_centered_blocks");
+    let paragraphs = common::paragraph_texts(&doc_xml);
+
+    assert!(
+        paragraphs.iter().any(|text| text == "First placed note."),
+        "the first placed block must remain its own paragraph: {paragraphs:?}"
+    );
+    assert!(
+        paragraphs.iter().any(|text| text == "Second placed note."),
+        "the second placed block must remain its own paragraph: {paragraphs:?}"
+    );
+}
+
+#[test]
+fn recovery_does_not_treat_a_parenthesized_continuation_as_an_affiliation() {
+    let doc_xml = fixture_doc_xml("recovery_parenthesized_continuation");
+    let paragraphs = common::paragraph_texts(&doc_xml);
+
+    assert!(
+        paragraphs.iter().any(|text| {
+            text.contains("Universal heading line") && text.contains("(parenthesized continuation)")
+        }),
+        "two rendered lines from one centered block must remain one paragraph: {paragraphs:?}"
+    );
+}
+
+#[test]
+fn recovery_does_not_treat_a_short_continuation_as_an_author_name() {
+    let doc_xml = fixture_doc_xml("recovery_short_continuation");
+    let paragraphs = common::paragraph_texts(&doc_xml);
+
+    assert!(
+        paragraphs
+            .iter()
+            .any(|text| text.contains("Universal heading line") && text.contains("Short")),
+        "two rendered lines from one centered block must remain one paragraph: {paragraphs:?}"
+    );
+}
+
+#[test]
 fn complex_paper_has_table_structure() {
     let doc_xml = fixture_doc_xml("complex_paper");
 
@@ -539,5 +619,18 @@ fn recovered_cluster_join_does_not_double_existing_space() {
     assert!(
         between.chars().next().is_some_and(char::is_whitespace),
         "separator between 上海 and 200433 should be whitespace, got {between:?}"
+    );
+}
+
+#[test]
+fn small_margin_placed_content_recovered() {
+    let doc_xml = fixture_doc_xml("small_margin_placed");
+    assert!(
+        doc_xml.contains("PAGE-TWO-TOP-BANNER-UNIQUE"),
+        "placed content near the edge of a small-margin page must be recovered"
+    );
+    assert!(
+        doc_xml.contains("First page body text."),
+        "body text within the configured margin band must stay in the body"
     );
 }

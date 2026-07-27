@@ -20,8 +20,8 @@ use std::collections::{HashMap, HashSet};
 
 use std::str::FromStr;
 use typort_ooxml::document::{
-    Alignment, BlockElement, CellContent, Document, ImageData, InlineElement, ListInfo, Paragraph,
-    ParagraphStyle, Run, Table, TableCell, TableRow, VMerge,
+    Alignment, BlockElement, CellContent, Document, HangingIndent, ImageData, InlineElement,
+    ListInfo, Paragraph, ParagraphStyle, Run, Table, TableCell, TableRow, VMerge,
 };
 
 use typst::comemo::Track;
@@ -56,6 +56,7 @@ struct EquationState {
 /// mutates a `&mut` field, lift `let html = ctx.html_doc;` first — `&HtmlDocument`
 /// is `Copy`, so this severs the borrow tie at zero cost.
 struct WalkCtx<'a> {
+    world: &'a TyportWorld,
     html_doc: &'a HtmlDocument,
     doc: &'a mut Document,
     eq_state: &'a mut EquationState,
@@ -183,6 +184,7 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
     .collect();
     {
         let mut ctx = WalkCtx {
+            world,
             html_doc: &html_doc,
             doc: &mut doc,
             eq_state: &mut eq_state,
@@ -548,9 +550,6 @@ fn apply_language_override(ovr: &page::SourceStyleOverrides, doc: &mut Document)
 }
 
 /// Recursively walk `HtmlNode` children, dispatching on `Tag::Start` element types.
-///
-/// `page_breaks` contains `Location`s of elements that should have a page
-/// break inserted before them (computed by [`collect_page_break_locations`]).
 #[allow(clippy::too_many_lines)]
 fn walk_tags(children: &[HtmlNode], ctx: &mut WalkCtx) {
     let html = ctx.html_doc;
@@ -839,7 +838,7 @@ fn handle_html_element(elem: &HtmlElement, ctx: &mut WalkCtx) {
         "dl" => convert_term_list(elem, ctx.doc),
         "ol" => convert_html_list(elem, ctx.doc, true, Some(ctx.html_doc)),
         "ul" => convert_html_list(elem, ctx.doc, false, Some(ctx.html_doc)),
-        "table" => convert_html_table(elem, None, ctx.doc, html),
+        "table" => convert_html_table(elem, None, ctx.doc, html, ctx.world),
         "figcaption" => {
             // Collect all figcaption content into a single paragraph
             let mut para = Paragraph::new();
@@ -885,7 +884,7 @@ fn handle_html_element(elem: &HtmlElement, ctx: &mut WalkCtx) {
                                 ctx.doc.add_paragraph(p);
                             } else {
                                 let mut bp = p;
-                                bp.hanging_indent = true;
+                                bp.hanging_indent = Some(HangingIndent::Default);
                                 // Typst emits the reference list as a <ul>, so each
                                 // entry arrived tagged as a bullet list item. The
                                 // "[n]" label is already the marker — drop the list
@@ -1857,11 +1856,11 @@ fn handle_table(slice: &[HtmlNode], table_loc: Option<Location>, ctx: &mut WalkC
         if let HtmlNode::Element(elem) = node {
             let tag = tag_name(elem);
             if tag == "table" {
-                convert_html_table(elem, table_loc, ctx.doc, html);
+                convert_html_table(elem, table_loc, ctx.doc, html, ctx.world);
                 return;
             }
             // Recurse into child elements to find the table
-            if find_and_convert_table_in_elem(elem, table_loc, ctx.doc, html) {
+            if find_and_convert_table_in_elem(elem, table_loc, ctx.doc, html, ctx.world) {
                 return;
             }
         }
@@ -1877,15 +1876,16 @@ fn find_and_convert_table_in_elem(
     table_loc: Option<Location>,
     doc: &mut Document,
     html_doc: &HtmlDocument,
+    world: &TyportWorld,
 ) -> bool {
     for child in &elem.children {
         if let HtmlNode::Element(inner) = child {
             let tag = tag_name(inner);
             if tag == "table" {
-                convert_html_table(inner, table_loc, doc, html_doc);
+                convert_html_table(inner, table_loc, doc, html_doc, world);
                 return true;
             }
-            if find_and_convert_table_in_elem(inner, table_loc, doc, html_doc) {
+            if find_and_convert_table_in_elem(inner, table_loc, doc, html_doc, world) {
                 return true;
             }
         }
@@ -1943,6 +1943,7 @@ fn convert_html_table(
     table_loc: Option<Location>,
     doc: &mut Document,
     html_doc: &HtmlDocument,
+    world: &TyportWorld,
 ) {
     let mut raw_rows: Vec<RawTableRow> = Vec::new();
     for child in &elem.children {
@@ -1998,7 +1999,7 @@ fn convert_html_table(
         }
         // Semantic cell alignment (the HTML `<td>`s carry none): horizontal → cell
         // paragraph `w:jc`, vertical → `w:vAlign`, read from the same TableElem.
-        table_align::apply_cell_alignment(&mut table, &table_elem);
+        table_align::apply_cell_alignment(&mut table, &table_elem, world, html_doc);
     }
 
     doc.add_table(table);
@@ -2733,14 +2734,16 @@ fn suppress_table_cell_indents(table: &mut Table) {
 /// Apply `#set par(hanging-indent: …)` from the source AST to the paragraphs it
 /// governs. Each rule applies from its byte offset onward; a paragraph adopts a
 /// hanging indent when the last rule at or before its earliest run is non-zero.
-/// Runs whose spans don't resolve into the main source (imported templates,
-/// detached) are skipped automatically (`Source::range` returns `None`).
+/// Runs whose spans don't resolve into the main source (imported helper output,
+/// detached content) are skipped automatically. Imported document-template set
+/// rules are resolved separately and apply to the main-source body spans.
 fn apply_hanging_indent_from_source(world: &TyportWorld, doc: &mut Document) {
     let source = world.main_source();
-    let rules = page::collect_par_hanging_indent_rules(source);
+    let rules = page::collect_par_hanging_indent_rules(world);
     if rules.is_empty() {
         return;
     }
+    let body_size_pt = f64::from(doc.style.body_size_half_pt) / 2.0;
     for element in &mut doc.body.elements {
         // BibliographyBlock owns its hanging indent (the doc-bibliography path);
         // only plain body paragraphs are governed here. List items, headings,
@@ -2780,8 +2783,15 @@ fn apply_hanging_indent_from_source(world: &TyportWorld, doc: &mut Document) {
         // the indent ON (a reset rule leaves it off); never clear one set
         // elsewhere.
         let active = rules.partition_point(|r| r.offset <= offset);
-        if active > 0 && rules[active - 1].nonzero {
-            p.hanging_indent = true;
+        let rule = rules[..active]
+            .iter()
+            .rev()
+            .find(|rule| rule.scope_end.is_none_or(|end| offset < end));
+        if let Some(rule) = rule.filter(|rule| rule.nonzero) {
+            let relative_twips = rule.em.map_or(0, |em| page::pt_to_twips(body_size_pt * em));
+            p.hanging_indent = Some(HangingIndent::Twips(
+                relative_twips.saturating_add(rule.twips.unwrap_or(0)),
+            ));
         }
     }
 }
