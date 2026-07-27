@@ -1,15 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">
   <w:body>
-    <w:p>
-      <w:pPr>
-        <w:ind w:firstLine="0"/>
-        <w:jc w:val="center"/>
-      </w:pPr>
-      <w:r>
-        <w:t xml:space="preserve">B2C2</w:t>
-      </w:r>
-    </w:p>
     <w:tbl>
       <w:tblPr>
         <w:tblW w:w="5000" w:type="pct"/>

@@ -1,6 +1,6 @@
 //! Table structure, cell merging, and math-in-table tests.
 
-use crate::common::fixture_doc_xml;
+use crate::common::{fixture_doc_xml, paragraph_containing};
 use std::io::Cursor;
 use std::path::Path;
 
@@ -500,6 +500,33 @@ fn table_cell_alignment_from_typst_reaches_word() {
 }
 
 #[test]
+fn table_cell_alignment_closure_reaches_word() {
+    let doc_xml = fixture_doc_xml("table_cell_alignment_closure");
+    let cells: Vec<&str> = doc_xml
+        .split("<w:tc>")
+        .skip(1)
+        .map(|cell| cell.split("</w:tc>").next().unwrap_or(""))
+        .collect();
+    let left = cells
+        .iter()
+        .find(|cell| cell.contains("Closure left"))
+        .expect("left closure cell present");
+    let right = cells
+        .iter()
+        .find(|cell| cell.contains("Closure right"))
+        .expect("right closure cell present");
+
+    assert!(
+        left.contains(r#"<w:jc w:val="left"/>"#),
+        "the closure's x=0 result must reach the left cell:\n{left}"
+    );
+    assert!(
+        right.contains(r#"<w:jc w:val="right"/>"#),
+        "the closure's x=1 result must reach the right cell:\n{right}"
+    );
+}
+
+#[test]
 fn table_cells_do_not_inherit_body_first_line_indent() {
     // Table cells are their own context — they must not take the body's
     // first-line indent (which they would inherit from the Normal style).
@@ -520,5 +547,57 @@ fn table_cells_do_not_inherit_body_first_line_indent() {
     assert!(
         suppressed >= cell_paras && cell_paras > 0,
         "all {cell_paras} cell paragraphs must suppress first-line indent, got {suppressed}"
+    );
+}
+
+#[test]
+fn nested_table_cell_keeps_paged_styles() {
+    let doc_xml = fixture_doc_xml("nested_table_cell_style");
+    let marker_para = paragraph_containing(&doc_xml, "RED-NESTED-MARKER");
+    assert!(
+        marker_para.contains("<w:color"),
+        "rendering-detected color must survive in nested-table cell content:\n{marker_para}"
+    );
+}
+
+#[test]
+fn table_borders_decided_per_table() {
+    let doc_xml = fixture_doc_xml("mixed_table_borders");
+    let tables: Vec<&str> = {
+        let mut out = Vec::new();
+        let mut rest = doc_xml.as_str();
+        while let Some(start) = rest.find("<w:tbl>") {
+            let end = rest[start..].find("</w:tbl>").map(|e| start + e).unwrap();
+            out.push(&rest[start..end]);
+            rest = &rest[end..];
+        }
+        out
+    };
+    assert_eq!(tables.len(), 2, "fixture has two top-level tables");
+
+    let borderless = tables[0];
+    let borders_block = {
+        let start = borderless
+            .find("<w:tblBorders>")
+            .expect("tblBorders present");
+        let end = borderless
+            .find("</w:tblBorders>")
+            .expect("tblBorders closed");
+        &borderless[start..end]
+    };
+    assert!(
+        !borders_block.contains("w:val=\"single\""),
+        "stroke:none table must not gain invented borders:\n{borders_block}"
+    );
+
+    let three_line = tables[1];
+    assert!(
+        three_line.contains("<w:top w:val=\"single\" w:sz=\"8\"")
+            && three_line.contains("<w:bottom w:val=\"single\" w:sz=\"8\""),
+        "three-line table keeps its own 1pt outer rules:\n{three_line}"
+    );
+    assert!(
+        !three_line.contains("<w:insideV w:val=\"single\""),
+        "three-line table must not gain vertical borders"
     );
 }

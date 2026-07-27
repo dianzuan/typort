@@ -39,7 +39,6 @@ struct FrameTextItem {
 }
 
 /// Recover content that exists in the `PagedDocument` but was lost from the `HtmlDocument` DOM.
-#[allow(clippy::too_many_lines)]
 pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document) {
     let margins = super::page::MarginsPt::from_settings(&doc.page_settings);
     let all_page_lines = extract_lines_from_all_pages(paged, margins);
@@ -53,13 +52,7 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
     // content. Fold their text into the dedup corpus so the page-bottom footnote
     // zone is never re-scraped into orphan body paragraphs. (They are also kept in
     // `exclude_text` below for the exact-line path.)
-    for footnote in &doc.footnotes {
-        for inline in &footnote.content {
-            if let InlineElement::Text(run) = inline {
-                full_doc_text.push_str(&run.text);
-            }
-        }
-    }
+    append_footnote_text(doc, &mut full_doc_text);
     let full_doc_text_nospace = strip_math_italic(&full_doc_text).replace(' ', "");
     // CJK-only projection of the whole document, used to recognize paged lines
     // whose prose is already present but broken up by interleaved OMML math,
@@ -97,13 +90,7 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
         .collect();
 
     let mut exclude_text = extract_header_footer_text(doc);
-    for footnote in &doc.footnotes {
-        for inline in &footnote.content {
-            if let InlineElement::Text(run) = inline {
-                exclude_text.push_str(&run.text);
-            }
-        }
-    }
+    append_footnote_text(doc, &mut exclude_text);
 
     let mut missing = Vec::new();
     for (i, line) in all_page_lines.iter().enumerate() {
@@ -113,155 +100,24 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
         if line.text.chars().count() < 2 {
             continue;
         }
-        // Skip very short lines ending with sentence-final punctuation —
-        // these are fragments of sentence tails from line-wrapped paragraphs
-        // that are already present in the full text.
-        if line.text.chars().count() <= 5
-            && line.text.trim().ends_with(['。', '.', '；', '！', '？'])
-        {
-            continue;
-        }
         if line.all_math_font {
             continue;
         }
-        // Skip short lines with math symbols — these are equation fragments
-        // that are already represented as OMML in the document.
-        {
-            let math_chars = line
-                .text
-                .chars()
-                .filter(|c| {
-                    ('\u{1D400}'..='\u{1D7FF}').contains(c)
-                    || ('\u{2200}'..='\u{22FF}').contains(c) // math operators (∗, ∑, etc.)
-                    || *c == '>' || *c == '<' || *c == '≥' || *c == '≤'
-                })
-                .count();
-            let total = line.text.chars().count();
-            // Short lines with ANY math: skip if under 8 chars total
-            if total < 8 && math_chars > 0 {
-                continue;
-            }
-            if total > 0 && math_chars * 4 > total {
-                continue;
-            }
-        }
-        let line_normalized = strip_cjk_spaces_str(&line.text);
-        let line_demath = strip_math_italic(&line.text);
-        let line_stripped = strip_visual_markers(&line.text);
-        let line_demath_nospace = line_demath.replace(' ', "");
-        // Short lines (< 6 chars) can match as false-positive substrings in
-        // longer paragraphs (e.g. author name "作者甲" inside author bio).
-        // For these, only check per-paragraph exact match, not full-text substring.
-        let short_line = line.text.chars().count() < 6;
-        let short_line_exact = short_line
-            && doc.body.elements.iter().any(|e| {
-                if let BlockElement::Paragraph(p) = e {
-                    paragraph_matches_short_line(p, line.text.trim())
-                } else {
-                    false
-                }
-            });
-        if short_line_exact
-            || (!short_line
-                && (full_doc_text.contains(&line.text)
-                    || full_doc_text.contains(&line_normalized)
-                    || full_doc_text.contains(&line_stripped)
-                    || full_doc_text.contains(&line_demath)
-                    || full_doc_text_nospace.contains(&line_demath_nospace)))
-            || line_matches_emitted_heading(&line.text, &heading_texts_nospace)
-            || exclude_text.contains(&line.text)
-        {
+        if line_matches_existing_text(
+            line,
+            doc,
+            &full_doc_text,
+            &full_doc_text_nospace,
+            &heading_texts_nospace,
+            &exclude_text,
+        ) {
             continue;
         }
-        // Fuzzy match: for lines containing math (short tokens mixed with text),
-        // check if significant text fragments (3+ chars) are already in the doc.
-        // Also check with math italic stripped to handle Unicode math ↔ ASCII OMML.
-        let words: Vec<&str> = line.text.split_whitespace().collect();
-        if words.len() >= 2 {
-            let sig_count = words.iter().filter(|w| w.chars().count() >= 3).count();
-            let matched = words
-                .iter()
-                .filter(|w| {
-                    let wlen = w.chars().count();
-                    if wlen < 3 {
-                        return false;
-                    }
-                    full_doc_text.contains(*w) || {
-                        let dw = strip_math_italic(w);
-                        full_doc_text.contains(dw.as_str())
-                            || full_doc_text_nospace.contains(dw.replace(' ', "").as_str())
-                    }
-                })
-                .count();
-            // Treat the line as already-present when a majority of significant
-            // words are found elsewhere. This majority rule (not all-or-nothing)
-            // is required for math-interleaved lines: a theorem/proof/footnote
-            // line whose prose is already in the DOM as an OMML paragraph will
-            // have its math tokens (𝑓, [𝑎,𝑏], 𝛼) fail to byte-match the OMML, so
-            // an `== sig_count` rule would re-insert it as a flat-text duplicate.
-            // An empirical before/after scan over all fixtures confirmed the
-            // stricter rule duplicated content in 21 documents.
-            if sig_count >= 2 && matched * 2 > sig_count {
-                continue;
-            }
-        }
-        // If the line has any CJK-heavy word (4+ ideographs) that appears in
-        // doc text, the line is likely already present (mixed with OMML math).
-        if words.iter().any(|w| {
-            let cjk_count = w
-                .chars()
-                .filter(|c| matches!(*c, '\u{4E00}'..='\u{9FFF}'))
-                .count();
-            cjk_count >= 4 && full_doc_text.contains(*w)
-        }) {
+        if line_words_are_already_emitted(line, &full_doc_text, &full_doc_text_nospace) {
             continue;
         }
-        // CJK fragment matching: extract CJK ideograph substrings (8+ chars)
-        // and check against doc text.
-        let long_frags: Vec<String> = extract_cjk_fragments(&line.text, 8);
-        if long_frags
-            .iter()
-            .any(|f| full_doc_text.contains(f.as_str()))
-        {
+        if line_cjk_is_already_emitted(line, &full_doc_text, &doc_cjk) {
             continue;
-        }
-        // For shorter fragments (4+ chars), require majority to match.
-        let short_frags: Vec<String> = extract_cjk_fragments(&line.text, 4);
-        if short_frags.len() >= 2 {
-            let frag_matched = short_frags
-                .iter()
-                .filter(|f| full_doc_text.contains(f.as_str()))
-                .count();
-            if frag_matched * 2 > short_frags.len() {
-                continue;
-            }
-        }
-        // A line that is only citation/footnote markers (e.g. "[1][2][5]") holds
-        // no recoverable prose — those marks are already emitted as citations.
-        // (Computed once; the CJK-projection check below reuses it.)
-        let line_sans_citations = strip_citation_markers(&line.text);
-        if line_sans_citations.trim().is_empty() {
-            continue;
-        }
-        // CJK-projection match: strip citation markers, then project to CJK
-        // ideographs and treat the line as already present when that projection is a
-        // contiguous substring of the document. This catches body lines the checks
-        // above miss because their prose is split by OMML math / superscript
-        // citations (which never byte-match). A heading number is left in place —
-        // it projects into the CJK string identically on both the paged and emitted
-        // sides (e.g. "三、引言" → "三引言"), so it never defeats the match.
-        {
-            let line_cjk: String = line_sans_citations
-                .chars()
-                .filter(|c| is_cjk_ideograph(*c))
-                .collect();
-            let cjk_len = line_cjk.chars().count();
-            let has_math = line.text.chars().any(|c| {
-                ('\u{1D400}'..='\u{1D7FF}').contains(&c) || ('\u{2200}'..='\u{22FF}').contains(&c)
-            });
-            if (cjk_len >= 6 || (cjk_len >= 2 && has_math)) && doc_cjk.contains(&line_cjk) {
-                continue;
-            }
         }
         // A recovered *multi-column* line whose columns are each (a substring of)
         // a real table cell is a re-scraped table row. This catches the case the
@@ -281,6 +137,122 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
     if !missing.is_empty() {
         insert_missing_at_position(doc, &missing, &all_page_lines);
     }
+}
+
+fn append_footnote_text(doc: &Document, output: &mut String) {
+    for footnote in &doc.footnotes {
+        for inline in &footnote.content {
+            if let InlineElement::Text(run) = inline {
+                output.push_str(&run.text);
+            }
+        }
+    }
+}
+
+fn line_matches_existing_text(
+    line: &FrameLine,
+    doc: &Document,
+    full_doc_text: &str,
+    full_doc_text_nospace: &str,
+    heading_texts_nospace: &[String],
+    exclude_text: &str,
+) -> bool {
+    let normalized = strip_cjk_spaces_str(&line.text);
+    let demath = strip_math_italic(&line.text);
+    let stripped = strip_visual_markers(&line.text);
+    let demath_nospace = demath.replace(' ', "");
+    let short = line.text.chars().count() < 6;
+    let short_exact = short
+        && doc.body.elements.iter().any(|element| {
+            if let BlockElement::Paragraph(paragraph) = element {
+                paragraph_matches_short_line(paragraph, line.text.trim())
+            } else {
+                false
+            }
+        });
+
+    short_exact
+        || full_doc_text.contains(&line.text)
+        || (!short
+            && (full_doc_text.contains(&normalized)
+                || full_doc_text.contains(&stripped)
+                || full_doc_text.contains(&demath)
+                || full_doc_text_nospace.contains(&demath_nospace)))
+        || line_matches_emitted_heading(&line.text, heading_texts_nospace)
+        || exclude_text.contains(&line.text)
+}
+
+fn line_words_are_already_emitted(
+    line: &FrameLine,
+    full_doc_text: &str,
+    full_doc_text_nospace: &str,
+) -> bool {
+    let words: Vec<&str> = line.text.split_whitespace().collect();
+    if words.len() >= 2 {
+        let significant = words
+            .iter()
+            .filter(|word| word.chars().count() >= 3)
+            .count();
+        let matched = words
+            .iter()
+            .filter(|word| {
+                if word.chars().count() < 3 {
+                    return false;
+                }
+                full_doc_text.contains(**word) || {
+                    let demath = strip_math_italic(word);
+                    full_doc_text.contains(&demath)
+                        || full_doc_text_nospace.contains(&demath.replace(' ', ""))
+                }
+            })
+            .count();
+        if significant >= 2 && matched * 2 > significant {
+            return true;
+        }
+    }
+
+    words.iter().any(|word| {
+        let cjk_count = word
+            .chars()
+            .filter(|c| matches!(*c, '\u{4E00}'..='\u{9FFF}'))
+            .count();
+        cjk_count >= 4 && full_doc_text.contains(*word)
+    })
+}
+
+fn line_cjk_is_already_emitted(line: &FrameLine, full_doc_text: &str, doc_cjk: &str) -> bool {
+    let long_fragments = extract_cjk_fragments(&line.text, 8);
+    if long_fragments
+        .iter()
+        .any(|fragment| full_doc_text.contains(fragment))
+    {
+        return true;
+    }
+
+    let short_fragments = extract_cjk_fragments(&line.text, 4);
+    if short_fragments.len() >= 2 {
+        let matched = short_fragments
+            .iter()
+            .filter(|fragment| full_doc_text.contains(*fragment))
+            .count();
+        if matched * 2 > short_fragments.len() {
+            return true;
+        }
+    }
+
+    let without_citations = strip_citation_markers(&line.text);
+    if without_citations.trim().is_empty() {
+        return true;
+    }
+    let line_cjk: String = without_citations
+        .chars()
+        .filter(|c| is_cjk_ideograph(*c))
+        .collect();
+    let cjk_len = line_cjk.chars().count();
+    let has_math = line.text.chars().any(|c| {
+        ('\u{1D400}'..='\u{1D7FF}').contains(&c) || ('\u{2200}'..='\u{22FF}').contains(&c)
+    });
+    (cjk_len >= 6 || (cjk_len >= 2 && has_math)) && doc_cjk.contains(&line_cjk)
 }
 
 fn extract_header_footer_text(doc: &Document) -> String {
@@ -736,7 +708,6 @@ fn pt_to_twips(pt: f64) -> u32 {
     (pt * 20.0).round().max(0.0) as u32
 }
 
-#[allow(clippy::cast_precision_loss, clippy::too_many_lines)]
 fn insert_missing_at_position(
     doc: &mut Document,
     missing_lines: &[FrameLine],
@@ -757,26 +728,7 @@ fn insert_missing_at_position(
         // element→page map uses it directly instead of interpolating.
         para.page_from_paged = Some(line.page_idx + 1);
 
-        let has_large_gap = if line.x_clusters.len() >= 2 {
-            // Estimate the font size for this line to determine gap threshold
-            let max_font_size_pt = line
-                .runs
-                .iter()
-                .map(|r| f64::from(r.size_half_pt.unwrap_or(21)) / 2.0)
-                .fold(0.0_f64, f64::max);
-            // A "real grid" gap should be at least 3em wide; h(0.5em) gaps are much smaller
-            let small_gap_threshold = max_font_size_pt * 3.0;
-            line.x_clusters.windows(2).any(|pair| {
-                // Estimate end of left cluster from x position + char count * average char width
-                let left_char_count: usize =
-                    pair[0].runs.iter().map(|r| r.text.chars().count()).sum();
-                let left_end = pair[0].x_pt + left_char_count as f64 * max_font_size_pt;
-                let gap = pair[1].x_pt - left_end;
-                gap > small_gap_threshold
-            })
-        } else {
-            false
-        };
+        let has_large_gap = line_has_large_cluster_gap(line);
         let is_real_grid = line.x_clusters.len() >= 2
             && has_large_gap
             && line
@@ -846,70 +798,103 @@ fn insert_missing_at_position(
         paragraphs.push(BlockElement::Paragraph(para));
     }
 
-    // Merge consecutive centered paragraphs that have the same font size
-    // (likely a single title wrapping across multiple rendered lines).
-    let mut merged: Vec<BlockElement> = Vec::new();
-    for elem in paragraphs {
-        let should_merge =
-            if let (Some(BlockElement::Paragraph(prev)), BlockElement::Paragraph(curr)) =
-                (merged.last(), &elem)
-            {
-                let prev_center = matches!(prev.alignment, Some(Alignment::Center));
-                let curr_center = matches!(curr.alignment, Some(Alignment::Center));
-                let prev_size = prev.inlines.iter().find_map(|i| {
-                    if let InlineElement::Text(r) = i {
-                        r.size_half_pt
-                    } else {
-                        None
-                    }
-                });
-                let curr_size = curr.inlines.iter().find_map(|i| {
-                    if let InlineElement::Text(r) = i {
-                        r.size_half_pt
-                    } else {
-                        None
-                    }
-                });
-                // Only merge short centered paragraphs (wrapped title lines).
-                // Don't merge if current starts with "（" or "(" (affiliation).
-                let prev_text = prev.text_content();
-                let curr_text = curr.text_content();
-                let combined_len = prev_text.chars().count() + curr_text.chars().count();
-                let combined_short = combined_len < 60;
-                let curr_is_affiliation = curr_text.starts_with('（') || curr_text.starts_with('(');
-                // Don't merge very short items (likely author names, not title fragments)
-                let curr_too_short = curr_text.chars().count() <= 5;
-                // Merge if both are short, OR if both have the same non-default
-                // font size (i.e. they're from the same styled block like a title)
-                let same_styled = prev_size == curr_size && prev_size.is_some();
-                prev_center
-                    && curr_center
-                    && prev_size == curr_size
-                    && (combined_short || same_styled)
-                    && !curr_is_affiliation
-                    && !curr_too_short
-            } else {
-                false
-            };
-
-        if should_merge {
-            let BlockElement::Paragraph(curr) = elem else {
-                unreachable!()
-            };
-            let Some(BlockElement::Paragraph(prev)) = merged.last_mut() else {
-                unreachable!()
-            };
-            prev.inlines.extend(curr.inlines);
-        } else {
-            merged.push(elem);
-        }
-    }
+    let merged = merge_centered_paragraphs(paragraphs, missing_lines);
 
     if !merged.is_empty() {
         let tail = doc.body.elements.split_off(insert_idx);
         doc.body.elements.extend(merged);
         doc.body.elements.extend(tail);
     }
+}
+
+fn merge_centered_paragraphs(
+    paragraphs: Vec<BlockElement>,
+    source_lines: &[FrameLine],
+) -> Vec<BlockElement> {
+    let mut merged = Vec::new();
+    let mut previous_line = None;
+    for (element, current_line) in paragraphs.into_iter().zip(source_lines) {
+        let should_merge =
+            if let (Some(BlockElement::Paragraph(previous)), BlockElement::Paragraph(current)) =
+                (merged.last(), &element)
+            {
+                let previous_size = first_text_size(previous);
+                let current_size = first_text_size(current);
+                let combined_length = previous.text_content().chars().count()
+                    + current.text_content().chars().count();
+                let same_non_default_size =
+                    previous_size == current_size && previous_size.is_some();
+                matches!(previous.alignment, Some(Alignment::Center))
+                    && matches!(current.alignment, Some(Alignment::Center))
+                    && previous_size == current_size
+                    && (combined_length < 60 || same_non_default_size)
+                    && previous_line
+                        .is_some_and(|line| recovered_lines_are_contiguous(line, current_line))
+            } else {
+                false
+            };
+
+        if should_merge {
+            let BlockElement::Paragraph(current) = element else {
+                unreachable!()
+            };
+            let Some(BlockElement::Paragraph(previous)) = merged.last_mut() else {
+                unreachable!()
+            };
+            previous.inlines.extend(current.inlines);
+        } else {
+            merged.push(element);
+        }
+        previous_line = Some(current_line);
+    }
+    merged
+}
+
+fn recovered_lines_are_contiguous(previous: &FrameLine, current: &FrameLine) -> bool {
+    if previous.page_idx != current.page_idx {
+        return false;
+    }
+    let font_size_pt = previous
+        .runs
+        .iter()
+        .chain(&current.runs)
+        .map(|run| f64::from(run.size_half_pt.unwrap_or(21)) / 2.0)
+        .fold(0.0_f64, f64::max);
+    let vertical_gap = current.y_pt - previous.y_pt;
+    vertical_gap >= 0.0 && vertical_gap <= font_size_pt * 2.0
+}
+
+fn first_text_size(paragraph: &Paragraph) -> Option<u32> {
+    paragraph.inlines.iter().find_map(|inline| {
+        if let InlineElement::Text(run) = inline {
+            run.size_half_pt
+        } else {
+            None
+        }
+    })
+}
+
+// Character counts in one rendered line are far below f64's exact integer range.
+#[allow(clippy::cast_precision_loss)]
+fn line_has_large_cluster_gap(line: &FrameLine) -> bool {
+    if line.x_clusters.len() < 2 {
+        return false;
+    }
+    let max_font_size_pt = line
+        .runs
+        .iter()
+        .map(|run| f64::from(run.size_half_pt.unwrap_or(21)) / 2.0)
+        .fold(0.0_f64, f64::max);
+    let gap_threshold = max_font_size_pt * 3.0;
+    line.x_clusters.windows(2).any(|pair| {
+        let left_char_count: usize = pair[0]
+            .runs
+            .iter()
+            .map(|run| run.text.chars().count())
+            .sum();
+        let left_end = pair[0].x_pt + left_char_count as f64 * max_font_size_pt;
+        pair[1].x_pt - left_end > gap_threshold
+    })
 }
 
 fn find_insert_position_by_y(

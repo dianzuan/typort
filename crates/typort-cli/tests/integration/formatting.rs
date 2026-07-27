@@ -1,7 +1,7 @@
 //! Inline formatting, footnote formatting, indentation, and run-coalescing tests.
 
 use crate::common;
-use crate::common::{fixture_doc_xml, fixture_styles_xml, paragraph_containing};
+use crate::common::{fixture_doc_xml, fixture_part, fixture_styles_xml, paragraph_containing};
 use std::io::Cursor;
 use std::path::Path;
 
@@ -453,6 +453,143 @@ fn hanging_indent_par_set_rule_is_honored() {
 }
 
 #[test]
+fn hanging_indent_uses_the_authored_length() {
+    let doc_xml = fixture_doc_xml("hanging_indent_exact_length");
+    let paragraph = paragraph_containing(&doc_xml, "authored one-em");
+
+    assert!(
+        paragraph.contains(r#"w:left="200""#) && paragraph.contains(r#"w:hanging="200""#),
+        "1em at an authored 10pt body size must become exactly 200 twips:\n{paragraph}"
+    );
+}
+
+#[test]
+fn hanging_indent_preserves_an_absolute_length() {
+    let doc_xml = fixture_doc_xml("hanging_indent_absolute_length");
+    let paragraph = paragraph_containing(&doc_xml, "authored eighteen-point");
+
+    assert!(
+        paragraph.contains(r#"w:left="360""#) && paragraph.contains(r#"w:hanging="360""#),
+        "18pt must become exactly 360 twips regardless of body font size:\n{paragraph}"
+    );
+}
+
+#[test]
+fn hanging_indent_resolves_a_source_variable() {
+    let doc_xml = fixture_doc_xml("hanging_indent_variable");
+    let paragraph = paragraph_containing(&doc_xml, "stored in a source variable");
+
+    assert!(
+        paragraph.contains(r#"w:left="360""#) && paragraph.contains(r#"w:hanging="360""#),
+        "a variable holding 18pt must resolve to exactly 360 twips:\n{paragraph}"
+    );
+}
+
+#[test]
+fn hanging_indent_resolves_a_source_expression() {
+    let doc_xml = fixture_doc_xml("hanging_indent_expression");
+    let paragraph = paragraph_containing(&doc_xml, "calculated by a source expression");
+
+    assert!(
+        paragraph.contains(r#"w:left="360""#) && paragraph.contains(r#"w:hanging="360""#),
+        "10pt + 8pt must resolve to exactly 360 twips:\n{paragraph}"
+    );
+}
+
+#[test]
+fn hanging_indent_resolves_length_multiplication() {
+    let doc_xml = fixture_doc_xml("hanging_indent_multiplication");
+    let paragraph = paragraph_containing(&doc_xml, "multiplied hanging indent");
+
+    assert!(
+        paragraph.contains(r#"w:left="400""#) && paragraph.contains(r#"w:hanging="400""#),
+        "1em * 2 at an authored 10pt body size must become exactly 400 twips:\n{paragraph}"
+    );
+}
+
+#[test]
+fn hanging_indent_resolves_mixed_unit_addition() {
+    let doc_xml = fixture_doc_xml("hanging_indent_mixed_units");
+    let paragraph = paragraph_containing(&doc_xml, "mixed-unit hanging indent");
+
+    assert!(
+        paragraph.contains(r#"w:left="300""#) && paragraph.contains(r#"w:hanging="300""#),
+        "1em + 5pt at an authored 10pt body size must become exactly 300 twips:\n{paragraph}"
+    );
+}
+
+#[test]
+fn hanging_indent_resolves_an_imported_constant() {
+    let doc_xml = fixture_doc_xml("hanging_indent_imported_constant");
+    let paragraph = paragraph_containing(&doc_xml, "imported hanging-indent constant");
+
+    assert!(
+        paragraph.contains(r#"w:left="360""#) && paragraph.contains(r#"w:hanging="360""#),
+        "an imported 18pt constant must become exactly 360 twips:\n{paragraph}"
+    );
+}
+
+#[test]
+fn hanging_indent_applies_from_an_imported_document_template() {
+    let doc_xml = fixture_doc_xml("hanging_indent_imported_template");
+    let paragraph = paragraph_containing(&doc_xml, "imported template hanging indent");
+
+    assert!(
+        paragraph.contains(r#"w:left="360""#) && paragraph.contains(r#"w:hanging="360""#),
+        "an imported template's 18pt hanging indent must become exactly 360 twips:\n{paragraph}"
+    );
+}
+
+#[test]
+fn hanging_indent_resolves_a_zero_argument_length_function() {
+    let doc_xml = fixture_doc_xml("hanging_indent_function");
+    let paragraph = paragraph_containing(&doc_xml, "function-derived hanging indent");
+
+    assert!(
+        paragraph.contains(r#"w:left="360""#) && paragraph.contains(r#"w:hanging="360""#),
+        "a zero-argument function returning 18pt must become exactly 360 twips:\n{paragraph}"
+    );
+}
+
+#[test]
+fn hanging_indent_resolves_parenthesized_arithmetic() {
+    let doc_xml = fixture_doc_xml("hanging_indent_parenthesized");
+    let paragraph = paragraph_containing(&doc_xml, "parenthesized hanging-indent");
+
+    assert!(
+        paragraph.contains(r#"w:left="600""#) && paragraph.contains(r#"w:hanging="600""#),
+        "(1em + 5pt) * 2 at 10pt must become exactly 600 twips:\n{paragraph}"
+    );
+}
+
+#[test]
+fn hanging_indent_stays_inside_its_content_scope() {
+    let doc_xml = fixture_doc_xml("hanging_indent_local_scope");
+    let inside = paragraph_containing(&doc_xml, "Inside the local");
+    let outside = paragraph_containing(&doc_xml, "After the local");
+
+    assert!(
+        inside.contains(r#"w:hanging="200""#),
+        "the local set rule must apply inside its content block:\n{inside}"
+    );
+    assert!(
+        !outside.contains("w:hanging"),
+        "the local set rule must not leak outside its content block:\n{outside}"
+    );
+}
+
+#[test]
+fn hanging_indent_in_an_inactive_branch_does_not_leak() {
+    let doc_xml = fixture_doc_xml("hanging_indent_inactive_branch");
+    let paragraph = paragraph_containing(&doc_xml, "Visible paragraph");
+
+    assert!(
+        !paragraph.contains("w:hanging"),
+        "a set rule in an inactive branch must not affect visible content:\n{paragraph}"
+    );
+}
+
+#[test]
 fn complex_paper_handwritten_refs_get_hanging_indent() {
     // complex_paper writes `#set par(hanging-indent: 2em)` before its hand-typed
     // reference list (NOT a #bibliography()). Honoring that declared value gives
@@ -615,5 +752,65 @@ fn separate_ordered_lists_each_restart_at_one() {
         overrides >= 2,
         "each ordered list's <w:num> must carry a level-0 startOverride so it restarts \
          at 1 (two lists -> >= 2 overrides); found {overrides}:\n{numbering}"
+    );
+}
+
+#[test]
+fn consecutive_linebreaks_survive_coalescing() {
+    let doc_xml = fixture_doc_xml("consecutive_linebreaks");
+
+    let func_form = paragraph_containing(&doc_xml, "first");
+    assert_eq!(
+        func_form.matches("<w:br/>").count(),
+        2,
+        "#linebreak()#linebreak() must emit two <w:br/>s (a blank line), got:\n{func_form}"
+    );
+
+    let markup_form = paragraph_containing(&doc_xml, "alpha");
+    assert_eq!(
+        markup_form.matches("<w:br/>").count(),
+        2,
+        r"`\ \` must emit two <w:br/>s (a blank line), got:\n{markup_form}"
+    );
+
+    for word in ["first", "second", "alpha", "beta"] {
+        assert_eq!(
+            doc_xml.matches(&format!(">{word}<")).count(),
+            1,
+            "{word:?} must appear exactly once — a duplicate means recovery re-injected it"
+        );
+    }
+}
+
+#[test]
+fn enum_custom_start_keeps_numbering() {
+    let numbering = fixture_part("enum_custom_start", "word/numbering.xml");
+    assert!(
+        numbering.contains("<w:startOverride w:val=\"4\"/>"),
+        "#enum(start: 4) must carry startOverride 4, got:\n{numbering}"
+    );
+    assert!(
+        numbering.contains("<w:startOverride w:val=\"1\"/>"),
+        "a plain enum must still restart at 1"
+    );
+}
+
+#[test]
+fn list_inline_math_emits_omml() {
+    let doc_xml = fixture_doc_xml("list_inline_math");
+
+    let bullet_item = paragraph_containing(&doc_xml, "item one with");
+    assert!(
+        bullet_item.contains("<m:oMath>"),
+        "bullet item's inline equation must be OMML, got:\n{bullet_item}"
+    );
+    let enum_item = paragraph_containing(&doc_xml, "numbered with");
+    assert!(
+        enum_item.contains("<m:oMath>"),
+        "enum item's inline equation must be OMML, got:\n{enum_item}"
+    );
+    assert!(
+        !doc_xml.contains("\u{1D465}"),
+        "MathML glyphs must not leak as literal text"
     );
 }

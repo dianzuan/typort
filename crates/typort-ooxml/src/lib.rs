@@ -284,7 +284,7 @@ mod tests {
     fn hanging_indent_produces_hanging_and_left() {
         let mut doc = Document::new();
         let mut para = document::Paragraph::new();
-        para.hanging_indent = true;
+        para.hanging_indent = Some(document::HangingIndent::Default);
         para.add_run("bibliography entry");
         doc.add_paragraph(para);
 
@@ -1568,7 +1568,7 @@ mod tests {
         let mut doc = Document::new();
         let mut bib_para = document::Paragraph::new();
         bib_para.add_run("Smith, J. (2020). Example. Journal, 42(3), 100-115.");
-        bib_para.hanging_indent = true;
+        bib_para.hanging_indent = Some(document::HangingIndent::Default);
         doc.body
             .elements
             .push(document::BlockElement::BibliographyBlock {

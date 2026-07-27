@@ -1,9 +1,6 @@
-//! Shared fixture-conversion and XML-scanning helpers for the `integration` and
-//! `review_regressions` test binaries. Cargo compiles each `tests/*.rs` (and
-//! `tests/*/main.rs`) as its own binary, so this file — which does not itself
-//! match either pattern — is not a test binary; it is pulled in via `mod
-//! common;` (for a flat file, resolving to this `tests/common/mod.rs`) or
-//! `#[path = "../common/mod.rs"] mod common;` (from `tests/integration/main.rs`).
+//! Shared fixture-conversion and XML-scanning helpers for the area modules in
+//! the `integration` test binary. This file does not itself match Cargo's test
+//! entry-point patterns; `tests/integration/main.rs` pulls it in explicitly.
 //!
 //! Not every consuming binary/module uses every helper here, which would
 //! otherwise warn under `dead_code` from that binary's point of view — each
@@ -43,8 +40,6 @@ pub fn fixture_doc_xml(fixture: &str) -> String {
 }
 
 /// Convert `tests/fixtures/<fixture>.typ` and return `word/styles.xml`.
-// Unused by `review_regressions`; see the per-binary dead_code note in the module doc.
-#[allow(dead_code)]
 pub fn fixture_styles_xml(fixture: &str) -> String {
     fixture_part(fixture, "word/styles.xml")
 }
@@ -67,8 +62,6 @@ pub fn paragraph_containing<'a>(doc_xml: &'a str, needle: &str) -> &'a str {
 
 /// Concatenated `<w:t>` text of every `<w:p>` in document order.
 /// Matches both `<w:p>` and `<w:p ...>` (attribute-bearing) paragraphs.
-// Unused by `review_regressions`; see the per-binary dead_code note in the module doc.
-#[allow(dead_code)]
 pub fn paragraph_texts(doc_xml: &str) -> Vec<String> {
     doc_xml
         .match_indices("<w:p")

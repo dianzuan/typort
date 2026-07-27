@@ -7,27 +7,49 @@
 //! the *styling* the HTML dropped — mirroring Pandoc's AST→writer split, adapted to
 //! typort's three-source model.
 //!
-//! Nothing here is hardcoded: each cell gets exactly the alignment Typst resolved
-//! for it (per-cell override, else the table-level value/array), or nothing when
-//! the author left it `auto`. The table-level *closure* form (`(x, y) => align`)
-//! needs an `Engine` we don't have post-compilation, so it degrades to "unset".
+//! Nothing here is hardcoded: each cell gets exactly the alignment Typst resolves
+//! for it (per-cell override, else the table-level value/array/closure), or nothing
+//! when the author leaves it `auto`.
 
 use typort_ooxml::document::{Alignment, CellContent, Table, TableCell, VMerge, VerticalAlign};
+use typst::World;
+use typst::comemo::Track;
+use typst::engine::{Engine, Route, Sink, Traced};
 use typst::foundations::{Smart, StyleChain};
+use typst::introspection::Introspector;
+use typst_html::HtmlDocument;
 use typst_library::layout::{Alignment as TstAlignment, Celled, HAlignment, VAlignment};
 use typst_library::model::{TableCell as TstCell, TableChild, TableElem, TableItem};
+use typst_utils::Protected;
 
+use crate::world::TyportWorld;
 /// Apply each cell's authored alignment (from the semantic `TableElem`) to the IR
 /// table — vertical → `vertical_align` (`w:vAlign`), horizontal → the cell
 /// paragraphs' alignment (`w:jc`). Cells the author left unaligned are untouched.
-pub(super) fn apply_cell_alignment(table: &mut Table, table_elem: &TableElem) {
+pub(super) fn apply_cell_alignment(
+    table: &mut Table,
+    table_elem: &TableElem,
+    world: &TyportWorld,
+    html_doc: &HtmlDocument,
+) {
     let semantic_cells = collect_cells(table_elem);
     let table_align = table_elem.align.get_ref(StyleChain::default());
+    let mut sink = Sink::new();
+    let traced = Traced::default();
+    let introspector: &dyn Introspector = &**html_doc.introspector();
+    let mut engine = Engine {
+        world: (world as &dyn World).track(),
+        library: world.library(),
+        introspector: Protected::new(introspector.track()),
+        traced: traced.track(),
+        sink: sink.track_mut(),
+        route: Route::default(),
+    };
 
     // Walk the IR's origin cells (skipping `vMerge` continuation placeholders, which
     // have no semantic counterpart) in document order, alongside the semantic cells.
     let mut sem = semantic_cells.iter();
-    for row in &mut table.rows {
+    for (row_idx, row) in table.rows.iter_mut().enumerate() {
         let mut col = 0usize;
         for cell in &mut row.cells {
             if cell.vmerge == VMerge::Continue {
@@ -35,7 +57,7 @@ pub(super) fn apply_cell_alignment(table: &mut Table, table_elem: &TableElem) {
                 continue;
             }
             let Some(sc) = sem.next() else { return };
-            if let Some(align) = resolve_align(sc, table_align, col) {
+            if let Some(align) = resolve_align(sc, table_align, col, row_idx, &mut engine) {
                 apply_align(cell, align);
             }
             col += cell.colspan as usize;
@@ -72,23 +94,24 @@ fn push_cell(item: &TableItem, out: &mut Vec<TstCell>) {
 }
 
 /// Resolve a cell's alignment: a per-cell override wins; otherwise the table-level
-/// alignment (`Value`, or `Array` indexed by column). Returns `None` for `auto` and
-/// for the closure form (which needs an `Engine`).
+/// alignment resolved by Typst at the cell coordinate. Returns `None` for `auto`
+/// or when evaluating the authored closure fails.
 fn resolve_align(
     cell: &TstCell,
     table_align: &Celled<Smart<TstAlignment>>,
     col: usize,
+    row: usize,
+    engine: &mut Engine,
 ) -> Option<TstAlignment> {
     if let Smart::Custom(a) = cell.align.get_ref(StyleChain::default()) {
         return Some(*a);
     }
-    match table_align {
-        Celled::Value(Smart::Custom(a)) => Some(*a),
-        Celled::Array(arr) if !arr.is_empty() => match &arr[col % arr.len()] {
-            Smart::Custom(a) => Some(*a),
-            Smart::Auto => None,
-        },
-        _ => None,
+    match table_align
+        .resolve(engine, StyleChain::default(), col, row)
+        .ok()?
+    {
+        Smart::Custom(align) => Some(align),
+        Smart::Auto => None,
     }
 }
 

@@ -43,6 +43,41 @@ fn image_embeds_in_docx() {
 }
 
 #[test]
+fn text_figure_does_not_steal_drawing_raster() {
+    let doc_xml = fixture_doc_xml("figure_kinds_no_steal");
+    assert!(
+        doc_xml.contains("QUOTE-BODY-SENTENCE"),
+        "the quote figure's body must stay editable text, not be replaced by an image"
+    );
+    assert_eq!(
+        doc_xml.matches("<w:drawing").count(),
+        1,
+        "exactly one embedded image: the drawing figure's own canvas"
+    );
+    let quote_caption = doc_xml.find("A quote figure").unwrap();
+    let drawing_pos = doc_xml.find("<w:drawing").unwrap();
+    assert!(
+        drawing_pos > quote_caption,
+        "the raster must attach to the drawing figure, not be stolen by the quote figure"
+    );
+}
+
+#[test]
+fn image_inside_rounded_container_embedded() {
+    let doc_xml = fixture_doc_xml("rounded_container_image");
+    assert_eq!(
+        doc_xml.matches("<w:drawing").count(),
+        2,
+        "both the rounded-container image and the figure image must embed"
+    );
+    let container_img = doc_xml.find("<w:drawing").unwrap();
+    assert!(
+        container_img < doc_xml.find("A real figure").unwrap(),
+        "the container's image must appear before the figure"
+    );
+}
+
+#[test]
 fn image_has_relationships_in_rels() {
     let world =
         typort_core::TyportWorld::new(Path::new("../../tests/fixtures/image_test.typ")).unwrap();

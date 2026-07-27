@@ -160,7 +160,7 @@ crates/
 | `convert/coalesce.rs` | Final pass: merges adjacent runs with identical effective `rPr` and folds whitespace-only runs, undoing the per-text-node run shattering. |
 | `convert/table_width.rs` | Turns a `TableElem`'s declared column `TrackSizings` (fr/rel/auto) into per-cell `w:tcW` percentages. |
 | `convert/table_align.rs` | Faithful table-cell alignment from the semantic `TableElem`: horizontal → cell-paragraph `w:jc`, vertical → `w:vAlign`. |
-| `convert/breaks.rs` | Explicit `#pagebreak()`/`#colbreak()` recovery from the source AST (both are consumed at compile time), positioned by run spans and following `#include` chains. |
+| `convert/breaks.rs` | Explicit `#pagebreak()`/`#colbreak()` recovery from the source AST (both are consumed at compile time), positioned by run spans, expanding local function calls, and following `#include` chains. |
 | `convert/bibliography.rs` | Citation data via the semantic `BibliographyElem` (+ re-parsing `.bib`/`.yml` with hayagriva). |
 | `convert/footnote.rs` | Footnote bodies from the HTML `doc-endnotes` section. |
 | `convert/image.rs` | Image content decoded from each `<img>`'s base64 src data-URL (typst-html 0.15 embeds the bytes in the DOM); Paged frames contribute display sizes (by content hash) and drawing-canvas rasters keyed by their figure's `Location`. |
