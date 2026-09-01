@@ -5,7 +5,11 @@ use std::process;
 use clap::Parser;
 
 #[derive(Parser)]
-#[command(name = "typort", about = "Convert Typst documents to Word (.docx)")]
+#[command(
+    name = "typort",
+    version,
+    about = "Convert Typst documents to Word (.docx)"
+)]
 struct Cli {
     /// Input .typ file
     input: PathBuf,
