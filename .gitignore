@@ -29,3 +29,6 @@ realize_test.rs
 PRD.md
 ROADMAP.md
 .claude/worktrees/
+
+# Local journal presets (user-supplied, never distributed)
+/presets/
