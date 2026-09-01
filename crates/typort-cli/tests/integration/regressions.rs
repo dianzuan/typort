@@ -1756,3 +1756,25 @@ fn issue_show_rule_heading_replace_recovery() {
     );
     assert!(xml.contains("Body text"), "body text present");
 }
+
+/// GitHub issue #4: an inline `#context [...]` inside a paragraph used to emit
+/// the paragraph twice — once correct, once with the contextual content
+/// stripped (`X ctx tail.` followed by a stray `X tail.`).
+#[test]
+fn issue_inline_context_no_duplicate_paragraph() {
+    let xml = fixture_doc_xml("issue_inline_context");
+    let texts: Vec<String> = crate::common::paragraph_texts(&xml)
+        .into_iter()
+        .filter(|t| !t.trim().is_empty())
+        .collect();
+    assert_eq!(
+        texts,
+        [
+            "X ctx tail.",
+            "Q 1 first.",
+            "Q 2 second.",
+            "block-level ctx",
+        ],
+        "each inline-context paragraph must appear exactly once, with its context content"
+    );
+}
