@@ -105,7 +105,7 @@ mod tests {
     fn parse_preset_from_toml() {
         let toml_content = r#"
 [journal]
-name = "管理世界"
+name = "Example Journal"
 
 [page]
 margin_top_cm = 2.54
@@ -118,7 +118,7 @@ body_size_pt = 10.5
 heading1_size_pt = 15.0
 "#;
         let preset: Preset = toml::from_str(toml_content).unwrap();
-        assert_eq!(preset.journal.name, "管理世界");
+        assert_eq!(preset.journal.name, "Example Journal");
         assert_eq!(preset.page.as_ref().unwrap().margin_top_cm, Some(2.54));
         assert_eq!(preset.font.as_ref().unwrap().body_size_pt, Some(10.5));
     }

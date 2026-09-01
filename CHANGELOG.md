@@ -67,6 +67,9 @@ before. The 0.14 line is no longer supported.
 
 ### Changed
 
+- Journal presets are no longer distributed with typort. `--preset <name>` still
+  loads a user-supplied `presets/<name>.toml` from next to the executable or the
+  working directory.
 - Requires typst 0.15.1 crates. Documents that depend on 0.14-only behaviour may
   render differently.
 - Integration tests are split into one module per area under

@@ -13,7 +13,11 @@ cargo install --path crates/typort-cli  # from a checkout
 
 ```bash
 typort input.typ -o output.docx
+typort input.typ --preset myjournal   # applies ./presets/myjournal.toml (page margins, footnote style)
 ```
+
+Presets are user-supplied TOML files (see `tests/fixtures/presets/example.toml`
+for the schema); none are bundled.
 
 ## What it does
 

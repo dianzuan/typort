@@ -86,8 +86,9 @@ fn preset_overrides_page_margins() {
     let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/hello.typ")).unwrap();
     let mut doc = typort_core::convert::convert(&world).unwrap();
 
-    // Load the built-in preset
-    let preset = typort_presets::load_preset(Path::new("../../presets"), "管理世界").unwrap();
+    // Load the test preset fixture
+    let preset =
+        typort_presets::load_preset(Path::new("../../tests/fixtures/presets"), "example").unwrap();
 
     // Apply preset page margins
     if let Some(page) = &preset.page {

@@ -18,7 +18,8 @@ struct Cli {
     #[arg(short, long)]
     output: Option<PathBuf>,
 
-    /// Journal preset name (loads from presets/ directory)
+    /// Preset name: loads `presets/<name>.toml` from next to the executable or the
+    /// current directory (none are bundled; supply your own)
     #[arg(long)]
     preset: Option<String>,
 }
