@@ -5,7 +5,8 @@ Universal Typst to Word (.docx) converter. Any valid `.typ` file should convert 
 ## Install
 
 ```bash
-cargo install --path crates/typort-cli
+cargo install typort                    # from crates.io
+cargo install --path crates/typort-cli  # from a checkout
 ```
 
 ## Usage
