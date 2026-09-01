@@ -122,14 +122,14 @@ cargo test --workspace
 cargo fmt --all -- --check
 ```
 
-**Toolchain caveat (verified 2026-05-30):** CI uses
-`dtolnay/rust-toolchain@stable` with no `rust-toolchain.toml`, so it floats to
-the latest stable Rust. A toolchain bump can turn previously-green code red
-without any code change — new rustfmt layout rules or new clippy lints applied to
-existing code. This bit the repo: CI went red after 2026-05-19 purely from a
-toolchain move. If green-on-an-older-toolchain matters, pin it with a
-`rust-toolchain.toml`. Until then, "CI is green" means "green on whatever stable
-shipped today" — always re-run the four commands locally before claiming success.
+**Toolchain (pinned 2026-09-01):** `rust-toolchain.toml` pins the channel
+(currently 1.98.0), so CI and local runs use the same compiler, clippy, and
+rustfmt. Before the pin, `dtolnay/rust-toolchain@stable` floated to the newest
+stable and twice turned a green tree red with no code change (2026-05-19,
+2026-07-12: new rustfmt layout rules / new clippy lints applied to existing
+code). Bump the pin deliberately, in a commit that also fixes whatever the new
+toolchain flags. If your local rust is not rustup-managed (e.g. a distro
+package), make sure it matches the pinned version before trusting a local green.
 
 Do not state a specific test count in prose anywhere (README, docs, comments) —
 counts drift and become lies. Let `cargo test` report the number.

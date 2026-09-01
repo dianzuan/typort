@@ -1,0 +1,7 @@
+# Pinned so CI is reproducible: `dtolnay/rust-toolchain@stable` floats to the
+# newest stable, which has turned a green tree red with no code change (new
+# clippy lints / rustfmt rules). Bump deliberately, with a commit that also
+# fixes whatever the new toolchain flags.
+[toolchain]
+channel = "1.98.0"
+components = ["clippy", "rustfmt"]
