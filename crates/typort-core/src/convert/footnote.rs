@@ -3,6 +3,7 @@ use typst::introspection::Tag;
 use typst_html::HtmlNode;
 use typst_layout::PagedDocument;
 
+use super::fmt::InlineFmt;
 use super::{has_attr_value, tag_name};
 
 /// Extract the footnote bodies from the HTML `doc-endnotes` section, add them to the
@@ -105,7 +106,7 @@ fn extract_footnotes_from_ol(children: &[HtmlNode], footnotes: &mut Vec<Vec<Inli
             && tag_name(li) == "li"
         {
             let mut inlines = Vec::new();
-            collect_footnote_inlines(&li.children, &mut inlines, false, false, false);
+            collect_footnote_inlines(&li.children, &mut inlines, InlineFmt::default());
             footnotes.push(inlines);
         }
     }
@@ -116,18 +117,14 @@ fn extract_footnotes_from_ol(children: &[HtmlNode], footnotes: &mut Vec<Vec<Inli
 pub(super) fn collect_footnote_inlines(
     children: &[HtmlNode],
     inlines: &mut Vec<InlineElement>,
-    bold: bool,
-    italic: bool,
-    monospace: bool,
+    fmt: InlineFmt,
 ) {
     for child in children {
         match child {
             HtmlNode::Text(text, _) => {
                 if !text.is_empty() {
                     let mut run = Run::new(text.as_str());
-                    run.bold = bold;
-                    run.italic = italic;
-                    run.monospace = monospace;
+                    fmt.apply_to(&mut run);
                     inlines.push(InlineElement::Text(run));
                 }
             }
@@ -143,16 +140,7 @@ pub(super) fn collect_footnote_inlines(
                 if tag == "math" {
                     continue;
                 }
-                let new_bold = bold || tag == "strong" || tag == "b";
-                let new_italic = italic || tag == "em" || tag == "i";
-                let new_monospace = monospace || tag == "code";
-                collect_footnote_inlines(
-                    &elem.children,
-                    inlines,
-                    new_bold,
-                    new_italic,
-                    new_monospace,
-                );
+                collect_footnote_inlines(&elem.children, inlines, fmt.for_tag(&tag));
             }
             HtmlNode::Tag(Tag::Start(content, _)) => {
                 if content.elem().name() == "equation" {

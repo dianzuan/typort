@@ -8,6 +8,7 @@
 mod bibliography;
 mod breaks;
 mod coalesce;
+mod fmt;
 mod footnote;
 mod image;
 pub mod inline;
@@ -85,37 +86,7 @@ type CellSpanInfo = (usize, u32, u32);
 /// A parsed table row paired with its rowspan metadata.
 type RawTableRow = (TableRow, Vec<CellSpanInfo>);
 
-/// Inline formatting accumulated while walking HTML nodes. Bundled so the
-/// collectors thread one `Copy` value instead of three positional bools
-/// (precedent: `TableWidthCtx`, `inline::InlineCtx`).
-#[derive(Clone, Copy, Default, Debug, PartialEq)]
-struct InlineFmt {
-    bold: bool,
-    italic: bool,
-    monospace: bool,
-}
-
-impl InlineFmt {
-    /// Formatting acquired by descending into an element with this tag name.
-    /// Accepts HTML tag names and the Typst element names ("strong"/"emph")
-    /// used by the introspection-Tag walker — one method serves both walkers
-    /// because the HTML tree and the Tag stream carry the same formatting
-    /// vocabulary under different spellings.
-    fn for_tag(self, tag: &str) -> Self {
-        Self {
-            bold: self.bold || tag == "strong" || tag == "b",
-            italic: self.italic || tag == "em" || tag == "i" || tag == "emph",
-            monospace: self.monospace || tag == "code",
-        }
-    }
-
-    fn bold() -> Self {
-        Self {
-            bold: true,
-            ..Self::default()
-        }
-    }
-}
+use fmt::InlineFmt;
 
 /// Convert a Typst source file to an OOXML `Document` using the tag-walker approach.
 ///
@@ -1720,9 +1691,7 @@ fn collect_html_inlines_with_doc(
             HtmlNode::Text(text, span) => {
                 if !text.is_empty() {
                     let mut run = Run::new(text.as_str());
-                    run.bold = fmt.bold;
-                    run.italic = fmt.italic;
-                    run.monospace = fmt.monospace;
+                    fmt.apply_to(&mut run);
                     if !span.is_detached() {
                         run.span = Some(*span);
                     }
@@ -2569,9 +2538,7 @@ fn collect_formatted_runs_inner(nodes: &[HtmlNode], para: &mut Paragraph, fmt: I
             HtmlNode::Text(text, span) => {
                 if !text.is_empty() {
                     let mut run = Run::new(text.as_str());
-                    run.bold = fmt.bold;
-                    run.italic = fmt.italic;
-                    run.monospace = fmt.monospace;
+                    fmt.apply_to(&mut run);
                     if !span.is_detached() {
                         run.span = Some(*span);
                     }
@@ -3139,23 +3106,5 @@ pub(super) fn collect_block_tag_locations(children: &[HtmlNode], out: &mut Vec<L
             _ => {}
         }
         i += 1;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::InlineFmt;
-
-    #[test]
-    fn inline_fmt_for_tag_accumulates() {
-        let fmt = InlineFmt::default().for_tag("strong");
-        assert!(fmt.bold && !fmt.italic && !fmt.monospace);
-        let fmt = fmt.for_tag("em");
-        assert!(fmt.bold && fmt.italic);
-        let fmt = InlineFmt::default().for_tag("emph"); // Typst tag-name spelling
-        assert!(fmt.italic);
-        let fmt = InlineFmt::default().for_tag("code");
-        assert!(fmt.monospace);
-        assert_eq!(InlineFmt::default().for_tag("span"), InlineFmt::default());
     }
 }
