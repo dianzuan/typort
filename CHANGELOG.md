@@ -3,7 +3,14 @@
 All notable changes to typort are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.2.0] — unreleased
+## [Unreleased]
+
+### Changed
+
+- Preset schema: the unused `[font]` section is removed (it was parsed but never
+  applied). Presets now carry `[journal]`, `[page]`, `[footnote]`.
+
+## [0.2.0] — 2026-09-01
 
 Baseline moved from typst 0.14.2 to **typst 0.15.1**. HTML export in 0.15 emits
 MathML equations, groups paragraphs differently, and embeds every image as a
@@ -92,6 +99,7 @@ before. The 0.14 line is no longer supported.
   breaks, headers & footers, page numbering, columns, TOC, figure captions, CJK
   typography, document metadata, `@preview` packages.
 
-[0.2.0]: https://github.com/dianzuan/typort/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/dianzuan/typort/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/dianzuan/typort/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/dianzuan/typort/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/dianzuan/typort/releases/tag/v0.1.0

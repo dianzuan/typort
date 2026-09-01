@@ -8,7 +8,6 @@ use std::path::{Path, PathBuf};
 pub struct Preset {
     pub journal: JournalInfo,
     pub page: Option<PagePreset>,
-    pub font: Option<FontPreset>,
     pub footnote: Option<FootnotePreset>,
 }
 
@@ -23,12 +22,6 @@ pub struct PagePreset {
     pub margin_bottom_cm: Option<f64>,
     pub margin_left_cm: Option<f64>,
     pub margin_right_cm: Option<f64>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct FontPreset {
-    pub body_size_pt: Option<f64>,
-    pub heading1_size_pt: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -112,15 +105,10 @@ margin_top_cm = 2.54
 margin_bottom_cm = 2.54
 margin_left_cm = 3.17
 margin_right_cm = 3.17
-
-[font]
-body_size_pt = 10.5
-heading1_size_pt = 15.0
 "#;
         let preset: Preset = toml::from_str(toml_content).unwrap();
         assert_eq!(preset.journal.name, "Example Journal");
         assert_eq!(preset.page.as_ref().unwrap().margin_top_cm, Some(2.54));
-        assert_eq!(preset.font.as_ref().unwrap().body_size_pt, Some(10.5));
     }
 
     #[test]
