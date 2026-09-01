@@ -103,6 +103,8 @@ fn issue_cjk_font_localized_name() {
 /// would pick `Noto Serif SC` (then localize it to the weight name
 /// `Noto Serif SC Light`), clobbering the geometry-detected rendered CJK font
 /// (`NSimSun`). The fix cross-checks the declared list against the detected fonts.
+/// The cross-check needs NSimSun to actually render, so the strong assertion is
+/// gated on it being installed (CI has no CJK fonts — see CLAUDE.md, Testing).
 #[test]
 fn issue_cjk_fallback_list_font() {
     use typst::World as _;
@@ -117,29 +119,35 @@ fn issue_cjk_fallback_list_font() {
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(&buf)).unwrap();
     let styles_xml = std::io::read_to_string(archive.by_name("word/styles.xml").unwrap()).unwrap();
 
-    // Font-INDEPENDENT key regression: the never-rendered fallback must never
-    // reach eastAsia, in any form (raw or localized weight name). FAILS before
-    // the fix (eastAsia="Noto Serif SC Light"), PASSES after.
+    // Font-INDEPENDENT: the original bug localized the never-rendered fallback
+    // to its weight name (`eastAsia="Noto Serif SC Light"`). That must never
+    // happen, whatever is installed.
     assert!(
-        !styles_xml.contains("Noto Serif SC"),
-        "the never-rendered CJK fallback must not become the eastAsia body default, got styles: {styles_xml}"
+        !styles_xml.contains("Noto Serif SC Light"),
+        "a never-rendered fallback must not be localized into eastAsia, got styles: {styles_xml}"
     );
 
-    // Font-DEPENDENT: with NSimSun installed it localizes to 新宋体; on CI (no
-    // CJK fonts) the raw declared primary is kept. Both branches assert.
+    // Font-DEPENDENT. With NSimSun installed, geometry sees it render, so the
+    // cross-check keeps it (localized to 新宋体) and the fallback never reaches
+    // eastAsia. Without NSimSun (CI installs no CJK fonts) geometry cannot tell
+    // this list from a Latin/CJK pair, and `apply_body_font_split` documents
+    // the positional fallback: the raw declared second entry.
     if nsimsun_installed {
         assert!(
             styles_xml.contains(r#"w:eastAsia="新宋体""#),
             "NSimSun body default must localize to 新宋体, got styles: {styles_xml}"
         );
+        assert!(
+            !styles_xml.contains("Noto Serif SC"),
+            "rendered NSimSun must win over the never-rendered fallback, got styles: {styles_xml}"
+        );
     } else {
         assert!(
-            styles_xml.contains(r#"w:eastAsia="NSimSun""#),
-            "without NSimSun installed the raw primary is kept; CI skip"
+            styles_xml.contains(r#"w:eastAsia="Noto Serif SC""#)
+                || styles_xml.contains(r#"w:eastAsia="NSimSun""#),
+            "without NSimSun installed eastAsia must be a raw declared name, got styles: {styles_xml}"
         );
-        eprintln!(
-            "note: NSimSun not installed — localized-name assertion skipped (expected on CI)"
-        );
+        eprintln!("note: NSimSun not installed — positional-fallback branch (expected on CI)");
     }
 }
 
