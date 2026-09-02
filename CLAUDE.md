@@ -73,12 +73,16 @@ anyone "simplify" it back to a dual-compilation description. Full detail in
   new positional parameter.
 - **File size:** don't grow files reflexively. The HTML walk is split by
   responsibility under `convert/` (`block`, `inline_walk`, `headings`, `tables`,
-  `lists`, `source`, `smallcaps`, `postprocess`, and `dom`); recovery is split under
-  `convert/recovery/` (`lines`, `deduplication`, `insertion`, `horizontal_rules`,
-  and `table_rules`), with shared walk/recovery text normalisation in
-  `convert/text_norm.rs`. The OOXML writer is split by emitted part under
-  `typort-ooxml/src/writer/`; put a new converter or part writer in its matching
-  module rather than growing the entry module. Tests are already split this way:
+  `lists`, `source`, `smallcaps`, `postprocess`, and `dom`); paged-style
+  extraction is split under `convert/page/` (`units`, `style`, `source_ast`,
+  `hanging_indent`, `reachable`, `sections`, `margin`, `run_style`, and
+  `language`); recovery is split under `convert/recovery/` (`lines`,
+  `deduplication`, `insertion`, `horizontal_rules`, and `table_rules`), with
+  shared walk/recovery text normalisation in `convert/text_norm.rs`; and the
+  OOXML writer is split by emitted part under `typort-ooxml/src/writer/`. Each
+  `mod.rs` is a re-exporting facade. Put a new converter, paged-style
+  responsibility, or writer part in its matching module rather than growing an
+  entry module. Tests are already split this way:
   `crates/typort-cli/tests/integration/` is one file per test area (see the Testing
   section below) — add a new area module rather than growing an existing one.
 
@@ -89,7 +93,7 @@ anyone "simplify" it back to a dual-compilation description. Full detail in
   `math`, `tables`, `structure`, `headings`, `formatting`, `images`, `recovery`,
   `lists`, `footnotes`, `misc`, `bibliography`, `fonts_cjk`, `golden`, and `visual`
   area modules, with fixture conversion shared through `tests/common`.
-- **Any change under `convert/recovery/` or to the `convert/page.rs` heuristics must
+- **Any change under `convert/recovery/` or to the `convert/page/` heuristics must
   ship with a fixture-based regression test** for the specific case — that code is
   the most fragile part of the system (geometry → semantics inference with magic
   thresholds; see ARCHITECTURE.md "fragile seam").

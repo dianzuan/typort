@@ -50,7 +50,7 @@ has no semantic HTML representation:
 - **No styling values.** `<h1>` tells you "heading"; it does *not* tell you the
   font, the exact point size, the RGB color, or the alignment. Those exist only in
   the rendered frames. typort reverse-engineers them from Paged geometry
-  (`convert/page.rs`).
+  (`convert/page/style.rs` and `convert/page/run_style.rs`).
 - **Layout-only constructs vanish.** `#align(center)[...]`, `#place(...)`, some
   `#grid(...)` layouts, and `#line()` rules have no HTML element, so they are
   *absent from the DOM*. typort recovers them by diffing rendered text lines
@@ -79,7 +79,7 @@ footnotes, and cross-references.
 
 Heuristics from geometry are a *fallback*. When the author wrote
 `#set text(font: ("Times New Roman", "SimSun"))`, that declaration is more
-trustworthy than counting glyphs. `convert/page.rs::extract_source_style_overrides`
+trustworthy than counting glyphs. `convert/page/source_ast.rs::extract_source_style_overrides`
 re-parses the main source **and its imports** (template `lib.typ` files often hide
 `set` rules inside functions) and these values override the Paged-derived guesses.
 
@@ -176,7 +176,11 @@ they exercise that public API as integration tests.
 | `convert/smallcaps.rs` | Recovers consumed `smallcaps` calls and aliases from the source AST. |
 | `convert/postprocess.rs` | Paragraph-indent cleanup and document metadata extraction. |
 | `convert/dom.rs` | Shared HTML DOM, tag, attribute, text, location, and alignment helpers. |
-| `convert/page.rs` | Reverse-engineers page settings and styles from Paged geometry; parses AST `set`-rule data (incl. `par(hanging-indent:)`); normalizes math-fallback fonts; strips redundant heading run props. |
+| `convert/page/mod.rs` | Paged-style facade: declares responsibility modules and re-exports their caller-facing API. |
+| `convert/page/units.rs`, `convert/page/style.rs` | Word-unit conversion and document-style detection from rendered frames. |
+| `convert/page/source_ast.rs`, `convert/page/hanging_indent.rs`, `convert/page/reachable.rs` | Authoritative source-AST `set`-rule parsing (including scoped hanging indents) and reachable local-source collection. |
+| `convert/page/sections.rs`, `convert/page/margin.rs` | Section changes, page settings, body/margin zones, headers, footers, and page numbering from Paged geometry. |
+| `convert/page/run_style.rs`, `convert/page/language.rs` | Per-run rendered-style overrides, redundant heading-property suppression, BCP-47 helpers, and localized CJK font names. |
 | `convert/recovery/mod.rs` | Orchestrates recovery of layout-only content HTML dropped and re-exports the recovery passes. |
 | `convert/recovery/lines.rs` | Extracts positioned rendered lines and run/x-cluster data from paged frames. |
 | `convert/recovery/deduplication.rs` | Builds the emitted-text corpus and decides which rendered lines are already represented. |
@@ -267,10 +271,10 @@ geometrically-correct slot. `recovery/horizontal_rules.rs` and
 - **Text normalization matching** across two very different pipelines. The shared
   normalisers in `convert/text_norm.rs` strip CJK spaces, math italics, visual
   markers, whitespace, citation markers, and identify CJK fragments.
-- **Geometry and text thresholds** collected in the documented constants blocks
-  at the top of `convert/page.rs` and the responsible `convert/recovery/*.rs`
-  module. Those blocks are the authoritative tuning references for the paged-style
-  and recovery heuristics.
+- **Geometry and text thresholds** collected as documented constants with their
+  owning responsibility under `convert/page/` and at the top of the responsible
+  `convert/recovery/*.rs` module. Those constants are the authoritative tuning
+  references for the paged-style and recovery heuristics.
 
 These heuristics are individually justified but collectively brittle: both false
 negatives (real content skipped) and false positives (content duplicated) are
