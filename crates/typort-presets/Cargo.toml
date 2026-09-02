@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 serde.workspace = true
 toml.workspace = true
+typort-ooxml.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

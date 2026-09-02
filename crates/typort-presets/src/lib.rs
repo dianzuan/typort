@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 /// A journal preset loaded from a TOML file.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Preset {
-    pub journal: JournalInfo,
+    pub journal: Option<JournalInfo>,
     pub page: Option<PagePreset>,
     pub footnote: Option<FootnotePreset>,
 }
@@ -28,6 +28,34 @@ pub struct PagePreset {
 pub struct FootnotePreset {
     /// "decimal" (1,2,3) or "circled" (①②③)
     pub format: Option<String>,
+}
+
+impl Preset {
+    /// Apply this preset to a converted document.
+    pub fn apply(&self, doc: &mut typort_ooxml::Document) {
+        if let Some(page) = &self.page {
+            if let Some(top) = page.margin_top_cm {
+                doc.page_settings.margin_top = cm_to_twips(top);
+            }
+            if let Some(bottom) = page.margin_bottom_cm {
+                doc.page_settings.margin_bottom = cm_to_twips(bottom);
+            }
+            if let Some(left) = page.margin_left_cm {
+                doc.page_settings.margin_left = cm_to_twips(left);
+            }
+            if let Some(right) = page.margin_right_cm {
+                doc.page_settings.margin_right = cm_to_twips(right);
+            }
+        }
+        if let Some(footnote) = &self.footnote
+            && let Some(format) = &footnote.format
+        {
+            doc.style.footnote_format = match format.as_str() {
+                "circled" => typort_ooxml::FootnoteFormat::CircledNumber,
+                _ => typort_ooxml::FootnoteFormat::Decimal,
+            };
+        }
+    }
 }
 
 /// Convert centimeters to OOXML twips (1 cm = 567 twips).
@@ -53,7 +81,7 @@ pub fn load_preset(presets_dir: &Path, name: &str) -> Result<Preset, String> {
     Ok(preset)
 }
 
-/// Load a preset from the built-in presets directory.
+/// Load a preset by name from the standard preset search path.
 ///
 /// Searches, in order: a `presets/` (or sibling `../presets/`) directory next
 /// to the running executable — so an installed binary finds its presets
@@ -63,7 +91,7 @@ pub fn load_preset(presets_dir: &Path, name: &str) -> Result<Preset, String> {
 ///
 /// # Errors
 /// Returns an error if no preset directory is found or the preset cannot be loaded.
-pub fn load_builtin_preset(name: &str) -> Result<Preset, String> {
+pub fn load_preset_from_search_path(name: &str) -> Result<Preset, String> {
     let mut candidates: Vec<PathBuf> = Vec::new();
 
     // Next to the installed executable (CWD-independent).
@@ -97,9 +125,6 @@ mod tests {
     #[test]
     fn parse_preset_from_toml() {
         let toml_content = r#"
-[journal]
-name = "Example Journal"
-
 [page]
 margin_top_cm = 2.54
 margin_bottom_cm = 2.54
@@ -107,7 +132,7 @@ margin_left_cm = 3.17
 margin_right_cm = 3.17
 "#;
         let preset: Preset = toml::from_str(toml_content).unwrap();
-        assert_eq!(preset.journal.name, "Example Journal");
+        assert!(preset.journal.is_none());
         assert_eq!(preset.page.as_ref().unwrap().margin_top_cm, Some(2.54));
     }
 
@@ -138,7 +163,7 @@ margin_right_cm = 2.5
         .unwrap();
 
         let preset = load_preset(dir.path(), "test_journal").unwrap();
-        assert_eq!(preset.journal.name, "Test Journal");
+        assert_eq!(preset.journal.as_ref().unwrap().name, "Test Journal");
         assert_eq!(preset.page.as_ref().unwrap().margin_top_cm, Some(2.0));
     }
 

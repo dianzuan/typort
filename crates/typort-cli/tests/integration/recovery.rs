@@ -1,15 +1,15 @@
 //! Geometry-recovery heuristic tests (see convert/recovery.rs and convert/page.rs).
 
 use crate::common;
-use crate::common::fixture_doc_xml;
-use std::io::Cursor;
-use std::path::Path;
+use crate::common::{
+    fixture_doc_xml, fixture_document, fixture_package, fixture_package_from_document,
+};
 
 #[test]
 fn long_left_heading_not_misclassified_as_centered() {
     // Regression: a long left-aligned heading whose text spans most of the line
     // has a text-center near the page center and was wrongly marked centered. See
-    // tests/fixtures/edge_long_left_heading.typ.
+    // the `edge_long_left_heading` fixture.
     let doc_xml = fixture_doc_xml("edge_long_left_heading");
     assert!(
         !doc_xml.contains(r#"<w:jc w:val="center"/>"#),
@@ -23,7 +23,7 @@ fn recovery_does_not_inject_citation_or_duplicate_orphans() {
     // prose is broken up by OMML math and superscript citations used to be misjudged
     // as "missing" and prepended at body index 0, injecting citation-number strings
     // and duplicated body sentences as orphans above the abstract. See
-    // tests/fixtures/edge_recovery_no_orphans.typ.
+    // the `edge_recovery_no_orphans` fixture.
     let doc_xml = fixture_doc_xml("edge_recovery_no_orphans");
 
     // Collect each paragraph's plain text (w:t only).
@@ -70,7 +70,7 @@ fn recovery_dedups_heading_with_number_beyond_old_table() {
     // gate skipped the whitespace-cancelled full-text dedup and the numeral table
     // capped at 十五. The fix dedups heading lines against the emitted heading text
     // (which carries the same Typst number), language-agnostically — no numeral
-    // table. See tests/fixtures/edge_recovery_heading_beyond_table.typ.
+    // table. See the `edge_recovery_heading_beyond_table` fixture.
     let doc_xml = fixture_doc_xml("edge_recovery_heading_beyond_table");
 
     // Each paragraph's concatenated w:t text.
@@ -98,7 +98,7 @@ fn recovery_keeps_centered_enumerated_line_not_over_suppressed() {
     // Removing the strip keeps the numeral in the projection, so the distinct
     // centered line survives. The centered line is the only place with the
     // comma-bearing "甲乙丙，丁戊己", so its presence proves it was not deleted.
-    // See tests/fixtures/edge_recovery_enumerated_centered_line.typ.
+    // See the `edge_recovery_enumerated_centered_line` fixture.
     let doc_xml = fixture_doc_xml("edge_recovery_enumerated_centered_line");
     assert!(
         doc_xml.contains("三、甲乙丙"),
@@ -216,15 +216,8 @@ fn complex_paper_has_table_structure() {
 
 #[test]
 fn complex_paper_has_list_numbering() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let package = fixture_package("complex_paper");
+    let doc_xml = package.part_text("word/document.xml");
 
     // Verify w:numPr is present for list items
     assert!(
@@ -241,14 +234,14 @@ fn complex_paper_has_list_numbering() {
     );
 
     // Verify numbering.xml exists
-    let names: Vec<String> = reader.file_names().map(String::from).collect();
+    let names: Vec<&str> = package.part_names().collect();
     assert!(
-        names.iter().any(|n| n == "word/numbering.xml"),
+        names.contains(&"word/numbering.xml"),
         "docx should contain word/numbering.xml, got: {names:?}"
     );
 
     // Verify numbering.xml content
-    let num_xml = std::io::read_to_string(reader.by_name("word/numbering.xml").unwrap()).unwrap();
+    let num_xml = package.part_text("word/numbering.xml");
     assert!(
         num_xml.contains("w:numbering"),
         "numbering.xml should have w:numbering root"
@@ -263,15 +256,14 @@ fn complex_paper_has_list_numbering() {
     );
 
     // Verify content types include numbering
-    let ct_xml = std::io::read_to_string(reader.by_name("[Content_Types].xml").unwrap()).unwrap();
+    let ct_xml = package.part_text("[Content_Types].xml");
     assert!(
         ct_xml.contains("numbering"),
         "content types should reference numbering"
     );
 
     // Verify document rels include numbering relationship
-    let rels_xml =
-        std::io::read_to_string(reader.by_name("word/_rels/document.xml.rels").unwrap()).unwrap();
+    let rels_xml = package.part_text("word/_rels/document.xml.rels");
     assert!(
         rels_xml.contains("numbering"),
         "document rels should reference numbering"
@@ -280,21 +272,15 @@ fn complex_paper_has_list_numbering() {
 
 #[test]
 fn end_to_end_hello_typ_to_docx() {
-    let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/hello.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let names: Vec<&str> = reader.file_names().collect();
+    let package = fixture_package("hello");
+    let names: Vec<&str> = package.part_names().collect();
 
     assert!(names.contains(&"[Content_Types].xml"));
     assert!(names.contains(&"word/document.xml"));
     assert!(names.contains(&"word/styles.xml"));
     assert!(names.contains(&"word/fontTable.xml"));
 
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = package.part_text("word/document.xml");
     assert!(doc_xml.contains("w:document"));
     assert!(doc_xml.contains("Hello"));
     assert!(doc_xml.contains("Heading1"), "should have heading style");
@@ -320,9 +306,7 @@ fn complex_paper_has_semantic_structure() {
 
 #[test]
 fn complex_paper_has_footnotes() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
+    let doc = fixture_document("complex_paper");
 
     // Verify footnotes were detected in the document model
     assert!(!doc.footnotes.is_empty(), "should have detected footnotes");
@@ -346,20 +330,17 @@ fn complex_paper_has_footnotes() {
     );
 
     // Write to docx and verify XML structure
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let package = fixture_package_from_document(&doc);
 
     // Verify footnotes.xml exists in the archive
-    let names: Vec<String> = reader.file_names().map(String::from).collect();
+    let names: Vec<&str> = package.part_names().collect();
     assert!(
-        names.iter().any(|n| n == "word/footnotes.xml"),
+        names.contains(&"word/footnotes.xml"),
         "docx should contain word/footnotes.xml, got: {names:?}"
     );
 
     // Verify document.xml has footnote references
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = package.part_text("word/document.xml");
     assert!(
         doc_xml.contains("w:footnoteReference"),
         "document.xml should contain w:footnoteReference"
@@ -370,7 +351,7 @@ fn complex_paper_has_footnotes() {
     );
 
     // Verify footnotes.xml content
-    let fn_xml = std::io::read_to_string(reader.by_name("word/footnotes.xml").unwrap()).unwrap();
+    let fn_xml = package.part_text("word/footnotes.xml");
     assert!(
         fn_xml.contains("w:footnotes"),
         "footnotes.xml should have w:footnotes root"
@@ -389,15 +370,14 @@ fn complex_paper_has_footnotes() {
     );
 
     // Verify content types include footnotes
-    let ct_xml = std::io::read_to_string(reader.by_name("[Content_Types].xml").unwrap()).unwrap();
+    let ct_xml = package.part_text("[Content_Types].xml");
     assert!(
         ct_xml.contains("footnotes"),
         "content types should reference footnotes"
     );
 
     // Verify document rels include footnotes relationship
-    let rels_xml =
-        std::io::read_to_string(reader.by_name("word/_rels/document.xml.rels").unwrap()).unwrap();
+    let rels_xml = package.part_text("word/_rels/document.xml.rels");
     assert!(
         rels_xml.contains("footnotes"),
         "document rels should reference footnotes"
@@ -408,9 +388,7 @@ fn complex_paper_has_footnotes() {
 fn center_test_recovers_aligned_content() {
     use typort_ooxml::document::Alignment;
 
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/center_test.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
+    let doc = fixture_document("center_test");
 
     // The centered text "张三  李四" should be recovered from PagedDocument
     let has_centered_authors = doc.body.elements.iter().any(|e| {
@@ -430,9 +408,7 @@ fn center_test_recovers_aligned_content() {
 
 #[test]
 fn complex_paper_recovers_author_info() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
+    let doc = fixture_document("complex_paper");
 
     // The author names and institution info from #align(center) should be recovered
     let has_author = doc.body.elements.iter().any(|e| {
@@ -505,9 +481,7 @@ fn grid_multi_column_has_tab_stops() {
 fn grid_document_model_has_tab_inlines() {
     use typort_ooxml::document::{BlockElement, InlineElement};
 
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/grid_test.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
+    let doc = fixture_document("grid_test");
 
     // Find paragraphs with Tab inline elements (multi-column grid lines)
     let has_tab = doc.body.elements.iter().any(|e| {
@@ -541,7 +515,7 @@ fn footnote_and_table_not_recovered_as_body_orphans() {
     // The footnote body must live in the footnote zone, not be scraped into the
     // document body; and no horizontal rule may be invented from the footnote
     // separator or the table's border lines (the source declares no #line()).
-    // See tests/fixtures/edge_footnote_table_no_orphan.typ.
+    // See the `edge_footnote_table_no_orphan` fixture.
     let doc_xml = fixture_doc_xml("edge_footnote_table_no_orphan");
     assert!(
         !doc_xml.contains("must stay in the footnote zone"),
@@ -575,7 +549,7 @@ fn recovered_cluster_join_does_not_double_existing_space() {
     // space — but the second recovered cluster's first run text begins with that
     // literal space (" 200433", carried over from the paged text items), so the
     // joiner's unconditional NBSP doubled it into NBSP+space: a WPS-visible
-    // doubled gap. See tests/fixtures/complex_paper.typ:13.
+    // doubled gap. See the `complex_paper` fixture.
     let doc_xml = fixture_doc_xml("complex_paper");
     let para = common::paragraph_containing(&doc_xml, "200433");
 
@@ -632,5 +606,143 @@ fn small_margin_placed_content_recovered() {
     assert!(
         doc_xml.contains("First page body text."),
         "body text within the configured margin band must stay in the body"
+    );
+}
+
+#[test]
+fn issue_caption_not_duplicated_by_recovery() {
+    // A figure/table caption must appear exactly once: the recovery pass must
+    // not re-insert it as a duplicate paragraph. Guaranteed by semantic text
+    // dedup, not by hardcoded "图 "/"表 " keyword skipping.
+    // CJK captions exercise the very path the old keyword filter special-cased.
+    let xml = fixture_doc_xml("issue_caption_dedup_cjk");
+    for caption in ["一个矩形示意图的标题", "实验数据汇总表"] {
+        let count = xml.matches(caption).count();
+        assert_eq!(
+            count, 1,
+            "caption {caption:?} should appear exactly once, found {count} (recovery duplicate?)"
+        );
+    }
+}
+
+#[test]
+fn issue_rotate_content_recovered() {
+    let xml = fixture_doc_xml("issue_rotate_content");
+    assert!(
+        xml.contains("This text is normal."),
+        "normal text before rotate should be present"
+    );
+    assert!(
+        xml.contains("This text has zero rotation."),
+        "rotated content should be recovered from PagedDocument"
+    );
+    assert!(
+        xml.contains("This text follows rotated content."),
+        "normal text after rotate should be present"
+    );
+}
+
+#[test]
+fn edge_bordered_blocks_text_preserved() {
+    let xml = fixture_doc_xml("edge_bordered_blocks");
+    assert!(
+        xml.contains("full border"),
+        "bordered block text should be present"
+    );
+    assert!(
+        xml.contains("important remark"),
+        "admonition text should be present"
+    );
+    assert!(
+        xml.contains("gray background"),
+        "filled block text should be present"
+    );
+    assert!(
+        xml.contains("Handle with care"),
+        "rect text should be present"
+    );
+    assert!(
+        xml.contains("Outer block content"),
+        "nested outer text should be present"
+    );
+    assert!(
+        xml.contains("Inner nested block"),
+        "nested inner text should be present"
+    );
+}
+
+#[test]
+fn issue_layout_dropped_text_recovered() {
+    let xml = fixture_doc_xml("issue_layout_dropped");
+    assert!(
+        xml.contains("Some text before"),
+        "text before layout should be present"
+    );
+    assert!(
+        xml.contains("Some text after"),
+        "text after layout should be present"
+    );
+}
+
+#[test]
+fn issue_split_paragraph_content() {
+    let xml = fixture_doc_xml("issue_split_paragraph");
+    assert!(
+        xml.contains("following items"),
+        "intro text should be present"
+    );
+    assert!(xml.contains("Item one"), "list item should be present");
+    assert!(
+        xml.contains("Consider the equation"),
+        "equation intro should be present"
+    );
+    assert!(
+        xml.contains("<m:oMathPara>"),
+        "display math should be present"
+    );
+    assert!(
+        xml.contains("normal paragraph"),
+        "trailing text should be present"
+    );
+}
+
+#[test]
+fn issue_place_absolute() {
+    let xml = fixture_doc_xml("issue_place_absolute");
+    assert!(xml.contains("body text"), "body text present");
+    assert!(xml.contains("Final paragraph"), "final paragraph present");
+}
+
+#[test]
+fn issue_show_rule_heading_replace_recovery() {
+    let xml = fixture_doc_xml("issue_show_rule_heading_replace");
+    assert!(xml.contains("First Heading"), "first heading text present");
+    assert!(
+        xml.contains("Second Heading"),
+        "second heading text present"
+    );
+    assert!(xml.contains("Body text"), "body text present");
+}
+
+/// GitHub issue #4: an inline `#context [...]` inside a paragraph used to emit
+/// the paragraph twice — once correct, once with the contextual content
+/// stripped (`X ctx tail.` followed by a stray `X tail.`).
+
+#[test]
+fn issue_inline_context_no_duplicate_paragraph() {
+    let xml = fixture_doc_xml("issue_inline_context");
+    let texts: Vec<String> = crate::common::paragraph_texts(&xml)
+        .into_iter()
+        .filter(|t| !t.trim().is_empty())
+        .collect();
+    assert_eq!(
+        texts,
+        [
+            "X ctx tail.",
+            "Q 1 first.",
+            "Q 2 second.",
+            "block-level ctx",
+        ],
+        "each inline-context paragraph must appear exactly once, with its context content"
     );
 }

@@ -81,7 +81,10 @@ anyone "simplify" it back to a dual-compilation description. Full detail in
 ## Testing
 
 - Tests are **fixture-driven**: a `.typ` file under `tests/fixtures/` is converted
-  and asserted on. Add a fixture for new features.
+  and asserted on. Add a fixture for new features. Integration tests are split into
+  `math`, `tables`, `structure`, `headings`, `formatting`, `images`, `recovery`,
+  `lists`, `footnotes`, `misc`, `bibliography`, `fonts_cjk`, `golden`, and `visual`
+  area modules, with fixture conversion shared through `tests/common`.
 - **Any change to `convert/recovery.rs` or the `convert/page.rs` heuristics must
   ship with a fixture-based regression test** for the specific case — that code is
   the most fragile part of the system (geometry → semantics inference with magic

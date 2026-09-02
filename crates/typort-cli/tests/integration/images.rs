@@ -1,29 +1,21 @@
 //! Image embedding and figure-caption tests.
 
 use crate::common;
-use crate::common::fixture_doc_xml;
-use std::io::Cursor;
-use std::path::Path;
+use crate::common::{fixture_doc_xml, fixture_document, fixture_package};
 
 #[test]
 fn image_embeds_in_docx() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/image_test.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let package = fixture_package("image_test");
 
     // Check image file exists in ZIP
-    let names: Vec<String> = reader.file_names().map(String::from).collect();
+    let names: Vec<&str> = package.part_names().collect();
     assert!(
         names.iter().any(|n| n.starts_with("word/media/image")),
         "should have image in word/media/, got: {names:?}"
     );
 
     // Check document.xml has drawing element
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = package.part_text("word/document.xml");
     assert!(
         doc_xml.contains("w:drawing"),
         "should have w:drawing element"
@@ -35,7 +27,7 @@ fn image_embeds_in_docx() {
     assert!(doc_xml.contains("a:blip"), "should have a:blip element");
 
     // Check content types include image
-    let ct_xml = std::io::read_to_string(reader.by_name("[Content_Types].xml").unwrap()).unwrap();
+    let ct_xml = package.part_text("[Content_Types].xml");
     assert!(
         ct_xml.contains("image/png"),
         "content types should include image/png"
@@ -79,17 +71,10 @@ fn image_inside_rounded_container_embedded() {
 
 #[test]
 fn image_has_relationships_in_rels() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/image_test.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let package = fixture_package("image_test");
 
     // Check document rels include image relationship
-    let rels_xml =
-        std::io::read_to_string(reader.by_name("word/_rels/document.xml.rels").unwrap()).unwrap();
+    let rels_xml = package.part_text("word/_rels/document.xml.rels");
     assert!(
         rels_xml.contains("relationships/image"),
         "document rels should include image relationship"
@@ -104,9 +89,7 @@ fn image_has_relationships_in_rels() {
 fn image_document_model_has_image_inline() {
     use typort_ooxml::document::{BlockElement, InlineElement};
 
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/image_test.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
+    let doc = fixture_document("image_test");
 
     // Find paragraphs with Image inlines
     let has_image = doc.body.elements.iter().any(|e| {
@@ -128,9 +111,7 @@ fn image_document_model_has_image_inline() {
 fn image_has_nonzero_emu_dimensions() {
     use typort_ooxml::document::{BlockElement, InlineElement};
 
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/image_test.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
+    let doc = fixture_document("image_test");
 
     for e in &doc.body.elements {
         if let BlockElement::Paragraph(p) = e {
@@ -147,23 +128,17 @@ fn image_has_nonzero_emu_dimensions() {
 
 #[test]
 fn svg_image_rasterized_and_embedded() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/svg_test.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let package = fixture_package("svg_test");
 
     // Check image file exists in ZIP
-    let names: Vec<String> = reader.file_names().map(String::from).collect();
+    let names: Vec<&str> = package.part_names().collect();
     assert!(
         names.iter().any(|n| n.starts_with("word/media/image")),
         "SVG should be rasterized to PNG and embedded in word/media/, got: {names:?}"
     );
 
     // Check document.xml has drawing element
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = package.part_text("word/document.xml");
     assert!(
         doc_xml.contains("w:drawing"),
         "SVG image should produce w:drawing element"
@@ -178,9 +153,7 @@ fn svg_image_rasterized_and_embedded() {
 fn svg_image_has_nonzero_dimensions() {
     use typort_ooxml::document::{BlockElement, InlineElement};
 
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/svg_test.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
+    let doc = fixture_document("svg_test");
 
     let mut found = false;
     for e in &doc.body.elements {
@@ -270,16 +243,8 @@ fn mixed_image_formats_stay_aligned() {
     // A GIF (unsupported raster) between two SVGs must not desync the image FIFO:
     // dropping it used to shift every later image onto the wrong caption. Re-encoding
     // it to PNG keeps all three figures' images. See edge_image_format_mix.typ.
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/edge_image_format_mix.typ"))
-            .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let names: Vec<String> = (0..reader.len())
-        .map(|i| reader.by_index(i).unwrap().name().to_string())
-        .collect();
+    let package = fixture_package("edge_image_format_mix");
+    let names: Vec<&str> = package.part_names().collect();
     let media = names
         .iter()
         .filter(|n| n.starts_with("word/media/"))
@@ -288,4 +253,171 @@ fn mixed_image_formats_stay_aligned() {
         media, 3,
         "all three figure images must be embedded (the GIF re-encoded), got {media}: {names:?}"
     );
+}
+
+#[test]
+fn issue_figure_caption_present() {
+    let xml = fixture_doc_xml("issue_figure_caption");
+    assert!(
+        xml.contains("Demographics of participants"),
+        "first figure caption text should be present"
+    );
+    assert!(
+        xml.contains("Fruit prices at the market"),
+        "second figure caption text should be present"
+    );
+    assert!(
+        xml.contains("Table") && xml.contains("1"),
+        "caption should include 'Table 1' numbering"
+    );
+}
+
+#[test]
+fn issue_show_caption_inplace_keeps_document_order() {
+    // A custom `show figure.caption: it => [...]` rule makes Typst HTML export emit
+    // each caption as a nested inline `caption` Tag inside the figure body `<p>`
+    // (not a `<figcaption>` element). Without a "caption" arm in handle_inline_tag,
+    // the captions were find_tag_end-skipped, then re-scraped from Paged geometry by
+    // recovery and hoisted/merged to the top — torn from their figures and out of
+    // order. The "caption" arm emits each caption as its own block in document order.
+    let xml = fixture_doc_xml("issue_show_caption_inplace");
+
+    // Document-order positions of the body prose and the two captions. `str::find`
+    // returns the byte offset of the first occurrence, i.e. document order in the XML.
+    let before = xml
+        .find("must remain first")
+        .expect("intro body paragraph present");
+    let alpha = xml
+        .find("Caption alpha one")
+        .expect("first caption text present");
+    let between = xml
+        .find("must keep its slot")
+        .expect("inter-figure body paragraph present");
+    let beta = xml
+        .find("Caption beta two")
+        .expect("second caption text present");
+    let after = xml
+        .find("near the end")
+        .expect("trailing body paragraph present");
+
+    // Captions must stay interleaved with their surrounding prose, not hoisted.
+    assert!(
+        before < alpha && alpha < between,
+        "first caption must sit between the intro and the inter-figure paragraph \
+         (before={before}, alpha={alpha}, between={between})"
+    );
+    assert!(
+        between < beta && beta < after,
+        "second caption must sit between the inter-figure and trailing paragraph \
+         (between={between}, beta={beta}, after={after})"
+    );
+
+    // And recovery must not duplicate the now-in-place captions.
+    assert_eq!(
+        xml.matches("Caption alpha one").count(),
+        1,
+        "first caption should appear exactly once (recovery duplicate?)"
+    );
+    assert_eq!(
+        xml.matches("Caption beta two").count(),
+        1,
+        "second caption should appear exactly once (recovery duplicate?)"
+    );
+}
+
+#[test]
+fn edge_figure_placement_tables_and_refs() {
+    let xml = fixture_doc_xml("edge_figure_placement");
+    assert!(
+        xml.contains("Performance comparison"),
+        "first figure caption should be present"
+    );
+    assert!(
+        xml.contains("Hyperparameters"),
+        "second figure caption should be present"
+    );
+    assert!(
+        xml.contains("<w:tbl>"),
+        "tables in figures should be present"
+    );
+    assert!(xml.contains("Heading1"), "heading styles should be present");
+}
+
+#[test]
+fn edge_subfigures_content() {
+    let xml = fixture_doc_xml("edge_subfigures");
+    assert!(
+        xml.contains("Subfigure placeholder"),
+        "subfigure placeholders should be present"
+    );
+    assert!(
+        xml.contains("Comparison of two methods"),
+        "main figure caption should be present"
+    );
+    assert!(
+        xml.contains("training data"),
+        "side-by-side table caption should be present"
+    );
+}
+
+#[test]
+fn issue_table_figure_caption_text() {
+    let xml = fixture_doc_xml("issue_table_figure_caption");
+    assert!(
+        xml.contains("First table with a caption"),
+        "first caption should be present"
+    );
+    assert!(
+        xml.contains("Second table with a caption"),
+        "second caption should be present"
+    );
+    assert!(xml.contains("<w:tbl>"), "tables should be present");
+}
+
+#[test]
+fn issue_list_of_figures_toc() {
+    let xml = fixture_doc_xml("issue_list_of_figures");
+    assert!(xml.contains("TOC"), "TOC field code should be present");
+    assert!(xml.contains("Introduction"), "heading should be present");
+    assert!(
+        xml.contains("blue rectangle"),
+        "figure caption should be present"
+    );
+    assert!(
+        xml.contains("simple table"),
+        "table caption should be present"
+    );
+}
+
+#[test]
+fn issue_figure_counter_reset_tables() {
+    let xml = fixture_doc_xml("issue_figure_counter_reset");
+    assert!(
+        xml.contains("First table"),
+        "first caption should be present"
+    );
+    assert!(
+        xml.contains("Table after reset"),
+        "reset caption should be present"
+    );
+    let table_count = xml.matches("<w:tbl>").count();
+    assert!(
+        table_count >= 2,
+        "should have at least 2 tables, got {table_count}"
+    );
+}
+
+#[test]
+fn issue_caption_prefix_custom_supplement() {
+    let xml = fixture_doc_xml("issue_caption_prefix_custom");
+    assert!(
+        xml.contains("Sample data"),
+        "first caption should be present"
+    );
+    assert!(
+        xml.contains("A diagram"),
+        "second caption should be present"
+    );
+    assert!(xml.contains("表"), "Chinese supplement should be present");
+    assert!(xml.contains("Fig."), "custom supplement should be present");
 }
