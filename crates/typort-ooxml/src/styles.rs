@@ -2,7 +2,7 @@ use quick_xml::Writer;
 use std::io::{self, Write};
 
 use crate::document::DocumentStyle;
-use crate::writer::{
+use crate::writer::package::{
     two_em_hanging_twips, write_font_triple, write_indentation, write_language_pair,
     write_size_pair,
 };

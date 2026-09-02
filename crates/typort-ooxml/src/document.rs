@@ -299,7 +299,7 @@ impl Run {
 
 /// The complete set of `Run` fields the writer serializes into `<w:rPr>`.
 ///
-/// Single source of truth shared by `writer::write_run` (has-rPr gate via
+/// Single source of truth shared by `writer::run::write_run` (has-rPr gate via
 /// `is_plain`) and run coalescing (merge-eligibility via `PartialEq`).
 /// Adding a styled field to `Run`? Add it HERE and to `format_key()`'s
 /// exhaustive destructure — the compiler will enforce this at `format_key()`

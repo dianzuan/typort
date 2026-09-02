@@ -111,7 +111,8 @@ fn coalesce_run_vec(runs: &mut Vec<Run>) {
 /// turns into `<w:rPr>` matches. `text` and the non-serialized `span` are
 /// deliberately ignored (the surviving run keeps the first run's span).
 ///
-/// Delegates to the canonical [`RunFormat`] struct shared with `typort_ooxml::writer::write_run`;
+/// Delegates to the canonical [`RunFormat`] struct shared with
+/// `typort_ooxml::writer::run::write_run`;
 /// if a new styled field is added, add it to `RunFormat` and both sites follow.
 ///
 /// A line-break run never merges with anything: the writer emits one `<w:br/>`

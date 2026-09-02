@@ -149,6 +149,22 @@ crates/
   typort-presets/  Journal/style preset loading
 ```
 
+`typort-ooxml/src/lib.rs` is the crate's public API index: it contains only module
+declarations and re-exports. Its writer tests live in `typort-ooxml/tests/`, where
+they exercise that public API as integration tests.
+
+### typort-ooxml writer internals
+
+| File | Responsibility |
+|------|----------------|
+| `writer/mod.rs` | Package entry point (`write_docx`), write context, and inventory of optional parts/relationships. |
+| `writer/package.rs` | ZIP/package plumbing, content types, relationships, settings, core properties, and shared XML helpers. |
+| `writer/document.rs` | Main document body and section properties. |
+| `writer/paragraph.rs`, `writer/run.rs`, `writer/table.rs` | WordprocessingML paragraphs, inline runs, and tables. |
+| `writer/numbering.rs`, `writer/footnotes.rs`, `writer/fields.rs` | Numbering definitions, footnote parts/references, and Word fields/bookmarks. |
+| `writer/math.rs`, `writer/image.rs`, `writer/citation.rs` | OMML passthrough, DrawingML images/media inventory, and citation/bibliography XML. |
+| `writer/header_footer.rs` | Header and footer parts, including automatic page numbering. |
+
 ### typort-core internals
 
 | File | Responsibility |
@@ -192,9 +208,10 @@ spacing/indent) so the writer does minimal conversion.
 `typort-ooxml::writer` emits the `.docx` XML parts directly via `quick-xml` — **no
 `docx-rs`, no intermediate format**. This is a deliberate choice: Word is strict
 about WML child-element ordering (`rPr`/`pPr` children must appear in schema
-order), and direct emission gives full control. The writer produces all parts
-(`document.xml`, `styles.xml`, `numbering.xml`, `settings.xml`, relationships,
-content-types, headers/footers, footnotes, media) and zips them.
+order), and direct emission gives full control. Its root owns package orchestration
+and shared write state; part-specific modules emit `document.xml`, `styles.xml`,
+`numbering.xml`, `settings.xml`, relationships, content types, headers/footers,
+footnotes, citations, math, and media before the entry point zips them.
 
 ## Math → OMML
 
