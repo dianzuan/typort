@@ -26,13 +26,16 @@ use typort_ooxml::document::{
 };
 
 use typst::comemo::Track;
-use typst::foundations::{Smart, StyleChain};
+use typst::foundations::{Content, NativeElement, Packed, Selector, Smart, StyleChain};
 use typst::introspection::{Introspector, Location, Tag};
 use typst::model::Numbering;
 use typst_html::{HtmlDocument, HtmlElement, HtmlNode};
 use typst_layout::PagedDocument;
 use typst_library::math::EquationElem;
-use typst_library::model::{CiteElem, CiteGroup, HeadingElem, OutlineElem, RefElem, TableElem};
+use typst_library::model::{
+    CiteElem, CiteGroup, EmphElem, HeadingElem, LinkElem, OutlineElem, RefElem, StrongElem,
+    TableElem,
+};
 use typst_library::text::{Lang, Region, SmartQuoteElem, SmartQuoter, SmartQuotes};
 
 /// Tracks equation numbering state across the document.
@@ -78,6 +81,18 @@ struct WalkCtx<'a> {
     bib_keys: &'a HashSet<String>,
 }
 
+impl WalkCtx<'_> {
+    /// Add a labelled bookmark once, allocating its document-wide id here.
+    fn add_bookmark(&mut self, para: &mut Paragraph, label: String) -> bool {
+        if self.bookmarks.insert(label.clone()) {
+            para.add_bookmark(self.doc.next_bookmark_id(), label);
+            true
+        } else {
+            false
+        }
+    }
+}
+
 use crate::world::TyportWorld;
 
 /// Rowspan metadata for a single cell: `(html_cell_index, rowspan, colspan)`.
@@ -87,6 +102,37 @@ type CellSpanInfo = (usize, u32, u32);
 type RawTableRow = (TableRow, Vec<CellSpanInfo>);
 
 use fmt::InlineFmt;
+
+/// Query the semantic content attached to an introspection location.
+fn content_at_location(html_doc: &HtmlDocument, location: Location) -> Option<Content> {
+    html_doc
+        .introspector()
+        .query_first(&Selector::Location(location))
+}
+
+/// Query and downcast the semantic element attached to an introspection location.
+fn element_at_location<E: NativeElement>(
+    html_doc: &HtmlDocument,
+    location: Location,
+) -> Option<Packed<E>> {
+    content_at_location(html_doc, location).and_then(|content| content.into_packed::<E>().ok())
+}
+
+/// Construct a text run and retain a source span when one is attached.
+fn run_with_span(text: &str, span: typst_syntax::Span) -> Run {
+    let mut run = Run::new(text);
+    if !span.is_detached() {
+        run.span = Some(span);
+    }
+    run
+}
+
+/// Whether an introspected equation is block-level.
+fn is_block_equation(content: &Content) -> bool {
+    content
+        .to_packed::<EquationElem>()
+        .is_some_and(|equation| *equation.block.as_option().as_ref().unwrap_or(&false))
+}
 
 /// Convert a Typst source file to an OOXML `Document` using the tag-walker approach.
 ///
@@ -521,152 +567,13 @@ fn apply_language_override(ovr: &page::SourceStyleOverrides, doc: &mut Document)
 }
 
 /// Recursively walk `HtmlNode` children, dispatching on `Tag::Start` element types.
-#[allow(clippy::too_many_lines)]
 fn walk_tags(children: &[HtmlNode], ctx: &mut WalkCtx) {
-    let html = ctx.html_doc;
     let mut i = 0;
     while i < children.len() {
         match &children[i] {
             HtmlNode::Tag(tag) => {
                 if let Tag::Start(content, _) = tag {
-                    let elem_name = content.elem().name();
-                    match elem_name {
-                        "heading" => {
-                            handle_heading(tag, ctx);
-                            // Track chapter changes for equation numbering
-                            if let Some(c) = html
-                                .introspector()
-                                .query_first(&typst::foundations::Selector::Location(
-                                    tag.location(),
-                                ))
-                                .and_then(|c| c.to_packed::<HeadingElem>().cloned())
-                            {
-                                let level = c.resolve_level(StyleChain::default()).get();
-                                if level == 1 {
-                                    ctx.eq_state.chapter += 1;
-                                    ctx.eq_state.eq_in_chapter = 0;
-                                }
-                            }
-                            // Skip past the heading's inner HTML elements to the matching End tag
-                            let end = find_tag_end(children, i, tag.location());
-                            i = end;
-                        }
-                        "par" => {
-                            // Merge subsequent inline equations + par fragments
-                            // into a single Word paragraph.
-                            i = handle_par_with_inline_equations(children, i, ctx);
-                        }
-                        "equation" => {
-                            handle_equation(tag, ctx);
-                            let end = find_tag_end(children, i, tag.location());
-                            i = end;
-                        }
-                        "footnote" => {
-                            handle_block_footnote(&children[i..], ctx.doc);
-                            let end = find_tag_end(children, i, tag.location());
-                            i = end;
-                        }
-                        "table" => {
-                            let end = find_tag_end(children, i, tag.location());
-                            handle_table(&children[i..=end], Some(tag.location()), ctx);
-                            i = end;
-                        }
-                        "list" => {
-                            let end = find_tag_end(children, i, tag.location());
-                            handle_list(&children[i..=end], false, ctx);
-                            i = end;
-                        }
-                        "enum" => {
-                            let end = find_tag_end(children, i, tag.location());
-                            handle_list(&children[i..=end], true, ctx);
-                            i = end;
-                        }
-                        "image" => {
-                            // The <img> element inside this tag range carries the
-                            // image's own bytes in its src data-URL — decode them
-                            // directly; the paged frames only supply display size.
-                            let end = find_tag_end(children, i, tag.location());
-                            if let Some(src) = find_img_src(&children[i..=end])
-                                && let Some(img_data) =
-                                    image::image_data_from_src(&src, ctx.image_sizes)
-                            {
-                                let mut para = Paragraph::new();
-                                para.add_image(img_data);
-                                ctx.doc.add_paragraph(para);
-                            }
-                            i = end;
-                        }
-                        "figure" | "section" => {
-                            // Recurse into inner children between Start and End
-                            let end = find_tag_end(children, i, tag.location());
-                            // Skip doc-endnotes sections
-                            if elem_name == "section" && is_doc_endnotes_section(&children[i..=end])
-                            {
-                                i = end;
-                                i += 1;
-                                continue;
-                            }
-                            // For figures, insert a bookmark if the content has a label
-                            if elem_name == "figure"
-                                && let Some(label) = content.label()
-                            {
-                                let label_str = format!("{}", label.resolve());
-                                if !ctx.bookmarks.contains(&label_str) {
-                                    ctx.bookmarks.insert(label_str.clone());
-                                    let bk_id = ctx.doc.next_bookmark_id();
-                                    let mut bk_para = Paragraph::new();
-                                    bk_para.add_bookmark(bk_id, label_str);
-                                    ctx.doc.add_paragraph(bk_para);
-                                }
-                            }
-                            let inner = &children[i + 1..end];
-                            // A vector-drawing body (#place'd curves, CeTZ) is
-                            // dropped from the HTML export entirely — its raster
-                            // was extracted from the paged frames, keyed by THIS
-                            // figure's location, so a quote/listing figure can
-                            // never steal another figure's canvas. Everything
-                            // else (tables, images, captions) walks normally.
-                            if elem_name == "figure"
-                                && !subtree_has_element(inner, "table")
-                                && !subtree_has_element(inner, "image")
-                                && let Some(img) = ctx.figure_rasters.remove(&tag.location())
-                            {
-                                let mut para = Paragraph::new();
-                                para.alignment = Some(Alignment::Center);
-                                para.add_image(img);
-                                ctx.doc.add_paragraph(para);
-                                emit_figure_caption(inner, ctx);
-                            } else {
-                                walk_tags(inner, ctx);
-                            }
-                            i = end;
-                        }
-                        "outline" => {
-                            let depth: u8 = html
-                                .introspector()
-                                .query_first(&typst::foundations::Selector::Location(
-                                    tag.location(),
-                                ))
-                                .and_then(|c| c.to_packed::<OutlineElem>().cloned())
-                                .and_then(|o| *o.depth.as_option())
-                                .flatten()
-                                .map_or(3, |d| u8::try_from(d.get()).unwrap_or(3));
-                            let mut para = Paragraph::new();
-                            para.add_toc(depth);
-                            ctx.doc.add_paragraph(para);
-                            let end = find_tag_end(children, i, tag.location());
-                            i = end;
-                        }
-                        // NOTE: no "pagebreak"/"colbreak" arms — in typst 0.15
-                        // both elements carry a plain `#[elem]` (no Location),
-                        // so their Tags can never appear here; explicit breaks
-                        // are recovered from the source AST (`breaks.rs`). An
-                        // arm here would double-insert if that ever changed.
-                        //
-                        // Inline elements handled within par/collect_par_inlines,
-                        // or should be skipped at block level. Also skip unknown tags.
-                        _ => {}
-                    }
+                    i = handle_block_tag(children, i, tag, content, ctx);
                 }
                 // Tag::End is consumed implicitly
             }
@@ -678,11 +585,7 @@ fn walk_tags(children: &[HtmlNode], ctx: &mut WalkCtx) {
                 let trimmed = text.as_str().trim();
                 if !trimmed.is_empty() {
                     let mut para = Paragraph::new();
-                    let mut run = Run::new(trimmed);
-                    if !span.is_detached() {
-                        run.span = Some(*span);
-                    }
-                    para.push_run(run);
+                    para.push_run(run_with_span(trimmed, *span));
                     ctx.doc.add_paragraph(para);
                 }
             }
@@ -702,19 +605,157 @@ fn walk_tags(children: &[HtmlNode], ctx: &mut WalkCtx) {
     }
 }
 
-/// The `src` attribute of the first `<img>` element within a node range.
-fn find_img_src(children: &[HtmlNode]) -> Option<String> {
-    for node in children {
-        if let HtmlNode::Element(el) = node {
-            if tag_name(el) == "img" {
-                return get_attr_value(el, "src");
+/// Dispatch one block-level Typst tag and return the last consumed node index.
+fn handle_block_tag(
+    children: &[HtmlNode],
+    i: usize,
+    tag: &Tag,
+    content: &Content,
+    ctx: &mut WalkCtx,
+) -> usize {
+    match content.elem().name() {
+        "heading" => {
+            if handle_heading(tag, ctx) == Some(1) {
+                ctx.eq_state.chapter += 1;
+                ctx.eq_state.eq_in_chapter = 0;
             }
-            if let Some(src) = find_img_src(&el.children) {
-                return Some(src);
+            find_tag_end(children, i, tag.location())
+        }
+        "par" => handle_par_with_inline_equations(children, i, ctx),
+        "equation" => {
+            handle_equation(tag, ctx);
+            find_tag_end(children, i, tag.location())
+        }
+        "footnote" => {
+            handle_block_footnote(&children[i..], ctx.doc);
+            find_tag_end(children, i, tag.location())
+        }
+        "table" => handle_table_tag(children, i, tag.location(), ctx),
+        "list" => handle_list_tag(children, i, tag.location(), false, ctx),
+        "enum" => handle_list_tag(children, i, tag.location(), true, ctx),
+        "image" => handle_block_image(children, i, tag.location(), ctx),
+        "figure" | "section" => handle_figure_or_section(children, i, tag, content, ctx),
+        "outline" => handle_outline(children, i, tag.location(), ctx),
+        // NOTE: no "pagebreak"/"colbreak" arms — in typst 0.15 both elements
+        // carry a plain `#[elem]` (no Location), so explicit breaks are recovered
+        // from the source AST (`breaks.rs`). Inline and unknown tags are skipped.
+        _ => i,
+    }
+}
+
+fn handle_table_tag(
+    children: &[HtmlNode],
+    i: usize,
+    location: Location,
+    ctx: &mut WalkCtx,
+) -> usize {
+    let end = find_tag_end(children, i, location);
+    handle_table(&children[i..=end], Some(location), ctx);
+    end
+}
+
+fn handle_list_tag(
+    children: &[HtmlNode],
+    i: usize,
+    location: Location,
+    ordered: bool,
+    ctx: &mut WalkCtx,
+) -> usize {
+    let end = find_tag_end(children, i, location);
+    handle_list(&children[i..=end], ordered, ctx);
+    end
+}
+
+fn handle_block_image(
+    children: &[HtmlNode],
+    i: usize,
+    location: Location,
+    ctx: &mut WalkCtx,
+) -> usize {
+    let end = find_tag_end(children, i, location);
+    if let Some(src) = find_img_src(&children[i..=end])
+        && let Some(img_data) = image::image_data_from_src(&src, ctx.image_sizes)
+    {
+        let mut para = Paragraph::new();
+        para.add_image(img_data);
+        ctx.doc.add_paragraph(para);
+    }
+    end
+}
+
+fn handle_figure_or_section(
+    children: &[HtmlNode],
+    i: usize,
+    tag: &Tag,
+    content: &Content,
+    ctx: &mut WalkCtx,
+) -> usize {
+    let location = tag.location();
+    let end = find_tag_end(children, i, location);
+    let is_figure = content.elem().name() == "figure";
+    if !is_figure && is_doc_endnotes_section(&children[i..=end]) {
+        return end;
+    }
+
+    if is_figure && let Some(label) = content.label() {
+        let mut para = Paragraph::new();
+        if ctx.add_bookmark(&mut para, label.resolve().to_string()) {
+            ctx.doc.add_paragraph(para);
+        }
+    }
+
+    let inner = &children[i + 1..end];
+    // A vector-drawing body (#place'd curves, CeTZ) is dropped from the HTML
+    // export entirely. Its raster is keyed by this figure's location.
+    if is_figure
+        && !subtree_has_element(inner, "table")
+        && !subtree_has_element(inner, "image")
+        && let Some(img) = ctx.figure_rasters.remove(&location)
+    {
+        let mut para = Paragraph::new();
+        para.alignment = Some(Alignment::Center);
+        para.add_image(img);
+        ctx.doc.add_paragraph(para);
+        emit_figure_caption(inner, ctx);
+    } else {
+        walk_tags(inner, ctx);
+    }
+    end
+}
+
+fn handle_outline(children: &[HtmlNode], i: usize, location: Location, ctx: &mut WalkCtx) -> usize {
+    let depth = element_at_location::<OutlineElem>(ctx.html_doc, location)
+        .and_then(|outline| *outline.depth.as_option())
+        .flatten()
+        .map_or(3, |depth| u8::try_from(depth.get()).unwrap_or(3));
+    let mut para = Paragraph::new();
+    para.add_toc(depth);
+    ctx.doc.add_paragraph(para);
+    find_tag_end(children, i, location)
+}
+
+/// Find the first nested HTML element matching `predicate`, in document order.
+fn find_first_element<'a, F>(nodes: &'a [HtmlNode], predicate: &F) -> Option<&'a HtmlElement>
+where
+    F: Fn(&HtmlElement) -> bool,
+{
+    for node in nodes {
+        if let HtmlNode::Element(element) = node {
+            if predicate(element) {
+                return Some(element);
+            }
+            if let Some(found) = find_first_element(&element.children, predicate) {
+                return Some(found);
             }
         }
     }
     None
+}
+
+/// The `src` attribute of the first `<img>` element within a node range.
+fn find_img_src(children: &[HtmlNode]) -> Option<String> {
+    find_first_element(children, &|element| tag_name(element) == "img")
+        .and_then(|element| get_attr_value(element, "src"))
 }
 
 /// Whether every direct child of `nodes` is inline-level content (text, an inline
@@ -814,7 +855,12 @@ fn handle_html_element(elem: &HtmlElement, ctx: &mut WalkCtx) {
             // Collect all figcaption content into a single paragraph
             let mut para = Paragraph::new();
             para.alignment = Some(Alignment::Center);
-            collect_html_inlines(&elem.children, &mut para, InlineFmt::default());
+            collect_inlines(
+                &elem.children,
+                &mut para,
+                None,
+                InlineOptions::generic(InlineFmt::default(), None),
+            );
             if !para.inlines.is_empty() {
                 ctx.doc.add_paragraph(para);
             }
@@ -926,27 +972,22 @@ fn emit_inline_equation_paragraph(
 ) {
     let mut para = Paragraph::new();
     para.alignment = alignment;
-    collect_html_inlines_with_doc(&elem.children, &mut para, fmt, Some(ctx.html_doc));
+    collect_inlines(
+        &elem.children,
+        &mut para,
+        None,
+        InlineOptions::generic(fmt, Some(ctx.html_doc)),
+    );
     if !para.inlines.is_empty() {
         ctx.doc.add_paragraph(para);
     }
 }
 
 /// Handle a `HeadingElem` tag: query the introspector for the full Content,
-/// extract level + body runs, and emit a heading paragraph.
-fn handle_heading(tag: &Tag, ctx: &mut WalkCtx) {
-    let html = ctx.html_doc;
-    let loc = tag.location();
-    let Some(content) = html
-        .introspector()
-        .query_first(&typst::foundations::Selector::Location(loc))
-    else {
-        return;
-    };
-
-    let Some(heading) = content.to_packed::<HeadingElem>() else {
-        return;
-    };
+/// extract level + body runs, emit a heading paragraph, and return its level.
+fn handle_heading(tag: &Tag, ctx: &mut WalkCtx) -> Option<usize> {
+    let content = content_at_location(ctx.html_doc, tag.location())?;
+    let heading = content.to_packed::<HeadingElem>()?;
 
     let level = heading.resolve_level(StyleChain::default()).get();
     #[allow(clippy::cast_possible_truncation)]
@@ -957,12 +998,7 @@ fn handle_heading(tag: &Tag, ctx: &mut WalkCtx) {
 
     // Insert bookmark if heading has a label
     if let Some(label) = content.label() {
-        let label_str = format!("{}", label.resolve());
-        if !ctx.bookmarks.contains(&label_str) {
-            ctx.bookmarks.insert(label_str.clone());
-            let bk_id = ctx.doc.next_bookmark_id();
-            para.add_bookmark(bk_id, label_str);
-        }
+        ctx.add_bookmark(&mut para, label.resolve().to_string());
     }
 
     // Prepend the synthesized heading number ("一、", "(三)", "1.1", …). Typst's
@@ -994,6 +1030,7 @@ fn handle_heading(tag: &Tag, ctx: &mut WalkCtx) {
         &mut prev_char,
     );
     ctx.doc.add_paragraph(para);
+    Some(level)
 }
 
 /// Derive the smart-quote language/region from the document's declared language.
@@ -1047,7 +1084,7 @@ fn handle_par(slice: &[HtmlNode], ctx: &mut WalkCtx) {
     let mut para = Paragraph::new();
     // Skip the first Tag::Start("par") and collect inlines from the inner nodes
     let inner = &slice[1..slice.len().saturating_sub(1)];
-    collect_par_inlines(inner, ctx, &mut para);
+    collect_inlines(inner, &mut para, Some(ctx), InlineOptions::paragraph());
     if !para.inlines.is_empty() {
         strip_cjk_spaces(&mut para);
         ctx.doc.add_paragraph(para);
@@ -1086,7 +1123,7 @@ fn handle_par_with_inline_equations(
 
     // Collect inlines from the first par fragment
     let inner = &children[par_start + 1..par_end];
-    collect_par_inlines(inner, ctx, &mut para);
+    collect_inlines(inner, &mut para, Some(ctx), InlineOptions::paragraph());
 
     // The pattern is strictly: equation -> par -> equation -> par -> ...
     // After each inline equation, we expect a continuation par.
@@ -1100,10 +1137,7 @@ fn handle_par_with_inline_equations(
         }
         if let HtmlNode::Tag(eq_tag) = &children[cursor] {
             let loc = eq_tag.location();
-            if let Some(c) = html
-                .introspector()
-                .query_first(&typst::foundations::Selector::Location(loc))
-            {
+            if let Some(c) = content_at_location(html, loc) {
                 para.push_run(Run::new(" "));
                 let omml = typort_math::equation_to_omml(&c);
                 para.add_math(omml);
@@ -1121,7 +1155,7 @@ fn handle_par_with_inline_equations(
             let p_end = find_tag_end(children, cursor, pt.location());
             let p_inner = &children[cursor + 1..p_end];
             para.push_run(Run::new(" "));
-            collect_par_inlines(p_inner, ctx, &mut para);
+            collect_inlines(p_inner, &mut para, Some(ctx), InlineOptions::paragraph());
             cursor = p_end + 1;
         } else {
             break;
@@ -1218,17 +1252,10 @@ fn is_inline_equation_at(children: &[HtmlNode], idx: usize, html_doc: &HtmlDocum
     }
     // Check that it's an inline equation (block == false)
     let loc = tag.location();
-    let Some(c) = html_doc
-        .introspector()
-        .query_first(&typst::foundations::Selector::Location(loc))
-    else {
+    let Some(content) = content_at_location(html_doc, loc) else {
         return false;
     };
-    let eq_packed = c.to_packed::<EquationElem>();
-    let is_block = eq_packed
-        .as_ref()
-        .is_some_and(|eq| *eq.block.as_option().as_ref().unwrap_or(&false));
-    !is_block
+    !is_block_equation(&content)
 }
 
 /// Check if position `idx` in `children` is a `Tag::Start("par")`.
@@ -1242,38 +1269,208 @@ fn is_par_tag_at(children: &[HtmlNode], idx: usize) -> bool {
     content.elem().name() == "par"
 }
 
-/// Collect inline elements from nodes inside a paragraph.
-/// This handles Text, `Tag::Start` for strong/emph/equation/footnote, and HTML elements.
-fn collect_par_inlines(children: &[HtmlNode], ctx: &mut WalkCtx, para: &mut Paragraph) {
+/// The behavior needed by a caller of the shared HTML inline collector.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum InlinePurpose {
+    Paragraph,
+    Generic,
+    FormattedRun,
+    Footnote,
+}
+
+/// Options for the single HTML inline collector.
+#[derive(Clone, Copy)]
+struct InlineOptions<'a> {
+    fmt: InlineFmt,
+    html_doc: Option<&'a HtmlDocument>,
+    purpose: InlinePurpose,
+}
+
+impl<'a> InlineOptions<'a> {
+    fn paragraph() -> Self {
+        Self {
+            fmt: InlineFmt::default(),
+            html_doc: None,
+            purpose: InlinePurpose::Paragraph,
+        }
+    }
+
+    fn generic(fmt: InlineFmt, html_doc: Option<&'a HtmlDocument>) -> Self {
+        Self {
+            fmt,
+            html_doc,
+            purpose: InlinePurpose::Generic,
+        }
+    }
+
+    fn formatted_run() -> Self {
+        Self {
+            fmt: InlineFmt::default(),
+            html_doc: None,
+            purpose: InlinePurpose::FormattedRun,
+        }
+    }
+
+    fn footnote(fmt: InlineFmt) -> Self {
+        Self {
+            fmt,
+            html_doc: None,
+            purpose: InlinePurpose::Footnote,
+        }
+    }
+
+    fn with_fmt(self, fmt: InlineFmt) -> Self {
+        Self { fmt, ..self }
+    }
+}
+
+/// Collect inline elements using the exact behavior selected by `options`.
+fn collect_inlines(
+    children: &[HtmlNode],
+    para: &mut Paragraph,
+    mut ctx: Option<&mut WalkCtx<'_>>,
+    options: InlineOptions<'_>,
+) {
     let mut i = 0;
     while i < children.len() {
         match &children[i] {
             HtmlNode::Text(text, span) => {
                 if !text.is_empty() {
-                    let mut run = Run::new(text.as_str());
-                    if !span.is_detached() {
-                        run.span = Some(*span);
-                    }
+                    let mut run = if options.purpose == InlinePurpose::Footnote {
+                        Run::new(text.as_str())
+                    } else {
+                        run_with_span(text.as_str(), *span)
+                    };
+                    options.fmt.apply_to(&mut run);
                     para.push_run(run);
                 }
             }
             HtmlNode::Tag(tag) => {
                 if let Tag::Start(..) = tag {
-                    i = handle_inline_tag(tag, children, i, ctx, para);
+                    match options.purpose {
+                        InlinePurpose::Paragraph => {
+                            if let Some(ctx) = ctx.as_deref_mut() {
+                                i = handle_inline_tag(tag, children, i, ctx, para);
+                            }
+                        }
+                        InlinePurpose::Generic => {
+                            collect_generic_inline_tag(children, i, tag, para, options);
+                        }
+                        InlinePurpose::FormattedRun => {
+                            i = collect_formatted_inline_tag(children, i, tag, para, options);
+                        }
+                        InlinePurpose::Footnote => collect_footnote_inline_tag(tag, para),
+                    }
                 }
             }
             HtmlNode::Element(elem) => {
-                handle_inline_html_element(elem, ctx, para);
+                collect_inline_element(elem, para, ctx.as_deref_mut(), options);
             }
             HtmlNode::Frame(frame) => {
-                // Layouted-opaque inline content (e.g. a boxed drawing as a
-                // figure body): rasterize in place as an inline image.
-                if let Some(img) = image::rasterize_html_frame(frame) {
-                    para.add_image(img);
+                if matches!(
+                    options.purpose,
+                    InlinePurpose::Paragraph | InlinePurpose::Generic
+                ) {
+                    // Layouted-opaque inline content (e.g. a boxed drawing as a
+                    // figure body): rasterize in place as an inline image.
+                    if let Some(img) = image::rasterize_html_frame(frame) {
+                        para.add_image(img);
+                    }
                 }
             }
         }
         i += 1;
+    }
+}
+
+fn collect_inline_element(
+    elem: &HtmlElement,
+    para: &mut Paragraph,
+    ctx: Option<&mut WalkCtx<'_>>,
+    options: InlineOptions<'_>,
+) {
+    match options.purpose {
+        InlinePurpose::Paragraph => {
+            if let Some(ctx) = ctx {
+                handle_inline_html_element(elem, ctx, para);
+            }
+        }
+        InlinePurpose::Generic => {
+            if tag_name(elem) == "math" || has_attr_value(elem, "role", "doc-noteref") {
+                return;
+            }
+            let fmt = options.fmt.for_tag(&tag_name(elem));
+            collect_inlines(&elem.children, para, None, options.with_fmt(fmt));
+        }
+        InlinePurpose::FormattedRun => {
+            // Deliberately descend into MathML here. Link display collection has
+            // historically leaked its glyphs; changing that output belongs to #12.
+            let fmt = options.fmt.for_tag(&tag_name(elem));
+            collect_inlines(&elem.children, para, None, options.with_fmt(fmt));
+        }
+        InlinePurpose::Footnote => {
+            if tag_name(elem) == "math" || has_attr_value(elem, "role", "doc-backlink") {
+                return;
+            }
+            let fmt = options.fmt.for_tag(&tag_name(elem));
+            collect_inlines(&elem.children, para, None, options.with_fmt(fmt));
+        }
+    }
+}
+
+fn collect_generic_inline_tag(
+    children: &[HtmlNode],
+    i: usize,
+    tag: &Tag,
+    para: &mut Paragraph,
+    options: InlineOptions<'_>,
+) {
+    let Tag::Start(content, _) = tag else { return };
+    match content.elem().name() {
+        "footnote" => {
+            if let Some(id) = footnote::find_footnote_id_in_range(&children[i..]) {
+                para.add_footnote_ref(id + 1);
+            }
+        }
+        "equation" => {
+            if let Some(html_doc) = options.html_doc
+                && let Some(content) = content_at_location(html_doc, tag.location())
+            {
+                para.add_math(typort_math::equation_to_omml(&content));
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_formatted_inline_tag(
+    children: &[HtmlNode],
+    i: usize,
+    tag: &Tag,
+    para: &mut Paragraph,
+    options: InlineOptions<'_>,
+) -> usize {
+    let Tag::Start(content, _) = tag else {
+        return i;
+    };
+    let end = find_tag_end(children, i, tag.location());
+    let fmt = match content.elem().name() {
+        "strong" | "emph" => options.fmt.for_tag(content.elem().name()),
+        "raw" => InlineFmt {
+            monospace: true,
+            ..options.fmt
+        },
+        _ => options.fmt,
+    };
+    collect_inlines(&children[i + 1..end], para, None, options.with_fmt(fmt));
+    end
+}
+
+fn collect_footnote_inline_tag(tag: &Tag, para: &mut Paragraph) {
+    if let Tag::Start(content, _) = tag
+        && content.elem().name() == "equation"
+    {
+        para.add_math(typort_math::equation_to_omml(content));
     }
 }
 
@@ -1301,7 +1498,6 @@ fn content_has_equation(content: &typst::foundations::Content) -> bool {
 
 /// Process a single inline `Tag::Start` within a paragraph.
 /// Returns the new index (pointing at the matching End tag).
-#[allow(clippy::too_many_lines)]
 fn handle_inline_tag(
     tag: &Tag,
     children: &[HtmlNode],
@@ -1309,266 +1505,259 @@ fn handle_inline_tag(
     ctx: &mut WalkCtx,
     para: &mut Paragraph,
 ) -> usize {
-    let html = ctx.html_doc;
     let Tag::Start(content, _) = tag else {
         return i;
     };
-    let elem_name = content.elem().name();
-    match elem_name {
-        "strong" => {
-            let loc = tag.location();
-            let end = find_tag_end(children, i, tag.location());
-            let body = html
-                .introspector()
-                .query_first(&typst::foundations::Selector::Location(loc))
-                .and_then(|c| c.to_packed::<typst_library::model::StrongElem>().cloned())
-                .map(|s| s.body.clone());
-            // `extract_runs` only carries text, so a `<strong>` wrapping an inline
-            // equation (typst 0.15 nests math inside the emphasis) would lose the
-            // math. When the body has an equation, descend the DOM children instead
-            // (where the introspector resolves the equation to OMML); otherwise keep
-            // the cheaper run-extraction path.
-            if body.as_ref().is_some_and(content_has_equation) {
-                let mut tmp = Paragraph::new();
-                collect_html_inlines_with_doc(
-                    &children[i + 1..end],
-                    &mut tmp,
-                    InlineFmt::bold(),
-                    Some(html),
-                );
-                para.inlines.append(&mut tmp.inlines);
-            } else if let Some(body) = body {
-                for mut r in inline::extract_runs(&body) {
-                    r.bold = true;
-                    para.push_run(r);
-                }
-            }
-            end
-        }
-        "emph" => {
-            let loc = tag.location();
-            let end = find_tag_end(children, i, tag.location());
-            let body = html
-                .introspector()
-                .query_first(&typst::foundations::Selector::Location(loc))
-                .and_then(|c| c.to_packed::<typst_library::model::EmphElem>().cloned())
-                .map(|e| e.body.clone());
-            if body.as_ref().is_some_and(content_has_equation) {
-                let mut tmp = Paragraph::new();
-                collect_html_inlines_with_doc(
-                    &children[i + 1..end],
-                    &mut tmp,
-                    InlineFmt {
-                        italic: true,
-                        ..InlineFmt::default()
-                    },
-                    Some(html),
-                );
-                para.inlines.append(&mut tmp.inlines);
-            } else if let Some(body) = body {
-                for mut r in inline::extract_runs(&body) {
-                    r.italic = true;
-                    para.push_run(r);
-                }
-            }
-            end
-        }
-        "equation" => {
-            let loc = tag.location();
-            if let Some(c) = html
-                .introspector()
-                .query_first(&typst::foundations::Selector::Location(loc))
-            {
-                let omml = typort_math::equation_to_omml(&c);
-                let eq_packed = c.to_packed::<EquationElem>();
-                let is_block = eq_packed
-                    .as_ref()
-                    .is_some_and(|eq| *eq.block.as_option().as_ref().unwrap_or(&false));
-                if is_block {
-                    if !para.inlines.is_empty() {
-                        let prev = std::mem::take(para);
-                        ctx.doc.add_paragraph(prev);
-                    }
-                    let eq_number = compute_equation_number(eq_packed, ctx.eq_state);
-                    let mut math_para = Paragraph::new();
-                    // Insert bookmark if equation has a label
-                    if let Some(label) = c.label() {
-                        let label_str = format!("{}", label.resolve());
-                        if !ctx.bookmarks.contains(&label_str) {
-                            ctx.bookmarks.insert(label_str.clone());
-                            let bk_id = ctx.doc.next_bookmark_id();
-                            math_para.add_bookmark(bk_id, label_str);
-                        }
-                    }
-                    if let Some(number) = eq_number {
-                        math_para.add_numbered_math(omml, number);
-                    } else {
-                        math_para.add_math(omml);
-                    }
-                    ctx.doc.add_paragraph(math_para);
-                } else {
-                    para.add_math(omml);
-                }
-            }
-            find_tag_end(children, i, tag.location())
-        }
-        "footnote" => {
-            let start_loc = tag.location();
-            if let Some(id) = footnote::find_footnote_id_in_range(&children[i..]) {
-                para.add_footnote_ref(id + 1);
-            }
-            find_tag_end(children, i, start_loc)
-        }
-        "image" => {
-            // Inline image within a paragraph: decode from the <img>'s own src
-            // data-URL (see the block-level arm).
-            let end = find_tag_end(children, i, tag.location());
-            if let Some(src) = find_img_src(&children[i..=end])
-                && let Some(img_data) = image::image_data_from_src(&src, ctx.image_sizes)
-            {
-                para.add_image(img_data);
-            }
-            end
-        }
-        "ref" => {
-            // Cross-reference: extract target label and display text
-            let end = find_tag_end(children, i, tag.location());
-            let loc = tag.location();
-            if let Some(c) = html
-                .introspector()
-                .query_first(&typst::foundations::Selector::Location(loc))
-                && let Some(ref_elem) = c.to_packed::<RefElem>()
-            {
-                let target_label = format!("{}", ref_elem.target.resolve());
-                let display = collect_flat_text(&children[i + 1..end]);
-                if ctx.bib_keys.contains(&target_label) {
-                    // Citation: a REF field to a non-existent bookmark renders in
-                    // Word as "Error! Reference source not found". Emit the
-                    // marker Typst already rendered (e.g. "[27]") as a run,
-                    // superscript when the style raises it (numeric CSL) — detected
-                    // from a <sup> in the rendered ref, not assumed from the style.
-                    let mut run = Run::new(&display);
-                    run.superscript = subtree_has_element(&children[i + 1..end], "sup");
-                    // Clickable cross-reference to the reference entry: Typst's HTML
-                    // links the marker to its bibliography entry via
-                    // `<a role="doc-biblioref" href="#loc-N">`; the bibliography side
-                    // bookmarks each entry by the same id, so link the marker there.
-                    match first_biblioref_href(&children[i + 1..end]) {
-                        Some(href) => para.add_internal_link(
-                            sanitize_anchor(href.trim_start_matches('#')),
-                            vec![run],
-                        ),
-                        None => para.push_run(run),
-                    }
-                } else {
-                    para.add_field_ref(target_label, display);
-                }
-            }
-            end
-        }
-        "link" => {
-            // Hyperlink: extract URL and formatted display runs
-            let end = find_tag_end(children, i, tag.location());
-            let loc = tag.location();
-            if let Some(c) = html
-                .introspector()
-                .query_first(&typst::foundations::Selector::Location(loc))
-                && let Some(link_elem) = c.to_packed::<typst_library::model::LinkElem>()
-            {
-                let url = match &link_elem.dest {
-                    typst_library::model::LinkTarget::Dest(
-                        typst_library::model::Destination::Url(u),
-                    ) => u.to_string(),
-                    _ => String::new(),
-                };
-                if url.is_empty() {
-                    return end;
-                }
-                // Collect formatted runs from link children, preserving bold/italic/etc.
-                let runs = collect_formatted_runs_from_nodes(&children[i + 1..end]);
-                if !runs.is_empty() {
-                    para.add_hyperlink(url, runs);
-                }
-            }
-            end
-        }
-        // No "pagebreak" arm — see the block-level walker: 0.15 pagebreaks have
-        // no Location, so the Tag can't appear; breaks.rs recovers them.
+    match content.elem().name() {
+        "strong" | "emph" => handle_emphasis_tag(tag, children, i, ctx, para),
+        "equation" => handle_inline_equation_tag(tag, children, i, ctx, para),
+        "footnote" => handle_inline_footnote_tag(tag, children, i, para),
+        "image" => handle_inline_image_tag(tag, children, i, ctx, para),
+        "ref" => handle_inline_ref_tag(tag, children, i, ctx, para),
+        "link" => handle_inline_link_tag(tag, children, i, ctx, para),
         "super" | "sub" | "raw" | "underline" | "strike" | "highlight" | "overline"
-        | "smallcaps" => {
-            let end = find_tag_end(children, i, tag.location());
-            let text = collect_flat_text(&children[i + 1..end]);
-            if !text.is_empty() {
-                let mut run = Run::new(&text);
-                apply_inline_format(elem_name, &mut run);
-                para.push_run(run);
+        | "smallcaps" => handle_inline_format_tag(tag, children, i, para),
+        "cite-group" => handle_inline_cite_group_tag(tag, children, i, ctx, para),
+        "par" | "context" => handle_nested_inline_tag(tag, children, i, ctx, para),
+        "caption" => handle_inline_caption_tag(tag, children, i, ctx, para),
+        _ => find_tag_end(children, i, tag.location()),
+    }
+}
+
+fn handle_emphasis_tag(
+    tag: &Tag,
+    children: &[HtmlNode],
+    i: usize,
+    ctx: &mut WalkCtx,
+    para: &mut Paragraph,
+) -> usize {
+    let end = find_tag_end(children, i, tag.location());
+    let Tag::Start(content, _) = tag else {
+        return end;
+    };
+    let (body, fmt) = if content.elem().name() == "strong" {
+        (
+            element_at_location::<StrongElem>(ctx.html_doc, tag.location())
+                .map(|strong| strong.body.clone()),
+            InlineFmt::bold(),
+        )
+    } else {
+        (
+            element_at_location::<EmphElem>(ctx.html_doc, tag.location())
+                .map(|emph| emph.body.clone()),
+            InlineFmt::italic(),
+        )
+    };
+
+    // `extract_runs` only carries text. Descend through the equation-aware HTML
+    // collector when emphasis wraps math; retain the cheaper Content walk otherwise.
+    if body.as_ref().is_some_and(content_has_equation) {
+        let mut tmp = Paragraph::new();
+        collect_inlines(
+            &children[i + 1..end],
+            &mut tmp,
+            None,
+            InlineOptions::generic(fmt, Some(ctx.html_doc)),
+        );
+        para.inlines.append(&mut tmp.inlines);
+    } else if let Some(body) = body {
+        for mut run in inline::extract_runs(&body) {
+            if fmt.bold {
+                run.bold = true;
+            } else {
+                run.italic = true;
             }
-            end
-        }
-        "cite-group" => {
-            let end = find_tag_end(children, i, tag.location());
-            let loc = tag.location();
-            if let Some(c) = html
-                .introspector()
-                .query_first(&typst::foundations::Selector::Location(loc))
-                && let Some(cite_group) = c.to_packed::<CiteGroup>()
-            {
-                // `CiteGroup::children` is now `Vec<Content>` (was
-                // `Vec<Packed<CiteElem>>`); unpack each to read its `key` label.
-                let keys: Vec<String> = cite_group
-                    .children
-                    .iter()
-                    .filter_map(|cite| cite.to_packed::<CiteElem>())
-                    .map(|cite| cite.key.resolve().to_string())
-                    .collect();
-                let display = collect_flat_text(&children[i + 1..end]);
-                if !keys.is_empty() && !display.is_empty() {
-                    para.add_citation(keys, display);
-                }
-            }
-            end
-        }
-        "par" | "context" => {
-            // A nested `par` or a `context` block reached in an inline context —
-            // e.g. an author-written `par()[...]` wrapping inline math, or a
-            // `#context { [… $eq$ …] }` (journal templates do both). Typst emits it
-            // as Start(par|context) … End with the prose held in an `Element<p>`
-            // inside that range, interleaved with `equation` markers. The default
-            // `_ =>` arm below would `find_tag_end` straight past the inner nodes,
-            // dropping the prose and leaving only the equations as an orphan math
-            // paragraph (and on typst 0.15, where an inline equation also emits a
-            // sibling `<math>` MathML element, the equation would be lost entirely).
-            // Descend instead, so prose and equations are collected into this same
-            // paragraph in document order.
-            let end = find_tag_end(children, i, tag.location());
-            collect_par_inlines(&children[i + 1..end], ctx, para);
-            end
-        }
-        "caption" => {
-            // A custom `show figure.caption` rule makes Typst emit the caption as a
-            // nested inline `caption` tag (not a `<figcaption>` element). Descend and
-            // emit it as its own block here (rather than find_tag_end-skipping) so it
-            // stays in document order and recovery dedups it instead of hoisting it —
-            // same treatment as the "par" arm above and the default figcaption path.
-            let end = find_tag_end(children, i, tag.location());
-            let text = collect_flat_text(&children[i + 1..end]);
-            if !text.trim().is_empty() {
-                if !para.inlines.is_empty() {
-                    let prev = std::mem::take(para);
-                    ctx.doc.add_paragraph(prev);
-                }
-                let mut cap = Paragraph::new();
-                cap.alignment = Some(Alignment::Center);
-                cap.push_run(Run::new(text.trim()));
-                ctx.doc.add_paragraph(cap);
-            }
-            end
-        }
-        _ => {
-            // Skip unknown or non-inline tags
-            find_tag_end(children, i, tag.location())
+            para.push_run(run);
         }
     }
+    end
+}
+
+fn handle_inline_equation_tag(
+    tag: &Tag,
+    children: &[HtmlNode],
+    i: usize,
+    ctx: &mut WalkCtx,
+    para: &mut Paragraph,
+) -> usize {
+    if let Some(content) = content_at_location(ctx.html_doc, tag.location()) {
+        if is_block_equation(&content) {
+            if !para.inlines.is_empty() {
+                ctx.doc.add_paragraph(std::mem::take(para));
+            }
+            emit_block_equation(&content, ctx);
+        } else {
+            para.add_math(typort_math::equation_to_omml(&content));
+        }
+    }
+    find_tag_end(children, i, tag.location())
+}
+
+fn handle_inline_footnote_tag(
+    tag: &Tag,
+    children: &[HtmlNode],
+    i: usize,
+    para: &mut Paragraph,
+) -> usize {
+    if let Some(id) = footnote::find_footnote_id_in_range(&children[i..]) {
+        para.add_footnote_ref(id + 1);
+    }
+    find_tag_end(children, i, tag.location())
+}
+
+fn handle_inline_image_tag(
+    tag: &Tag,
+    children: &[HtmlNode],
+    i: usize,
+    ctx: &WalkCtx,
+    para: &mut Paragraph,
+) -> usize {
+    let end = find_tag_end(children, i, tag.location());
+    if let Some(src) = find_img_src(&children[i..=end])
+        && let Some(img_data) = image::image_data_from_src(&src, ctx.image_sizes)
+    {
+        para.add_image(img_data);
+    }
+    end
+}
+
+fn handle_inline_ref_tag(
+    tag: &Tag,
+    children: &[HtmlNode],
+    i: usize,
+    ctx: &WalkCtx,
+    para: &mut Paragraph,
+) -> usize {
+    let end = find_tag_end(children, i, tag.location());
+    if let Some(reference) = element_at_location::<RefElem>(ctx.html_doc, tag.location()) {
+        let target = reference.target.resolve().to_string();
+        let display = collect_flat_text(&children[i + 1..end]);
+        if ctx.bib_keys.contains(&target) {
+            let mut run = Run::new(&display);
+            run.superscript = subtree_has_element(&children[i + 1..end], "sup");
+            match first_biblioref_href(&children[i + 1..end]) {
+                Some(href) => {
+                    para.add_internal_link(
+                        sanitize_anchor(href.trim_start_matches('#')),
+                        vec![run],
+                    );
+                }
+                None => para.push_run(run),
+            }
+        } else {
+            para.add_field_ref(target, display);
+        }
+    }
+    end
+}
+
+fn handle_inline_link_tag(
+    tag: &Tag,
+    children: &[HtmlNode],
+    i: usize,
+    ctx: &WalkCtx,
+    para: &mut Paragraph,
+) -> usize {
+    let end = find_tag_end(children, i, tag.location());
+    let Some(link) = element_at_location::<LinkElem>(ctx.html_doc, tag.location()) else {
+        return end;
+    };
+    let typst_library::model::LinkTarget::Dest(typst_library::model::Destination::Url(url)) =
+        &link.dest
+    else {
+        return end;
+    };
+    let mut display = Paragraph::new();
+    collect_inlines(
+        &children[i + 1..end],
+        &mut display,
+        None,
+        InlineOptions::formatted_run(),
+    );
+    let runs = drain_text_runs(&mut display);
+    if !runs.is_empty() {
+        para.add_hyperlink(url.to_string(), runs);
+    }
+    end
+}
+
+fn handle_inline_format_tag(
+    tag: &Tag,
+    children: &[HtmlNode],
+    i: usize,
+    para: &mut Paragraph,
+) -> usize {
+    let end = find_tag_end(children, i, tag.location());
+    let text = collect_flat_text(&children[i + 1..end]);
+    if !text.is_empty() {
+        let mut run = Run::new(&text);
+        if let Tag::Start(content, _) = tag {
+            apply_inline_format(content.elem().name(), &mut run);
+        }
+        para.push_run(run);
+    }
+    end
+}
+
+fn handle_inline_cite_group_tag(
+    tag: &Tag,
+    children: &[HtmlNode],
+    i: usize,
+    ctx: &WalkCtx,
+    para: &mut Paragraph,
+) -> usize {
+    let end = find_tag_end(children, i, tag.location());
+    if let Some(cite_group) = element_at_location::<CiteGroup>(ctx.html_doc, tag.location()) {
+        let keys = cite_group
+            .children
+            .iter()
+            .filter_map(|cite| cite.to_packed::<CiteElem>())
+            .map(|cite| cite.key.resolve().to_string())
+            .collect::<Vec<_>>();
+        let display = collect_flat_text(&children[i + 1..end]);
+        if !keys.is_empty() && !display.is_empty() {
+            para.add_citation(keys, display);
+        }
+    }
+    end
+}
+
+fn handle_nested_inline_tag(
+    tag: &Tag,
+    children: &[HtmlNode],
+    i: usize,
+    ctx: &mut WalkCtx,
+    para: &mut Paragraph,
+) -> usize {
+    let end = find_tag_end(children, i, tag.location());
+    collect_inlines(
+        &children[i + 1..end],
+        para,
+        Some(ctx),
+        InlineOptions::paragraph(),
+    );
+    end
+}
+
+fn handle_inline_caption_tag(
+    tag: &Tag,
+    children: &[HtmlNode],
+    i: usize,
+    ctx: &mut WalkCtx,
+    para: &mut Paragraph,
+) -> usize {
+    let end = find_tag_end(children, i, tag.location());
+    let text = collect_flat_text(&children[i + 1..end]);
+    if !text.trim().is_empty() {
+        if !para.inlines.is_empty() {
+            ctx.doc.add_paragraph(std::mem::take(para));
+        }
+        let mut caption = Paragraph::new();
+        caption.alignment = Some(Alignment::Center);
+        caption.push_run(Run::new(text.trim()));
+        ctx.doc.add_paragraph(caption);
+    }
+    end
 }
 
 /// Apply the appropriate formatting flag to a `Run` based on the inline tag name.
@@ -1592,27 +1781,33 @@ fn handle_inline_html_element(elem: &HtmlElement, ctx: &mut WalkCtx, para: &mut 
         "strong" | "b" | "em" | "i" => {
             // Pass the doc and move ALL inlines (not just text runs): emphasis can
             // wrap an inline equation (typst 0.15 nests math inside the emphasis
-            // element), which `collect_html_inlines` emits as OMML via the
+            // element), which the shared inline collector emits as OMML via the
             // introspector — `drain_text_runs` would silently drop that math.
             let mut tmp = Paragraph::new();
-            collect_html_inlines_with_doc(
+            collect_inlines(
                 &elem.children,
                 &mut tmp,
-                InlineFmt::default().for_tag(tag_str.as_str()),
-                Some(ctx.html_doc),
+                None,
+                InlineOptions::generic(
+                    InlineFmt::default().for_tag(tag_str.as_str()),
+                    Some(ctx.html_doc),
+                ),
             );
             para.inlines.append(&mut tmp.inlines);
         }
         "code" => {
             let mut tmp = Paragraph::new();
-            collect_html_inlines_with_doc(
+            collect_inlines(
                 &elem.children,
                 &mut tmp,
-                InlineFmt {
-                    monospace: true,
-                    ..InlineFmt::default()
-                },
-                Some(ctx.html_doc),
+                None,
+                InlineOptions::generic(
+                    InlineFmt {
+                        monospace: true,
+                        ..InlineFmt::default()
+                    },
+                    Some(ctx.html_doc),
+                ),
             );
             para.inlines.append(&mut tmp.inlines);
         }
@@ -1633,18 +1828,28 @@ fn handle_inline_html_element(elem: &HtmlElement, ctx: &mut WalkCtx, para: &mut 
             // External hyperlink from HTML <a href="...">
             if let Some(href) = get_attr_value(elem, "href") {
                 let mut tmp = Paragraph::new();
-                collect_html_inlines(&elem.children, &mut tmp, InlineFmt::default());
+                collect_inlines(
+                    &elem.children,
+                    &mut tmp,
+                    None,
+                    InlineOptions::generic(InlineFmt::default(), None),
+                );
                 let runs = drain_text_runs(&mut tmp);
                 if !runs.is_empty() {
                     para.add_hyperlink(href, runs);
                 }
             } else {
-                collect_par_inlines(&elem.children, ctx, para);
+                collect_inlines(&elem.children, para, Some(ctx), InlineOptions::paragraph());
             }
         }
         "sup" => {
             let mut tmp = Paragraph::new();
-            collect_html_inlines(&elem.children, &mut tmp, InlineFmt::default());
+            collect_inlines(
+                &elem.children,
+                &mut tmp,
+                None,
+                InlineOptions::generic(InlineFmt::default(), None),
+            );
             for mut run in drain_text_runs(&mut tmp) {
                 run.superscript = true;
                 para.push_run(run);
@@ -1652,7 +1857,12 @@ fn handle_inline_html_element(elem: &HtmlElement, ctx: &mut WalkCtx, para: &mut 
         }
         "sub" => {
             let mut tmp = Paragraph::new();
-            collect_html_inlines(&elem.children, &mut tmp, InlineFmt::default());
+            collect_inlines(
+                &elem.children,
+                &mut tmp,
+                None,
+                InlineOptions::generic(InlineFmt::default(), None),
+            );
             for mut run in drain_text_runs(&mut tmp) {
                 run.subscript = true;
                 para.push_run(run);
@@ -1664,134 +1874,42 @@ fn handle_inline_html_element(elem: &HtmlElement, ctx: &mut WalkCtx, para: &mut 
             para.push_run(Run::line_break());
         }
         _ => {
-            collect_par_inlines(&elem.children, ctx, para);
-        }
-    }
-}
-
-/// Collect inline elements from HTML nodes (used for table cells, list items, etc.)
-///
-/// This variant does not resolve inline equations. For table cells that may
-/// contain math, use the `_with_doc` variant instead.
-fn collect_html_inlines(children: &[HtmlNode], para: &mut Paragraph, fmt: InlineFmt) {
-    collect_html_inlines_with_doc(children, para, fmt, None);
-}
-
-/// Inner implementation of `collect_html_inlines` that optionally accepts an
-/// `HtmlDocument` for resolving inline equations via the Introspector.
-fn collect_html_inlines_with_doc(
-    children: &[HtmlNode],
-    para: &mut Paragraph,
-    fmt: InlineFmt,
-    html_doc: Option<&HtmlDocument>,
-) {
-    for child in children {
-        match child {
-            HtmlNode::Text(text, span) => {
-                if !text.is_empty() {
-                    let mut run = Run::new(text.as_str());
-                    fmt.apply_to(&mut run);
-                    if !span.is_detached() {
-                        run.span = Some(*span);
-                    }
-                    para.push_run(run);
-                }
-            }
-            HtmlNode::Element(elem) => {
-                let tag = tag_name(elem);
-                // typst 0.15 emits an inline equation as a native MathML `<math>`
-                // element next to its `Tag::Start("equation")` marker. The marker
-                // produces the OMML, so skip `<math>` to avoid re-emitting its
-                // glyphs as duplicate literal text.
-                if tag == "math" {
-                    continue;
-                }
-                let new_fmt = fmt.for_tag(&tag);
-                // Skip the footnote reference marker (its number is emitted by the
-                // `Tag::Start("footnote")` handler). typst 0.15 puts the
-                // `doc-noteref` role on the `<sup>` (0.14 used `<a>`), so match by
-                // role rather than tag name.
-                if has_attr_value(elem, "role", "doc-noteref") {
-                    continue;
-                }
-                collect_html_inlines_with_doc(&elem.children, para, new_fmt, html_doc);
-            }
-            HtmlNode::Tag(tag) => {
-                if let Tag::Start(content, _) = tag {
-                    let elem_name = content.elem().name();
-                    if elem_name == "footnote" {
-                        if let Some(id) = footnote::find_footnote_id_in_range(
-                            &children[children
-                                .iter()
-                                .position(|c| std::ptr::eq(c, child))
-                                .unwrap_or(0)..],
-                        ) {
-                            para.add_footnote_ref(id + 1);
-                        }
-                    } else if elem_name == "equation"
-                        && let Some(doc) = html_doc
-                    {
-                        let loc = tag.location();
-                        if let Some(c) = doc
-                            .introspector()
-                            .query_first(&typst::foundations::Selector::Location(loc))
-                        {
-                            let omml = typort_math::equation_to_omml(&c);
-                            para.add_math(omml);
-                        }
-                    }
-                }
-            }
-            HtmlNode::Frame(frame) => {
-                // Layouted-opaque inline content: rasterize in place.
-                if let Some(img) = image::rasterize_html_frame(frame) {
-                    para.add_image(img);
-                }
-            }
+            collect_inlines(&elem.children, para, Some(ctx), InlineOptions::paragraph());
         }
     }
 }
 
 /// Handle a block-level equation Tag.
 fn handle_equation(tag: &Tag, ctx: &mut WalkCtx) {
-    let html = ctx.html_doc;
-    let loc = tag.location();
-    let Some(content) = html
-        .introspector()
-        .query_first(&typst::foundations::Selector::Location(loc))
-    else {
+    let Some(content) = content_at_location(ctx.html_doc, tag.location()) else {
         return;
     };
 
-    let omml = typort_math::equation_to_omml(&content);
-    let eq_packed = content.to_packed::<EquationElem>();
-    let is_block = eq_packed
-        .as_ref()
-        .is_some_and(|eq| *eq.block.as_option().as_ref().unwrap_or(&false));
-
-    let mut para = Paragraph::new();
-    if is_block {
-        // Insert bookmark if equation has a label
-        if let Some(label) = content.label() {
-            let label_str = format!("{}", label.resolve());
-            if !ctx.bookmarks.contains(&label_str) {
-                ctx.bookmarks.insert(label_str.clone());
-                let bk_id = ctx.doc.next_bookmark_id();
-                para.add_bookmark(bk_id, label_str);
-            }
-        }
-        let eq_number = compute_equation_number(eq_packed, ctx.eq_state);
-        if let Some(number) = eq_number {
-            para.add_numbered_math(omml, number);
-        } else {
-            para.add_math(omml);
-        }
-        ctx.doc.add_paragraph(para);
+    if is_block_equation(&content) {
+        emit_block_equation(&content, ctx);
     } else {
         // Inline equation at block level: wrap in a paragraph
+        let mut para = Paragraph::new();
+        let omml = typort_math::equation_to_omml(&content);
         para.add_math(omml);
         ctx.doc.add_paragraph(para);
     }
+}
+
+/// Emit a labelled and optionally numbered block equation as one paragraph.
+fn emit_block_equation(content: &Content, ctx: &mut WalkCtx) {
+    let mut para = Paragraph::new();
+    if let Some(label) = content.label() {
+        ctx.add_bookmark(&mut para, label.resolve().to_string());
+    }
+    let number = compute_equation_number(content.to_packed::<EquationElem>(), ctx.eq_state);
+    let omml = typort_math::equation_to_omml(content);
+    if let Some(number) = number {
+        para.add_numbered_math(omml, number);
+    } else {
+        para.add_math(omml);
+    }
+    ctx.doc.add_paragraph(para);
 }
 
 /// Handle a block-level footnote Tag.
@@ -1812,91 +1930,26 @@ fn handle_block_footnote(children_from_here: &[HtmlNode], doc: &mut Document) {
 
 /// Handle a `table` Tag: find the HTML `<table>` element in the inner children and parse it.
 fn handle_table(slice: &[HtmlNode], table_loc: Option<Location>, ctx: &mut WalkCtx) {
-    let html = ctx.html_doc;
-    // Look for an HTML <table> element within the tag range
-    for node in slice {
-        if let HtmlNode::Element(elem) = node {
-            let tag = tag_name(elem);
-            if tag == "table" {
-                convert_html_table(elem, table_loc, ctx.doc, html, ctx.world);
-                return;
-            }
-            // Recurse into child elements to find the table
-            if find_and_convert_table_in_elem(elem, table_loc, ctx.doc, html, ctx.world) {
-                return;
-            }
-        }
+    if let Some(table) = find_first_element(slice, &|element| tag_name(element) == "table") {
+        convert_html_table(table, table_loc, ctx.doc, ctx.html_doc, ctx.world);
+        return;
     }
     // Fallback: walk inner children normally
     let inner = &slice[1..slice.len().saturating_sub(1)];
     walk_tags(inner, ctx);
-}
-
-/// Recursively search for a `<table>` element within an HTML element tree.
-fn find_and_convert_table_in_elem(
-    elem: &HtmlElement,
-    table_loc: Option<Location>,
-    doc: &mut Document,
-    html_doc: &HtmlDocument,
-    world: &TyportWorld,
-) -> bool {
-    for child in &elem.children {
-        if let HtmlNode::Element(inner) = child {
-            let tag = tag_name(inner);
-            if tag == "table" {
-                convert_html_table(inner, table_loc, doc, html_doc, world);
-                return true;
-            }
-            if find_and_convert_table_in_elem(inner, table_loc, doc, html_doc, world) {
-                return true;
-            }
-        }
-    }
-    false
 }
 
 /// Handle a `list` or `enum` Tag: find the HTML `<ul>` or `<ol>` element in the inner
 /// children and parse it.
 fn handle_list(slice: &[HtmlNode], ordered: bool, ctx: &mut WalkCtx) {
-    // Look for an HTML <ul> or <ol> element within the tag range
-    for node in slice {
-        if let HtmlNode::Element(elem) = node {
-            let tag = tag_name(elem);
-            if (ordered && tag == "ol") || (!ordered && tag == "ul") {
-                convert_html_list(elem, ctx.doc, ordered, ctx.html_doc);
-                return;
-            }
-            // Recurse
-            if find_and_convert_list_in_elem(elem, ctx.doc, ordered, ctx.html_doc) {
-                return;
-            }
-        }
+    let list_tag = if ordered { "ol" } else { "ul" };
+    if let Some(list) = find_first_element(slice, &|element| tag_name(element) == list_tag) {
+        convert_html_list(list, ctx.doc, ordered, ctx.html_doc);
+        return;
     }
     // Fallback: walk inner children normally
     let inner = &slice[1..slice.len().saturating_sub(1)];
     walk_tags(inner, ctx);
-}
-
-/// Recursively search for a `<ul>` or `<ol>` element.
-fn find_and_convert_list_in_elem(
-    elem: &HtmlElement,
-    doc: &mut Document,
-    ordered: bool,
-    html_doc: &HtmlDocument,
-) -> bool {
-    for child in &elem.children {
-        if let HtmlNode::Element(inner) = child {
-            let tag = tag_name(inner);
-            if (ordered && tag == "ol") || (!ordered && tag == "ul") {
-                convert_html_list(inner, doc, ordered, html_doc);
-                return true;
-            }
-            if find_and_convert_list_in_elem(inner, doc, ordered, html_doc) {
-                return true;
-            }
-        }
-    }
-    false
 }
 
 /// Convert an HTML `<table>` element into the document model.
@@ -1907,43 +1960,16 @@ fn convert_html_table(
     html_doc: &HtmlDocument,
     world: &TyportWorld,
 ) {
-    let mut raw_rows: Vec<RawTableRow> = Vec::new();
-    for child in &elem.children {
-        if let HtmlNode::Element(row_or_section) = child {
-            let tag = tag_name(row_or_section);
-            if tag == "tr" {
-                if let Some(result) = convert_table_row(row_or_section, html_doc) {
-                    raw_rows.push(result);
-                }
-            } else if tag == "thead" || tag == "tbody" || tag == "tfoot" {
-                for inner in &row_or_section.children {
-                    if let HtmlNode::Element(tr) = inner
-                        && tag_name(tr) == "tr"
-                        && let Some(result) = convert_table_row(tr, html_doc)
-                    {
-                        raw_rows.push(result);
-                    }
-                }
-            }
-        }
-    }
-
-    if raw_rows.is_empty() {
+    let Some(mut table) = convert_html_table_to_model(elem, html_doc) else {
         return;
-    }
-
-    // Post-process: insert vMerge::Continue cells where rowspans require them
-    let mut table = postprocess_rowspans(raw_rows);
+    };
 
     // Semantic column widths: read the declared track sizes off the TableElem
     // and turn them into per-cell percentages. Degrades to equal distribution
     // (cells left at width_pct = None) when the spec is all-`Auto`/`columns: N`,
     // or when the element is not queryable (e.g. nested tables with no location).
     if let Some(loc) = table_loc
-        && let Some(table_elem) = html_doc
-            .introspector()
-            .query_first(&typst::foundations::Selector::Location(loc))
-            .and_then(|c| c.to_packed::<TableElem>().cloned())
+        && let Some(table_elem) = element_at_location::<TableElem>(html_doc, loc)
     {
         let tracks = table_elem.columns.get_ref(StyleChain::default());
         let content_pt = f64::from(
@@ -2130,14 +2156,19 @@ fn convert_cell_paragraphs(
     // would consume only the <p>s — dropping those equation siblings and stacking
     // a single math-bearing line into several paragraphs. When the cell carries
     // inline math, collect the whole cell as one paragraph instead, so the
-    // equations are spliced back in document order. collect_html_inlines_with_doc
+    // equations are spliced back in document order. The shared inline collector
     // already turns an `equation` Tag into OMML and recurses through <p> wrappers
     // to pick up the surrounding text.
     let has_inline_equation =
         (0..td.children.len()).any(|i| is_inline_equation_at(&td.children, i, html_doc));
     if has_inline_equation {
         let mut para = Paragraph::new();
-        collect_html_inlines_with_doc(&td.children, &mut para, fmt, Some(html_doc));
+        collect_inlines(
+            &td.children,
+            &mut para,
+            None,
+            InlineOptions::generic(fmt, Some(html_doc)),
+        );
         return vec![para];
     }
 
@@ -2157,7 +2188,12 @@ fn convert_cell_paragraphs(
                 && tag_name(el) == "p"
             {
                 let mut para = Paragraph::new();
-                collect_html_inlines_with_doc(&el.children, &mut para, fmt, Some(html_doc));
+                collect_inlines(
+                    &el.children,
+                    &mut para,
+                    None,
+                    InlineOptions::generic(fmt, Some(html_doc)),
+                );
                 if !para.inlines.is_empty() {
                     paragraphs.push(para);
                 }
@@ -2166,14 +2202,24 @@ fn convert_cell_paragraphs(
         if paragraphs.is_empty() {
             // Fallback: collect all content as one paragraph
             let mut para = Paragraph::new();
-            collect_html_inlines_with_doc(&td.children, &mut para, fmt, Some(html_doc));
+            collect_inlines(
+                &td.children,
+                &mut para,
+                None,
+                InlineOptions::generic(fmt, Some(html_doc)),
+            );
             vec![para]
         } else {
             paragraphs
         }
     } else {
         let mut para = Paragraph::new();
-        collect_html_inlines_with_doc(&td.children, &mut para, fmt, Some(html_doc));
+        collect_inlines(
+            &td.children,
+            &mut para,
+            None,
+            InlineOptions::generic(fmt, Some(html_doc)),
+        );
         vec![para]
     }
 }
@@ -2242,11 +2288,11 @@ fn collect_cell_content_recursive(
                     }
                 } else if tag == "p" {
                     let mut para = Paragraph::new();
-                    collect_html_inlines_with_doc(
+                    collect_inlines(
                         &el.children,
                         &mut para,
-                        InlineFmt::default(),
-                        Some(html_doc),
+                        None,
+                        InlineOptions::generic(InlineFmt::default(), Some(html_doc)),
                     );
                     if !para.inlines.is_empty() {
                         content.push(CellContent::Paragraph(para));
@@ -2272,9 +2318,7 @@ fn collect_cell_content_recursive(
                 // through the introspector like the inline collector does.
                 if let Tag::Start(c, _) = tag
                     && c.elem().name() == "equation"
-                    && let Some(eq) = html_doc
-                        .introspector()
-                        .query_first(&typst::foundations::Selector::Location(tag.location()))
+                    && let Some(eq) = content_at_location(html_doc, tag.location())
                 {
                     let omml = typort_math::equation_to_omml(&eq);
                     let mut para = Paragraph::new();
@@ -2297,7 +2341,13 @@ fn collect_cell_content_recursive(
 /// Convert an HTML `<table>` element into a `Table` model (without adding to doc).
 /// Returns `None` if the table has no rows.
 fn convert_html_table_to_model(elem: &HtmlElement, html_doc: &HtmlDocument) -> Option<Table> {
-    let mut raw_rows: Vec<RawTableRow> = Vec::new();
+    let raw_rows = collect_table_rows(elem, html_doc);
+    (!raw_rows.is_empty()).then(|| postprocess_rowspans(raw_rows))
+}
+
+/// Collect direct and section-wrapped HTML table rows once for every table path.
+fn collect_table_rows(elem: &HtmlElement, html_doc: &HtmlDocument) -> Vec<RawTableRow> {
+    let mut raw_rows = Vec::new();
     for child in &elem.children {
         if let HtmlNode::Element(row_or_section) = child {
             let tag = tag_name(row_or_section);
@@ -2317,12 +2367,7 @@ fn convert_html_table_to_model(elem: &HtmlElement, html_doc: &HtmlDocument) -> O
             }
         }
     }
-
-    if raw_rows.is_empty() {
-        None
-    } else {
-        Some(postprocess_rowspans(raw_rows))
-    }
+    raw_rows
 }
 
 /// Convert an HTML `<ol>` or `<ul>` element into list paragraphs.
@@ -2371,11 +2416,11 @@ fn convert_html_list_at_level(
             for idx in 0..=li.children.len() {
                 if idx == li.children.len() || is_sublist(&li.children[idx]) {
                     if range_start < idx {
-                        collect_html_inlines_with_doc(
+                        collect_inlines(
                             &li.children[range_start..idx],
                             &mut para,
-                            InlineFmt::default(),
-                            Some(html_doc),
+                            None,
+                            InlineOptions::generic(InlineFmt::default(), Some(html_doc)),
                         );
                     }
                     range_start = idx + 1;
@@ -2431,7 +2476,12 @@ fn convert_term_list(elem: &HtmlElement, doc: &mut Document) {
                 "dt" => {
                     let mut para = Paragraph::new();
                     para.suppress_indent = true;
-                    collect_html_inlines(&item.children, &mut para, InlineFmt::bold());
+                    collect_inlines(
+                        &item.children,
+                        &mut para,
+                        None,
+                        InlineOptions::generic(InlineFmt::bold(), None),
+                    );
                     if !para.inlines.is_empty() {
                         doc.add_paragraph(para);
                     }
@@ -2440,7 +2490,12 @@ fn convert_term_list(elem: &HtmlElement, doc: &mut Document) {
                     let mut para = Paragraph::new();
                     para.left_indent = Some(doc.style.first_line_indent_twips);
                     para.suppress_indent = true;
-                    collect_html_inlines(&item.children, &mut para, InlineFmt::default());
+                    collect_inlines(
+                        &item.children,
+                        &mut para,
+                        None,
+                        InlineOptions::generic(InlineFmt::default(), None),
+                    );
                     if !para.inlines.is_empty() {
                         doc.add_paragraph(para);
                     }
@@ -2509,72 +2564,6 @@ fn collect_flat_text(nodes: &[HtmlNode]) -> String {
         }
     }
     text
-}
-
-/// Collect formatted runs from a slice of `HtmlNode`, preserving bold/italic/monospace.
-///
-/// Used for hyperlink display text where inner formatting (e.g. `*Bold link*`) must
-/// be preserved on the `Run` objects.
-fn collect_formatted_runs_from_nodes(nodes: &[HtmlNode]) -> Vec<Run> {
-    let mut para = Paragraph::new();
-    // Walk through Tag nodes to handle strong/emph within the link's content
-    collect_formatted_runs_inner(nodes, &mut para, InlineFmt::default());
-    drain_text_runs(&mut para)
-}
-
-/// Inner helper for collecting formatted runs, tracking inherited formatting state.
-fn collect_formatted_runs_inner(nodes: &[HtmlNode], para: &mut Paragraph, fmt: InlineFmt) {
-    let mut i = 0;
-    while i < nodes.len() {
-        match &nodes[i] {
-            HtmlNode::Text(text, span) => {
-                if !text.is_empty() {
-                    let mut run = Run::new(text.as_str());
-                    fmt.apply_to(&mut run);
-                    if !span.is_detached() {
-                        run.span = Some(*span);
-                    }
-                    para.push_run(run);
-                }
-            }
-            HtmlNode::Tag(tag) => {
-                if let Tag::Start(content, _) = tag {
-                    let elem_name = content.elem().name();
-                    let end = find_tag_end(nodes, i, tag.location());
-                    match elem_name {
-                        "strong" | "emph" => {
-                            collect_formatted_runs_inner(
-                                &nodes[i + 1..end],
-                                para,
-                                fmt.for_tag(elem_name),
-                            );
-                        }
-                        "raw" => {
-                            collect_formatted_runs_inner(
-                                &nodes[i + 1..end],
-                                para,
-                                InlineFmt {
-                                    monospace: true,
-                                    ..fmt
-                                },
-                            );
-                        }
-                        _ => {
-                            collect_formatted_runs_inner(&nodes[i + 1..end], para, fmt);
-                        }
-                    }
-                    i = end;
-                }
-            }
-            HtmlNode::Element(elem) => {
-                let tag = tag_name(elem);
-                let new_fmt = fmt.for_tag(&tag);
-                collect_formatted_runs_inner(&elem.children, para, new_fmt);
-            }
-            HtmlNode::Frame(_) => {}
-        }
-        i += 1;
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3013,20 +3002,10 @@ fn sanitize_anchor(id: &str) -> String {
 /// The `href` of the first `<a role="doc-biblioref">` within `nodes` — the link from
 /// a citation marker to its bibliography entry.
 fn first_biblioref_href(nodes: &[HtmlNode]) -> Option<String> {
-    for node in nodes {
-        if let HtmlNode::Element(elem) = node {
-            if tag_name(elem) == "a"
-                && has_attr_value(elem, "role", "doc-biblioref")
-                && let Some(href) = get_attr_value(elem, "href")
-            {
-                return Some(href);
-            }
-            if let Some(href) = first_biblioref_href(&elem.children) {
-                return Some(href);
-            }
-        }
-    }
-    None
+    find_first_element(nodes, &|element| {
+        tag_name(element) == "a" && has_attr_value(element, "role", "doc-biblioref")
+    })
+    .and_then(|element| get_attr_value(element, "href"))
 }
 
 /// Collect each `<li>`'s `id` attribute within `nodes`, in document order — the

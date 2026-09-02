@@ -1,7 +1,7 @@
 //! Run-coalescing post-pass.
 //!
 //! The HTML walk emits one `Run` per Typst text node (see
-//! `convert/mod.rs::collect_par_inlines`), so a single logical line is shattered
+//! `convert/mod.rs::collect_inlines`), so a single logical line is shattered
 //! into many tiny `<w:r>` runs and whitespace-only runs stay isolated. Nothing
 //! else in the pipeline merges them. This pass runs LAST — after every per-run
 //! style patch (`page::apply_styles_from_paged`, smallcaps, etc.) has settled —

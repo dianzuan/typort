@@ -27,16 +27,9 @@ fn walk_content(content: &Content, fmt: InlineFmt, runs: &mut Vec<Run>) {
             walk_content(child, fmt, runs);
         }
     } else if let Some(strong) = content.to_packed::<StrongElem>() {
-        walk_content(&strong.body, InlineFmt { bold: true, ..fmt }, runs);
+        walk_content(&strong.body, fmt.for_tag("strong"), runs);
     } else if let Some(emph) = content.to_packed::<EmphElem>() {
-        walk_content(
-            &emph.body,
-            InlineFmt {
-                italic: true,
-                ..fmt
-            },
-            runs,
-        );
+        walk_content(&emph.body, fmt.for_tag("emph"), runs);
     } else if let Some(sc) = content.to_packed::<SmallcapsElem>() {
         walk_content(
             &sc.body,

@@ -46,6 +46,13 @@ impl InlineFmt {
         }
     }
 
+    pub fn italic() -> Self {
+        Self {
+            italic: true,
+            ..Self::default()
+        }
+    }
+
     /// Copy every flag onto a [`Run`]. The single place formatting state
     /// reaches a `Run` — new flags added to this struct cannot be silently
     /// dropped by one of the walkers.
