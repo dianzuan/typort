@@ -1367,7 +1367,7 @@ mod tests {
         });
         assert_eq!(doc.citation_sources.len(), 1);
         assert_eq!(
-            doc.citation_sources[0].source_type.as_ooxml_str(),
+            doc.citation_sources[0].source_type.ooxml_value(),
             "JournalArticle"
         );
     }
@@ -1595,7 +1595,7 @@ mod tests {
 
     #[test]
     fn source_type_thesis_serializes_as_report() {
-        assert_eq!(document::SourceType::Thesis.as_ooxml_str(), "Report");
+        assert_eq!(document::SourceType::Thesis.ooxml_value(), "Report");
     }
 
     #[test]

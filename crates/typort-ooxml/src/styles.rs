@@ -2,6 +2,10 @@ use quick_xml::Writer;
 use std::io::{self, Write};
 
 use crate::document::DocumentStyle;
+use crate::writer::{
+    two_em_hanging_twips, write_font_triple, write_indentation, write_language_pair,
+    write_size_pair,
+};
 
 pub(crate) fn generate_styles(
     writer: &mut Writer<&mut Vec<u8>>,
@@ -37,28 +41,22 @@ fn write_doc_defaults<W: Write>(w: &mut Writer<W>, style: &DocumentStyle) -> io:
         d.create_element("w:rPrDefault")
             .write_inner_content(|rprd| {
                 rprd.create_element("w:rPr").write_inner_content(|rpr| {
-                    let mut fonts = rpr
-                        .create_element("w:rFonts")
-                        .with_attribute(("w:ascii", style.body_font_ascii.as_str()))
-                        .with_attribute(("w:hAnsi", style.body_font_ascii.as_str()))
-                        .with_attribute(("w:eastAsia", style.body_font_east_asia.as_str()));
-                    if style.has_cjk_content {
-                        fonts = fonts.with_attribute(("w:hint", "eastAsia"));
-                    }
-                    fonts.write_empty()?;
+                    write_font_triple(
+                        rpr,
+                        style.body_font_ascii.as_str(),
+                        style.body_font_east_asia.as_str(),
+                        style.has_cjk_content,
+                    )?;
                     rpr.create_element("w:kern")
                         .with_attribute(("w:val", "2"))
                         .write_empty()?;
-                    rpr.create_element("w:sz")
-                        .with_attribute(("w:val", sz.as_str()))
-                        .write_empty()?;
-                    rpr.create_element("w:szCs")
-                        .with_attribute(("w:val", sz.as_str()))
-                        .write_empty()?;
-                    rpr.create_element("w:lang")
-                        .with_attribute(("w:val", style.lang_latin.as_str()))
-                        .with_attribute(("w:eastAsia", style.lang_east_asia.as_str()))
-                        .write_empty()?;
+                    write_size_pair(rpr, sz.as_str())?;
+                    write_language_pair(
+                        rpr,
+                        "w:lang",
+                        style.lang_latin.as_str(),
+                        style.lang_east_asia.as_str(),
+                    )?;
                     Ok(())
                 })?;
                 Ok(())
@@ -94,25 +92,19 @@ fn write_style_normal<W: Write>(w: &mut Writer<W>, style: &DocumentStyle) -> io:
                 .with_attribute(("w:val", "Normal"))
                 .write_empty()?;
             s.create_element("w:rPr").write_inner_content(|rpr| {
-                let mut fonts = rpr
-                    .create_element("w:rFonts")
-                    .with_attribute(("w:ascii", style.body_font_ascii.as_str()))
-                    .with_attribute(("w:hAnsi", style.body_font_ascii.as_str()))
-                    .with_attribute(("w:eastAsia", style.body_font_east_asia.as_str()));
-                if style.has_cjk_content {
-                    fonts = fonts.with_attribute(("w:hint", "eastAsia"));
-                }
-                fonts.write_empty()?;
-                rpr.create_element("w:sz")
-                    .with_attribute(("w:val", sz.as_str()))
-                    .write_empty()?;
-                rpr.create_element("w:szCs")
-                    .with_attribute(("w:val", sz.as_str()))
-                    .write_empty()?;
-                rpr.create_element("w:lang")
-                    .with_attribute(("w:val", style.lang_latin.as_str()))
-                    .with_attribute(("w:eastAsia", style.lang_east_asia.as_str()))
-                    .write_empty()?;
+                write_font_triple(
+                    rpr,
+                    style.body_font_ascii.as_str(),
+                    style.body_font_east_asia.as_str(),
+                    style.has_cjk_content,
+                )?;
+                write_size_pair(rpr, sz.as_str())?;
+                write_language_pair(
+                    rpr,
+                    "w:lang",
+                    style.lang_latin.as_str(),
+                    style.lang_east_asia.as_str(),
+                )?;
                 Ok(())
             })?;
             s.create_element("w:pPr").write_inner_content(|ppr| {
@@ -131,17 +123,11 @@ fn write_style_normal<W: Write>(w: &mut Writer<W>, style: &DocumentStyle) -> io:
                     .with_attribute(("w:before", sp_before.as_str()))
                     .with_attribute(("w:after", sp_after.as_str()))
                     .write_empty()?;
-                let mut ind = ppr.create_element("w:ind");
                 // East-Asian char-based first-line indent: Word prefers
                 // firstLineChars over firstLine, so emit it first and keep the
                 // twips as a fallback. Absolute indents emit only firstLine.
-                let chars_str;
-                if let Some(chars) = style.first_line_indent_chars {
-                    chars_str = chars.to_string();
-                    ind = ind.with_attribute(("w:firstLineChars", chars_str.as_str()));
-                }
-                ind.with_attribute(("w:firstLine", indent.as_str()))
-                    .write_empty()?;
+                let chars_str = style.first_line_indent_chars.map(|chars| chars.to_string());
+                write_indentation(ppr, None, None, chars_str.as_deref(), Some(indent.as_str()))?;
                 Ok(())
             })?;
             Ok(())
@@ -187,24 +173,18 @@ fn write_style_heading<W: Write>(
                     .with_attribute(("w:before", sp_before.as_str()))
                     .with_attribute(("w:after", sp_after.as_str()))
                     .write_empty()?;
-                ppr.create_element("w:ind")
-                    .with_attribute(("w:firstLine", "0"))
-                    .write_empty()?;
+                write_indentation(ppr, None, None, None, Some("0"))?;
                 Ok(())
             })?;
             s.create_element("w:rPr").write_inner_content(|rpr| {
-                rpr.create_element("w:rFonts")
-                    .with_attribute(("w:ascii", style.body_font_ascii.as_str()))
-                    .with_attribute(("w:hAnsi", style.body_font_ascii.as_str()))
-                    .with_attribute(("w:eastAsia", style.body_font_east_asia.as_str()))
-                    .write_empty()?;
+                write_font_triple(
+                    rpr,
+                    style.body_font_ascii.as_str(),
+                    style.body_font_east_asia.as_str(),
+                    false,
+                )?;
                 rpr.create_element("w:b").write_empty()?;
-                rpr.create_element("w:sz")
-                    .with_attribute(("w:val", font_size.as_str()))
-                    .write_empty()?;
-                rpr.create_element("w:szCs")
-                    .with_attribute(("w:val", font_size.as_str()))
-                    .write_empty()?;
+                write_size_pair(rpr, font_size.as_str())?;
                 Ok(())
             })?;
             Ok(())
@@ -218,7 +198,7 @@ fn write_style_heading<W: Write>(
 /// so it renders consistently across word processors. Based on `Normal` with a
 /// hanging indent matching the reference layout.
 fn write_style_bibliography<W: Write>(w: &mut Writer<W>, style: &DocumentStyle) -> io::Result<()> {
-    let hang = (style.body_size_half_pt * 10 * 2).to_string();
+    let hang = two_em_hanging_twips(style.body_size_half_pt).to_string();
     w.create_element("w:style")
         .with_attribute(("w:type", "paragraph"))
         .with_attribute(("w:styleId", "Bibliography"))
@@ -230,11 +210,13 @@ fn write_style_bibliography<W: Write>(w: &mut Writer<W>, style: &DocumentStyle) 
                 .with_attribute(("w:val", "Normal"))
                 .write_empty()?;
             s.create_element("w:pPr").write_inner_content(|ppr| {
-                ppr.create_element("w:ind")
-                    .with_attribute(("w:left", hang.as_str()))
-                    .with_attribute(("w:hanging", hang.as_str()))
-                    .with_attribute(("w:firstLine", "0"))
-                    .write_empty()?;
+                write_indentation(
+                    ppr,
+                    Some(hang.as_str()),
+                    Some(hang.as_str()),
+                    None,
+                    Some("0"),
+                )?;
                 Ok(())
             })?;
             Ok(())
@@ -255,9 +237,7 @@ fn write_style_code_block<W: Write>(w: &mut Writer<W>, style: &DocumentStyle) ->
                 .with_attribute(("w:val", "Normal"))
                 .write_empty()?;
             s.create_element("w:pPr").write_inner_content(|ppr| {
-                ppr.create_element("w:ind")
-                    .with_attribute(("w:firstLine", "0"))
-                    .write_empty()?;
+                write_indentation(ppr, None, None, None, Some("0"))?;
                 ppr.create_element("w:spacing")
                     .with_attribute(("w:line", "240"))
                     .with_attribute(("w:lineRule", "auto"))
@@ -275,17 +255,13 @@ fn write_style_code_block<W: Write>(w: &mut Writer<W>, style: &DocumentStyle) ->
                 Ok(())
             })?;
             s.create_element("w:rPr").write_inner_content(|rpr| {
-                rpr.create_element("w:rFonts")
-                    .with_attribute(("w:ascii", style.code_font.as_str()))
-                    .with_attribute(("w:hAnsi", style.code_font.as_str()))
-                    .with_attribute(("w:eastAsia", style.code_font.as_str()))
-                    .write_empty()?;
-                rpr.create_element("w:sz")
-                    .with_attribute(("w:val", code_sz.as_str()))
-                    .write_empty()?;
-                rpr.create_element("w:szCs")
-                    .with_attribute(("w:val", code_sz.as_str()))
-                    .write_empty()?;
+                write_font_triple(
+                    rpr,
+                    style.code_font.as_str(),
+                    style.code_font.as_str(),
+                    false,
+                )?;
+                write_size_pair(rpr, code_sz.as_str())?;
                 Ok(())
             })?;
             Ok(())
@@ -325,12 +301,7 @@ fn write_style_footnote_text<W: Write>(w: &mut Writer<W>, style: &DocumentStyle)
                 .with_attribute(("w:val", "Normal"))
                 .write_empty()?;
             s.create_element("w:rPr").write_inner_content(|rpr| {
-                rpr.create_element("w:sz")
-                    .with_attribute(("w:val", fn_sz.as_str()))
-                    .write_empty()?;
-                rpr.create_element("w:szCs")
-                    .with_attribute(("w:val", fn_sz.as_str()))
-                    .write_empty()?;
+                write_size_pair(rpr, fn_sz.as_str())?;
                 Ok(())
             })?;
             Ok(())

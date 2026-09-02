@@ -8,33 +8,52 @@ use zip::write::SimpleFileOptions;
 
 use crate::document::{
     Alignment, BlockElement, Document, DocumentStyle, FootnoteFormat, ImageData, ImageFormat,
-    InlineElement, PageNumberFormat, ParagraphStyle, SectionBreak, SectionBreakType, Table,
+    InlineElement, PageNumberFormat, SectionBreak, Table,
 };
 use crate::styles;
 
 /// Tracks which optional document parts are present, used for rId assignment
 /// and conditional XML generation.
-#[derive(Clone, Copy)]
-#[allow(clippy::struct_excessive_bools)]
 struct DocParts {
-    footnotes: bool,
-    numbering: bool,
-    header: bool,
-    footer: bool,
-    bibliography: bool,
-    content_width_twips: u32,
+    relationships: Vec<RelKind>,
+}
+
+impl DocParts {
+    fn new(doc: &Document) -> Self {
+        let mut relationships = vec![RelKind::Styles, RelKind::FontTable];
+        if !doc.footnotes.is_empty() {
+            relationships.push(RelKind::Footnotes);
+        }
+        if doc_has_lists(doc) {
+            relationships.push(RelKind::Numbering);
+        }
+        relationships.push(RelKind::Settings);
+        if doc.header.is_some() {
+            relationships.push(RelKind::Header);
+        }
+        if doc.footer.is_some() || doc.page_numbering.is_some() {
+            relationships.push(RelKind::Footer);
+        }
+        if !doc.citation_sources.is_empty() {
+            relationships.push(RelKind::Bibliography);
+        }
+        Self { relationships }
+    }
+
+    fn has(&self, kind: RelKind) -> bool {
+        self.relationships.contains(&kind)
+    }
 }
 
 /// Read-only context threaded through the body writers (`write_paragraph`,
 /// `write_table`, `write_bibliography_sdt`), replacing the
-/// `(fn_format, doc_style, parts, image_counter, citation_id_counter)` tuple
+/// `(doc_style, parts, content_width, image_counter, citation_id_counter)` tuple
 /// that previously appeared on each. All fields are shared, so this is passed
 /// by `&WriteCtx`; the `Cell`s carry the running image/citation ids.
-#[derive(Clone, Copy)]
 struct WriteCtx<'a> {
-    fn_format: &'a FootnoteFormat,
     doc_style: &'a DocumentStyle,
-    parts: DocParts,
+    parts: &'a DocParts,
+    content_width_twips: u32,
     image_counter: &'a std::cell::Cell<usize>,
     citation_id_counter: &'a std::cell::Cell<u32>,
 }
@@ -47,17 +66,7 @@ pub fn write_docx<W: Write + Seek>(
     doc: &Document,
     writer: W,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let ps = &doc.page_settings;
-    let parts = DocParts {
-        footnotes: !doc.footnotes.is_empty(),
-        numbering: doc_has_lists(doc),
-        header: doc.header.is_some(),
-        footer: doc.footer.is_some() || doc.page_numbering.is_some(),
-        bibliography: !doc.citation_sources.is_empty(),
-        content_width_twips: ps
-            .width_twips
-            .saturating_sub(ps.margin_left + ps.margin_right),
-    };
+    let parts = DocParts::new(doc);
     let images = collect_images(doc);
     let has_images = !images.is_empty();
 
@@ -65,17 +74,17 @@ pub fn write_docx<W: Write + Seek>(
     let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
     zip.start_file("[Content_Types].xml", options)?;
-    zip.write_all(&xml_part(|w| generate_content_types(w, parts, &images))?)?;
+    zip.write_all(&xml_part(|w| generate_content_types(w, &parts, &images))?)?;
 
     zip.start_file("_rels/.rels", options)?;
     zip.write_all(&xml_part(generate_rels)?)?;
 
     zip.start_file("word/_rels/document.xml.rels", options)?;
-    zip.write_all(&xml_part(|w| generate_document_rels(w, parts, &images))?)?;
+    zip.write_all(&xml_part(|w| generate_document_rels(w, &parts, &images))?)?;
 
     zip.start_file("word/styles.xml", options)?;
     zip.write_all(&xml_part(|w| {
-        styles::generate_styles(w, parts.footnotes, &doc.style)
+        styles::generate_styles(w, parts.has(RelKind::Footnotes), &doc.style)
     })?)?;
 
     zip.start_file("word/fontTable.xml", options)?;
@@ -85,14 +94,16 @@ pub fn write_docx<W: Write + Seek>(
     zip.write_all(&xml_part(|w| generate_settings(w, &doc.style))?)?;
 
     zip.start_file("word/document.xml", options)?;
-    zip.write_all(&xml_part(|w| generate_document_xml(w, doc, has_images))?)?;
+    zip.write_all(&xml_part(|w| {
+        generate_document_xml(w, doc, has_images, &parts)
+    })?)?;
 
-    if parts.footnotes {
+    if parts.has(RelKind::Footnotes) {
         zip.start_file("word/footnotes.xml", options)?;
         zip.write_all(&xml_part(|w| generate_footnotes_xml(w, doc))?)?;
     }
 
-    if parts.numbering {
+    if parts.has(RelKind::Numbering) {
         zip.start_file("word/numbering.xml", options)?;
         zip.write_all(&xml_part(|w| generate_numbering_xml(w, doc))?)?;
     }
@@ -115,10 +126,7 @@ pub fn write_docx<W: Write + Seek>(
     // Write image files to word/media/
     for (idx, img) in images.iter().enumerate() {
         let n = idx + 1;
-        let ext = match img.format {
-            ImageFormat::Png => "png",
-            ImageFormat::Jpeg => "jpg",
-        };
+        let ext = img.format.extension();
         let path = format!("word/media/image{n}.{ext}");
         zip.start_file(path, options)?;
         zip.write_all(&img.bytes)?;
@@ -129,7 +137,7 @@ pub fn write_docx<W: Write + Seek>(
     zip.write_all(&xml_part(|w| generate_core_properties(w, doc))?)?;
 
     // Custom XML bibliography data source
-    if parts.bibliography {
+    if parts.has(RelKind::Bibliography) {
         zip.start_file("customXml/item1.xml", options)?;
         zip.write_all(&xml_part(|w| {
             generate_custom_xml_sources(w, &doc.citation_sources)
@@ -219,10 +227,8 @@ fn collect_images_from_table<'a>(
 
 /// A fixed (non-image) relationship part of `document.xml.rels`.
 ///
-/// The order of [`fixed_relationships`] is the **single source of truth** for
-/// rId assignment: `generate_document_rels` writes the parts in this order, and
-/// both `image_rel_id` and `header_footer_rel_id` derive their numbers from the
-/// same list. Add or reorder a part in one place and every rId stays consistent.
+/// The order stored in [`DocParts::relationships`] is the **single source of truth**
+/// for rId assignment. Images follow the fixed relationships.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RelKind {
     Styles,
@@ -253,33 +259,10 @@ impl RelKind {
     }
 }
 
-/// The fixed relationship parts present in this document, in write order.
-/// rId of a fixed part is its index here + 1; images follow at `len() + n`.
-fn fixed_relationships(parts: DocParts) -> Vec<RelKind> {
-    let mut kinds = vec![RelKind::Styles, RelKind::FontTable];
-    if parts.footnotes {
-        kinds.push(RelKind::Footnotes);
-    }
-    if parts.numbering {
-        kinds.push(RelKind::Numbering);
-    }
-    kinds.push(RelKind::Settings);
-    if parts.header {
-        kinds.push(RelKind::Header);
-    }
-    if parts.footer {
-        kinds.push(RelKind::Footer);
-    }
-    if parts.bibliography {
-        kinds.push(RelKind::Bibliography);
-    }
-    kinds
-}
-
 /// Compute the relationship ID for an image given its 1-based index.
 /// Image relationships follow all fixed parts in `document.xml.rels`.
-fn image_rel_id(image_index: usize, parts: DocParts) -> String {
-    format!("rId{}", fixed_relationships(parts).len() + image_index)
+fn image_rel_id(image_index: usize, parts: &DocParts) -> String {
+    format!("rId{}", parts.relationships.len() + image_index)
 }
 
 pub(crate) fn xml_part(
@@ -296,15 +279,88 @@ pub(crate) fn xml_part(
     Ok(buf)
 }
 
+pub(crate) fn write_value_element<W: Write>(
+    writer: &mut Writer<W>,
+    name: &str,
+    value: &str,
+) -> io::Result<()> {
+    writer
+        .create_element(name)
+        .with_attribute(("w:val", value))
+        .write_empty()?;
+    Ok(())
+}
+
+pub(crate) fn write_font_triple<W: Write>(
+    writer: &mut Writer<W>,
+    ascii: &str,
+    east_asia: &str,
+    hint_east_asia: bool,
+) -> io::Result<()> {
+    let mut fonts = writer
+        .create_element("w:rFonts")
+        .with_attribute(("w:ascii", ascii))
+        .with_attribute(("w:hAnsi", ascii))
+        .with_attribute(("w:eastAsia", east_asia));
+    if hint_east_asia {
+        fonts = fonts.with_attribute(("w:hint", "eastAsia"));
+    }
+    fonts.write_empty()?;
+    Ok(())
+}
+
+pub(crate) fn write_size_pair<W: Write>(writer: &mut Writer<W>, size: &str) -> io::Result<()> {
+    write_value_element(writer, "w:sz", size)?;
+    write_value_element(writer, "w:szCs", size)
+}
+
+pub(crate) fn write_language_pair<W: Write>(
+    writer: &mut Writer<W>,
+    name: &str,
+    latin: &str,
+    east_asia: &str,
+) -> io::Result<()> {
+    writer
+        .create_element(name)
+        .with_attribute(("w:val", latin))
+        .with_attribute(("w:eastAsia", east_asia))
+        .write_empty()?;
+    Ok(())
+}
+
+pub(crate) fn write_indentation<W: Write>(
+    writer: &mut Writer<W>,
+    left: Option<&str>,
+    hanging: Option<&str>,
+    first_line_chars: Option<&str>,
+    first_line: Option<&str>,
+) -> io::Result<()> {
+    let mut indentation = writer.create_element("w:ind");
+    if let Some(value) = left {
+        indentation = indentation.with_attribute(("w:left", value));
+    }
+    if let Some(value) = hanging {
+        indentation = indentation.with_attribute(("w:hanging", value));
+    }
+    if let Some(value) = first_line_chars {
+        indentation = indentation.with_attribute(("w:firstLineChars", value));
+    }
+    if let Some(value) = first_line {
+        indentation = indentation.with_attribute(("w:firstLine", value));
+    }
+    indentation.write_empty()?;
+    Ok(())
+}
+
+pub(crate) fn two_em_hanging_twips(size_half_pt: u32) -> u32 {
+    size_half_pt * 10 * 2
+}
+
 fn generate_content_types(
     writer: &mut Writer<&mut Vec<u8>>,
-    parts: DocParts,
+    parts: &DocParts,
     images: &[&ImageData],
 ) -> io::Result<()> {
-    // Determine which image extensions are used
-    let has_png = images.iter().any(|i| i.format == ImageFormat::Png);
-    let has_jpeg = images.iter().any(|i| i.format == ImageFormat::Jpeg);
-
     writer
         .create_element("Types")
         .with_attribute(("xmlns", "http://schemas.openxmlformats.org/package/2006/content-types"))
@@ -317,17 +373,13 @@ fn generate_content_types(
                 .with_attribute(("Extension", "xml"))
                 .with_attribute(("ContentType", "application/xml"))
                 .write_empty()?;
-            if has_png {
-                w.create_element("Default")
-                    .with_attribute(("Extension", "png"))
-                    .with_attribute(("ContentType", "image/png"))
-                    .write_empty()?;
-            }
-            if has_jpeg {
-                w.create_element("Default")
-                    .with_attribute(("Extension", "jpg"))
-                    .with_attribute(("ContentType", "image/jpeg"))
-                    .write_empty()?;
+            for format in [ImageFormat::Png, ImageFormat::Jpeg] {
+                if images.iter().any(|image| image.format == format) {
+                    w.create_element("Default")
+                        .with_attribute(("Extension", format.extension()))
+                        .with_attribute(("ContentType", format.content_type()))
+                        .write_empty()?;
+                }
             }
             w.create_element("Override")
                 .with_attribute(("PartName", "/word/document.xml"))
@@ -341,13 +393,13 @@ fn generate_content_types(
                 .with_attribute(("PartName", "/word/fontTable.xml"))
                 .with_attribute(("ContentType", "application/vnd.openxmlformats-officedocument.wordprocessingml.fontTable+xml"))
                 .write_empty()?;
-            if parts.footnotes {
+            if parts.has(RelKind::Footnotes) {
                 w.create_element("Override")
                     .with_attribute(("PartName", "/word/footnotes.xml"))
                     .with_attribute(("ContentType", "application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"))
                     .write_empty()?;
             }
-            if parts.numbering {
+            if parts.has(RelKind::Numbering) {
                 w.create_element("Override")
                     .with_attribute(("PartName", "/word/numbering.xml"))
                     .with_attribute(("ContentType", "application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"))
@@ -357,13 +409,13 @@ fn generate_content_types(
                 .with_attribute(("PartName", "/word/settings.xml"))
                 .with_attribute(("ContentType", "application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"))
                 .write_empty()?;
-            if parts.header {
+            if parts.has(RelKind::Header) {
                 w.create_element("Override")
                     .with_attribute(("PartName", "/word/header1.xml"))
                     .with_attribute(("ContentType", "application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"))
                     .write_empty()?;
             }
-            if parts.footer {
+            if parts.has(RelKind::Footer) {
                 w.create_element("Override")
                     .with_attribute(("PartName", "/word/footer1.xml"))
                     .with_attribute(("ContentType", "application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"))
@@ -373,7 +425,7 @@ fn generate_content_types(
                 .with_attribute(("PartName", "/docProps/core.xml"))
                 .with_attribute(("ContentType", "application/vnd.openxmlformats-package.core-properties+xml"))
                 .write_empty()?;
-            if parts.bibliography {
+            if parts.has(RelKind::Bibliography) {
                 w.create_element("Override")
                     .with_attribute(("PartName", "/customXml/itemProps1.xml"))
                     .with_attribute(("ContentType", "application/vnd.openxmlformats-officedocument.customXmlProperties+xml"))
@@ -406,7 +458,7 @@ fn generate_rels(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<()> {
 
 fn generate_document_rels(
     writer: &mut Writer<&mut Vec<u8>>,
-    parts: DocParts,
+    parts: &DocParts,
     images: &[&ImageData],
 ) -> io::Result<()> {
     writer
@@ -417,7 +469,7 @@ fn generate_document_rels(
         ))
         .write_inner_content(|w| {
             // Fixed parts, in the order that defines every rId (see `RelKind`).
-            for (idx, kind) in fixed_relationships(parts).iter().enumerate() {
+            for (idx, kind) in parts.relationships.iter().enumerate() {
                 let rid = format!("rId{}", idx + 1);
                 let (rel_type, target) = kind.type_and_target();
                 w.create_element("Relationship")
@@ -430,10 +482,7 @@ fn generate_document_rels(
             // Image relationships
             for (idx, img) in images.iter().enumerate() {
                 let rid = image_rel_id(idx + 1, parts);
-                let ext = match img.format {
-                    ImageFormat::Png => "png",
-                    ImageFormat::Jpeg => "jpg",
-                };
+                let ext = img.format.extension();
                 let target = format!("media/image{}.{ext}", idx + 1);
                 w.create_element("Relationship")
                     .with_attribute(("Id", rid.as_str()))
@@ -474,10 +523,12 @@ fn generate_settings(
                     .write_empty()?;
                 Ok(())
             })?;
-            w.create_element("w:themeFontLang")
-                .with_attribute(("w:val", style.lang_latin.as_str()))
-                .with_attribute(("w:eastAsia", style.lang_east_asia.as_str()))
-                .write_empty()?;
+            write_language_pair(
+                w,
+                "w:themeFontLang",
+                style.lang_latin.as_str(),
+                style.lang_east_asia.as_str(),
+            )?;
             w.create_element("m:mathPr").write_inner_content(|m| {
                 m.create_element("m:mathFont")
                     .with_attribute(("m:val", "Cambria Math"))
@@ -518,15 +569,16 @@ fn generate_settings(
 }
 
 /// Compute the relationship ID for a header or footer by locating it in the
-/// single source of truth (`fixed_relationships`). Only called when the part is
-/// present (guarded by `parts.header` / `parts.footer` at the call sites).
-fn header_footer_rel_id(is_header: bool, parts: DocParts) -> String {
+/// single source of truth (`DocParts::relationships`). Only called when the part
+/// is present, as guarded by the call sites.
+fn header_footer_rel_id(is_header: bool, parts: &DocParts) -> String {
     let kind = if is_header {
         RelKind::Header
     } else {
         RelKind::Footer
     };
-    let pos = fixed_relationships(parts)
+    let pos = parts
+        .relationships
         .iter()
         .position(|k| *k == kind)
         .expect("header/footer rel id requested for a part that is not present");
@@ -537,6 +589,7 @@ fn generate_document_xml(
     writer: &mut Writer<&mut Vec<u8>>,
     doc: &Document,
     has_images: bool,
+    parts: &DocParts,
 ) -> io::Result<()> {
     let mut elem = writer
         .create_element("w:document")
@@ -572,20 +625,12 @@ fn generate_document_xml(
     let image_counter = std::cell::Cell::new(0_usize);
     let citation_id_counter = std::cell::Cell::new(1_000_000_u32);
     let ps = &doc.page_settings;
-    let parts = DocParts {
-        footnotes: !doc.footnotes.is_empty(),
-        numbering: doc_has_lists(doc),
-        header: doc.header.is_some(),
-        footer: doc.footer.is_some() || doc.page_numbering.is_some(),
-        bibliography: !doc.citation_sources.is_empty(),
+    let ctx = WriteCtx {
+        doc_style: &doc.style,
+        parts,
         content_width_twips: ps
             .width_twips
             .saturating_sub(ps.margin_left + ps.margin_right),
-    };
-    let ctx = WriteCtx {
-        fn_format: &doc.style.footnote_format,
-        doc_style: &doc.style,
-        parts,
         image_counter: &image_counter,
         citation_id_counter: &citation_id_counter,
     };
@@ -622,12 +667,12 @@ fn write_section_properties<W: Write>(
     writer: &mut Writer<W>,
     settings: &crate::document::PageSettings,
     style: &crate::document::DocumentStyle,
-    parts: DocParts,
+    parts: &DocParts,
     page_numbering: Option<&PageNumberFormat>,
 ) -> io::Result<()> {
     writer.create_element("w:sectPr").write_inner_content(|w| {
         // Header reference
-        if parts.header {
+        if parts.has(RelKind::Header) {
             let rid = header_footer_rel_id(true, parts);
             w.create_element("w:headerReference")
                 .with_attribute(("w:type", "default"))
@@ -635,7 +680,7 @@ fn write_section_properties<W: Write>(
                 .write_empty()?;
         }
         // Footer reference
-        if parts.footer {
+        if parts.has(RelKind::Footer) {
             let rid = header_footer_rel_id(false, parts);
             w.create_element("w:footerReference")
                 .with_attribute(("w:type", "default"))
@@ -645,9 +690,8 @@ fn write_section_properties<W: Write>(
         write_footnote_pr(w, &style.footnote_format)?;
         // Page number format (w:pgNumType)
         if let Some(fmt) = page_numbering {
-            let fmt_val = page_number_format_val(fmt);
             w.create_element("w:pgNumType")
-                .with_attribute(("w:fmt", fmt_val))
+                .with_attribute(("w:fmt", fmt.ooxml_value()))
                 .write_empty()?;
         }
         write_section_page_settings(w, settings)?;
@@ -768,10 +812,7 @@ fn write_paragraph<W: Write>(
                         .with_attribute(("w:val", "CodeBlock"))
                         .write_empty()?;
                 } else if let Some(style) = &para.style {
-                    let style_id = match style {
-                        ParagraphStyle::Heading(n) => format!("Heading{n}"),
-                        ParagraphStyle::Normal => "Normal".to_string(),
-                    };
+                    let style_id = style.ooxml_value();
                     ppr.create_element("w:pStyle")
                         .with_attribute(("w:val", style_id.as_str()))
                         .write_empty()?;
@@ -796,8 +837,8 @@ fn write_paragraph<W: Write>(
                     // of the text area centers the equation, and a right tab at the
                     // right margin holds the number. (This is what `#`-numbering in
                     // Word's equation editor produces.)
-                    let center_pos = (ctx.parts.content_width_twips / 2).to_string();
-                    let right_pos = ctx.parts.content_width_twips.to_string();
+                    let center_pos = (ctx.content_width_twips / 2).to_string();
+                    let right_pos = ctx.content_width_twips.to_string();
                     ppr.create_element("w:tabs").write_inner_content(|tabs| {
                         tabs.create_element("w:tab")
                             .with_attribute(("w:val", "center"))
@@ -830,12 +871,13 @@ fn write_paragraph<W: Write>(
                 let zero_chars = ctx.doc_style.first_line_indent_chars.is_some();
                 if let Some(left) = para.left_indent {
                     let left_str = left.to_string();
-                    let mut ind = ppr.create_element("w:ind");
-                    ind = ind.with_attribute(("w:left", left_str.as_str()));
-                    if zero_chars {
-                        ind = ind.with_attribute(("w:firstLineChars", "0"));
-                    }
-                    ind.with_attribute(("w:firstLine", "0")).write_empty()?;
+                    write_indentation(
+                        ppr,
+                        Some(left_str.as_str()),
+                        None,
+                        zero_chars.then_some("0"),
+                        Some("0"),
+                    )?;
                 } else if has_hanging {
                     // Bibliographies use the historical 2em default; source-authored
                     // paragraph rules carry their exact converted width.
@@ -844,35 +886,33 @@ fn write_paragraph<W: Write>(
                         .unwrap_or(crate::document::HangingIndent::Default)
                     {
                         crate::document::HangingIndent::Default => {
-                            ctx.doc_style.body_size_half_pt * 10 * 2
+                            two_em_hanging_twips(ctx.doc_style.body_size_half_pt)
                         }
                         crate::document::HangingIndent::Twips(twips) => twips,
                     };
                     let bib_indent_str = bib_indent.to_string();
-                    let mut ind = ppr.create_element("w:ind");
-                    ind = ind
-                        .with_attribute(("w:left", bib_indent_str.as_str()))
-                        .with_attribute(("w:hanging", bib_indent_str.as_str()));
-                    if zero_chars {
-                        ind = ind.with_attribute(("w:firstLineChars", "0"));
-                    }
-                    ind.with_attribute(("w:firstLine", "0")).write_empty()?;
+                    write_indentation(
+                        ppr,
+                        Some(bib_indent_str.as_str()),
+                        Some(bib_indent_str.as_str()),
+                        zero_chars.then_some("0"),
+                        Some("0"),
+                    )?;
                 } else if has_list {
                     // List indent: left = 2em, hanging = 1em, computed from body font size
-                    let list_left = ctx.doc_style.body_size_half_pt * 10 * 2;
-                    let list_hanging = ctx.doc_style.body_size_half_pt * 10;
+                    let list_left = two_em_hanging_twips(ctx.doc_style.body_size_half_pt);
+                    let list_hanging = list_left / 2;
                     let list_left_str = list_left.to_string();
                     let list_hanging_str = list_hanging.to_string();
-                    ppr.create_element("w:ind")
-                        .with_attribute(("w:left", list_left_str.as_str()))
-                        .with_attribute(("w:hanging", list_hanging_str.as_str()))
-                        .write_empty()?;
+                    write_indentation(
+                        ppr,
+                        Some(list_left_str.as_str()),
+                        Some(list_hanging_str.as_str()),
+                        None,
+                        None,
+                    )?;
                 } else if suppress_indent || has_eq_number {
-                    let mut ind = ppr.create_element("w:ind");
-                    if zero_chars {
-                        ind = ind.with_attribute(("w:firstLineChars", "0"));
-                    }
-                    ind.with_attribute(("w:firstLine", "0")).write_empty()?;
+                    write_indentation(ppr, None, None, zero_chars.then_some("0"), Some("0"))?;
                 }
                 // Emit spacing override
                 if let Some(before) = para.spacing_before {
@@ -884,7 +924,7 @@ fn write_paragraph<W: Write>(
                 // Emit alignment
                 if let Some(alignment) = &para.alignment {
                     ppr.create_element("w:jc")
-                        .with_attribute(("w:val", alignment.as_ooxml_str()))
+                        .with_attribute(("w:val", alignment.ooxml_value()))
                         .write_empty()?;
                 }
                 // Emit section break (w:sectPr inside w:pPr)
@@ -897,7 +937,9 @@ fn write_paragraph<W: Write>(
         for inline in &para.inlines {
             match inline {
                 InlineElement::Text(run) => write_run(w, run, ctx.doc_style)?,
-                InlineElement::FootnoteRef(id) => write_footnote_ref(w, *id, ctx.fn_format)?,
+                InlineElement::FootnoteRef(id) => {
+                    write_footnote_ref(w, *id, &ctx.doc_style.footnote_format)?;
+                }
                 InlineElement::Math {
                     omml_xml,
                     equation_number,
@@ -1018,11 +1060,12 @@ fn write_run<W: Write>(
         if has_rpr {
             w.create_element("w:rPr").write_inner_content(|rpr| {
                 if run.monospace {
-                    rpr.create_element("w:rFonts")
-                        .with_attribute(("w:ascii", doc_style.code_font.as_str()))
-                        .with_attribute(("w:hAnsi", doc_style.code_font.as_str()))
-                        .with_attribute(("w:eastAsia", doc_style.code_font.as_str()))
-                        .write_empty()?;
+                    write_font_triple(
+                        rpr,
+                        doc_style.code_font.as_str(),
+                        doc_style.code_font.as_str(),
+                        false,
+                    )?;
                 } else if has_font_override {
                     let ascii = run
                         .font_ascii
@@ -1032,11 +1075,7 @@ fn write_run<W: Write>(
                         .font_east_asia
                         .as_deref()
                         .unwrap_or(&doc_style.body_font_east_asia);
-                    rpr.create_element("w:rFonts")
-                        .with_attribute(("w:ascii", ascii))
-                        .with_attribute(("w:hAnsi", ascii))
-                        .with_attribute(("w:eastAsia", east_asia))
-                        .write_empty()?;
+                    write_font_triple(rpr, ascii, east_asia, false)?;
                 }
                 if run.bold {
                     rpr.create_element("w:b").write_empty()?;
@@ -1062,12 +1101,7 @@ fn write_run<W: Write>(
                     .filter(|_| !run.superscript && !run.subscript)
                 {
                     let size_str = size.to_string();
-                    rpr.create_element("w:sz")
-                        .with_attribute(("w:val", size_str.as_str()))
-                        .write_empty()?;
-                    rpr.create_element("w:szCs")
-                        .with_attribute(("w:val", size_str.as_str()))
-                        .write_empty()?;
+                    write_size_pair(rpr, size_str.as_str())?;
                 }
                 if run.strikethrough {
                     rpr.create_element("w:strike").write_empty()?;
@@ -1221,7 +1255,7 @@ fn write_table<W: Write>(writer: &mut Writer<W>, table: &Table, ctx: &WriteCtx) 
                             // tcBorders in the CT_TcPr schema order).
                             if let Some(va) = cell.vertical_align {
                                 tcpr.create_element("w:vAlign")
-                                    .with_attribute(("w:val", va.as_val()))
+                                    .with_attribute(("w:val", va.ooxml_value()))
                                     .write_empty()?;
                             }
                             Ok(())
@@ -1280,46 +1314,14 @@ fn generate_numbering_xml(writer: &mut Writer<&mut Vec<u8>>, doc: &Document) -> 
             w.create_element("w:abstractNum")
                 .with_attribute(("w:abstractNumId", "1"))
                 .write_inner_content(|abs| {
-                    abs.create_element("w:lvl")
-                        .with_attribute(("w:ilvl", "0"))
-                        .write_inner_content(|lvl| {
-                            lvl.create_element("w:start")
-                                .with_attribute(("w:val", "1"))
-                                .write_empty()?;
-                            lvl.create_element("w:numFmt")
-                                .with_attribute(("w:val", "decimal"))
-                                .write_empty()?;
-                            lvl.create_element("w:lvlText")
-                                .with_attribute(("w:val", "%1."))
-                                .write_empty()?;
-                            lvl.create_element("w:lvlJc")
-                                .with_attribute(("w:val", "left"))
-                                .write_empty()?;
-                            Ok(())
-                        })?;
+                    write_numbering_level(abs, "0", "1", "decimal", "%1.", "left")?;
                     Ok(())
                 })?;
             // Abstract numbering 2: unordered list (bullet)
             w.create_element("w:abstractNum")
                 .with_attribute(("w:abstractNumId", "2"))
                 .write_inner_content(|abs| {
-                    abs.create_element("w:lvl")
-                        .with_attribute(("w:ilvl", "0"))
-                        .write_inner_content(|lvl| {
-                            lvl.create_element("w:start")
-                                .with_attribute(("w:val", "1"))
-                                .write_empty()?;
-                            lvl.create_element("w:numFmt")
-                                .with_attribute(("w:val", "bullet"))
-                                .write_empty()?;
-                            lvl.create_element("w:lvlText")
-                                .with_attribute(("w:val", "\u{2022}"))
-                                .write_empty()?;
-                            lvl.create_element("w:lvlJc")
-                                .with_attribute(("w:val", "left"))
-                                .write_empty()?;
-                            Ok(())
-                        })?;
+                    write_numbering_level(abs, "0", "1", "bullet", "\u{2022}", "left")?;
                     Ok(())
                 })?;
             // Abstract numbering 3: Chinese five-level heading numbering
@@ -1361,55 +1363,46 @@ fn generate_numbering_xml(writer: &mut Writer<&mut Vec<u8>>, doc: &Document) -> 
                     Ok(())
                 })?;
             // Numbering instance 1 -> abstractNum 1 (ordered)
-            w.create_element("w:num")
-                .with_attribute(("w:numId", "1"))
-                .write_inner_content(|num| {
-                    num.create_element("w:abstractNumId")
-                        .with_attribute(("w:val", "1"))
-                        .write_empty()?;
-                    Ok(())
-                })?;
+            write_numbering_instance(w, "1", "1", None)?;
             // Numbering instance 2 -> abstractNum 2 (unordered)
-            w.create_element("w:num")
-                .with_attribute(("w:numId", "2"))
-                .write_inner_content(|num| {
-                    num.create_element("w:abstractNumId")
-                        .with_attribute(("w:val", "2"))
-                        .write_empty()?;
-                    Ok(())
-                })?;
+            write_numbering_instance(w, "2", "2", None)?;
             // Numbering instance 3 -> abstractNum 3 (Chinese headings, opt-in)
-            w.create_element("w:num")
-                .with_attribute(("w:numId", "3"))
-                .write_inner_content(|num| {
-                    num.create_element("w:abstractNumId")
-                        .with_attribute(("w:val", "3"))
-                        .write_empty()?;
-                    Ok(())
-                })?;
+            write_numbering_instance(w, "3", "3", None)?;
             // Dynamic numbering instances for each top-level list
             for &(num_id, abstract_num_id, start) in &doc.list_num_instances {
                 let num_id_str = num_id.to_string();
                 let abs_id_str = abstract_num_id.to_string();
                 let start_str = start.to_string();
-                w.create_element("w:num")
-                    .with_attribute(("w:numId", num_id_str.as_str()))
-                    .write_inner_content(|num| {
-                        num.create_element("w:abstractNumId")
-                            .with_attribute(("w:val", abs_id_str.as_str()))
-                            .write_empty()?;
-                        // Each top-level list is an independent instance: override the
-                        // level-0 start so Word restarts at the list's own first number
-                        // (its `<ol start>` / `#enum(start:)`, 1 by default), rather
-                        // than continuing the shared abstractNum's counter.
-                        num.create_element("w:lvlOverride")
-                            .with_attribute(("w:ilvl", "0"))
-                            .write_inner_content(|ovr| {
-                                ovr.create_element("w:startOverride")
-                                    .with_attribute(("w:val", start_str.as_str()))
-                                    .write_empty()?;
-                                Ok(())
-                            })?;
+                write_numbering_instance(
+                    w,
+                    num_id_str.as_str(),
+                    abs_id_str.as_str(),
+                    Some(start_str.as_str()),
+                )?;
+            }
+            Ok(())
+        })?;
+    Ok(())
+}
+
+fn write_numbering_instance<W: Write>(
+    writer: &mut Writer<W>,
+    num_id: &str,
+    abstract_num_id: &str,
+    start: Option<&str>,
+) -> io::Result<()> {
+    writer
+        .create_element("w:num")
+        .with_attribute(("w:numId", num_id))
+        .write_inner_content(|num| {
+            write_value_element(num, "w:abstractNumId", abstract_num_id)?;
+            if let Some(start) = start {
+                // Each top-level list is an independent instance: override the
+                // level-0 start so Word restarts at the list's own first number.
+                num.create_element("w:lvlOverride")
+                    .with_attribute(("w:ilvl", "0"))
+                    .write_inner_content(|ovr| {
+                        write_value_element(ovr, "w:startOverride", start)?;
                         Ok(())
                     })?;
             }
@@ -1431,18 +1424,10 @@ fn write_numbering_level(
         .create_element("w:lvl")
         .with_attribute(("w:ilvl", ilvl))
         .write_inner_content(|lvl| {
-            lvl.create_element("w:start")
-                .with_attribute(("w:val", start))
-                .write_empty()?;
-            lvl.create_element("w:numFmt")
-                .with_attribute(("w:val", num_fmt))
-                .write_empty()?;
-            lvl.create_element("w:lvlText")
-                .with_attribute(("w:val", lvl_text))
-                .write_empty()?;
-            lvl.create_element("w:lvlJc")
-                .with_attribute(("w:val", jc))
-                .write_empty()?;
+            write_value_element(lvl, "w:start", start)?;
+            write_value_element(lvl, "w:numFmt", num_fmt)?;
+            write_value_element(lvl, "w:lvlText", lvl_text)?;
+            write_value_element(lvl, "w:lvlJc", jc)?;
             Ok(())
         })?;
     Ok(())
@@ -1476,13 +1461,7 @@ fn write_equation_number<W: Write>(writer: &mut Writer<W>, number: &str) -> io::
         w.create_element("w:tab").write_empty()?;
         Ok(())
     })?;
-    writer.create_element("w:r").write_inner_content(|w| {
-        w.create_element("w:t")
-            .with_attribute(("xml:space", "preserve"))
-            .write_text_content(BytesText::new(number))?;
-        Ok(())
-    })?;
-    Ok(())
+    write_text_run(writer, number, true)
 }
 
 /// Write a `wp:inline` drawing element for an embedded image.
@@ -1495,10 +1474,7 @@ fn write_image_inline<W: Write>(
     let cx = img.width_emu.to_string();
     let cy = img.height_emu.to_string();
     let id_str = n.to_string();
-    let ext = match img.format {
-        ImageFormat::Png => "png",
-        ImageFormat::Jpeg => "jpg",
-    };
+    let ext = img.format.extension();
     let name = format!("Image{n}");
     let filename = format!("image{n}.{ext}");
 
@@ -1622,34 +1598,53 @@ fn write_fld_char<W: Write>(writer: &mut Writer<W>, char_type: &str) -> io::Resu
     Ok(())
 }
 
+fn write_text_run<W: Write>(
+    writer: &mut Writer<W>,
+    text: &str,
+    preserve_space: bool,
+) -> io::Result<()> {
+    writer.create_element("w:r").write_inner_content(|w| {
+        let mut text_element = w.create_element("w:t");
+        if preserve_space {
+            text_element = text_element.with_attribute(("xml:space", "preserve"));
+        }
+        text_element.write_text_content(BytesText::new(text))?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
+fn write_instruction_text_run<W: Write>(writer: &mut Writer<W>, text: &str) -> io::Result<()> {
+    writer.create_element("w:r").write_inner_content(|w| {
+        w.create_element("w:instrText")
+            .with_attribute(("xml:space", "preserve"))
+            .write_text_content(BytesText::new(text))?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
+fn write_complex_field<W: Write>(
+    writer: &mut Writer<W>,
+    instruction: &str,
+    cached_result: &str,
+    preserve_cached_space: bool,
+) -> io::Result<()> {
+    write_fld_char(writer, "begin")?;
+    write_instruction_text_run(writer, instruction)?;
+    write_fld_char(writer, "separate")?;
+    write_text_run(writer, cached_result, preserve_cached_space)?;
+    write_fld_char(writer, "end")
+}
+
 fn write_field_ref<W: Write>(
     writer: &mut Writer<W>,
     bookmark_name: &str,
     display_text: &str,
 ) -> io::Result<()> {
-    // fldChar begin
-    write_fld_char(writer, "begin")?;
-    // instrText with REF field code
     let bookmark_name = truncate_bookmark_name(bookmark_name);
     let instr = format!(" REF {bookmark_name} \\h ");
-    writer.create_element("w:r").write_inner_content(|w| {
-        w.create_element("w:instrText")
-            .with_attribute(("xml:space", "preserve"))
-            .write_text_content(BytesText::new(&instr))?;
-        Ok(())
-    })?;
-    // fldChar separate
-    write_fld_char(writer, "separate")?;
-    // Display text (fallback)
-    writer.create_element("w:r").write_inner_content(|w| {
-        w.create_element("w:t")
-            .with_attribute(("xml:space", "preserve"))
-            .write_text_content(BytesText::new(display_text))?;
-        Ok(())
-    })?;
-    // fldChar end
-    write_fld_char(writer, "end")?;
-    Ok(())
+    write_complex_field(writer, &instr, display_text, true)
 }
 
 /// Write a Word citation as a Structured Document Tag (SDT) with a CITATION field code.
@@ -1701,12 +1696,7 @@ fn write_citation_sdt<W: Write>(
                     instr.push_str(key);
                 }
                 instr.push(' ');
-                content.create_element("w:r").write_inner_content(|w| {
-                    w.create_element("w:instrText")
-                        .with_attribute(("xml:space", "preserve"))
-                        .write_text_content(BytesText::new(&instr))?;
-                    Ok(())
-                })?;
+                write_instruction_text_run(content, &instr)?;
                 // fldChar separate
                 write_fld_char(content, "separate")?;
                 // Display text with noProof
@@ -1789,12 +1779,7 @@ fn write_bibliography_sdt<W: Write>(
                     // fldChar begin
                     write_fld_char(pw, "begin")?;
                     // instrText
-                    pw.create_element("w:r").write_inner_content(|w| {
-                        w.create_element("w:instrText")
-                            .with_attribute(("xml:space", "preserve"))
-                            .write_text_content(BytesText::new(" BIBLIOGRAPHY "))?;
-                        Ok(())
-                    })?;
+                    write_instruction_text_run(pw, " BIBLIOGRAPHY ")?;
                     // fldChar separate
                     write_fld_char(pw, "separate")?;
                     Ok(())
@@ -1878,27 +1863,35 @@ fn write_column_break<W: Write>(writer: &mut Writer<W>) -> io::Result<()> {
 
 fn write_toc_field<W: Write>(writer: &mut Writer<W>, max_depth: u8) -> io::Result<()> {
     let instr = format!(r#" TOC \o "1-{max_depth}" \h \z \u "#);
-    // fldChar begin
-    write_fld_char(writer, "begin")?;
-    // instrText
+    write_complex_field(
+        writer,
+        &instr,
+        "Right-click and update field to see table of contents.",
+        false,
+    )
+}
+
+fn write_footnote_mark_run<W: Write>(
+    writer: &mut Writer<W>,
+    mark: Option<&str>,
+    preserve_space: bool,
+) -> io::Result<()> {
     writer.create_element("w:r").write_inner_content(|w| {
-        w.create_element("w:instrText")
-            .with_attribute(("xml:space", "preserve"))
-            .write_text_content(quick_xml::events::BytesText::new(&instr))?;
+        w.create_element("w:rPr").write_inner_content(|rpr| {
+            write_value_element(rpr, "w:rStyle", "FootnoteReference")?;
+            Ok(())
+        })?;
+        if let Some(mark) = mark {
+            let mut text = w.create_element("w:t");
+            if preserve_space {
+                text = text.with_attribute(("xml:space", "preserve"));
+            }
+            text.write_text_content(BytesText::new(mark))?;
+        } else {
+            w.create_element("w:footnoteRef").write_empty()?;
+        }
         Ok(())
     })?;
-    // fldChar separate
-    write_fld_char(writer, "separate")?;
-    // Placeholder text
-    writer.create_element("w:r").write_inner_content(|w| {
-        w.create_element("w:t")
-            .write_text_content(quick_xml::events::BytesText::new(
-                "Right-click and update field to see table of contents.",
-            ))?;
-        Ok(())
-    })?;
-    // fldChar end
-    write_fld_char(writer, "end")?;
     Ok(())
 }
 
@@ -1933,18 +1926,7 @@ fn write_footnote_ref<W: Write>(
     if use_custom {
         let seq_num = id - 1; // id starts at 2, so fn 1 = id 2
         let mark = circled_number_char(seq_num);
-        writer.create_element("w:r").write_inner_content(|w| {
-            w.create_element("w:rPr").write_inner_content(|rpr| {
-                rpr.create_element("w:rStyle")
-                    .with_attribute(("w:val", "FootnoteReference"))
-                    .write_empty()?;
-                Ok(())
-            })?;
-            w.create_element("w:t")
-                .with_attribute(("xml:space", "preserve"))
-                .write_text_content(BytesText::new(&mark))?;
-            Ok(())
-        })?;
+        write_footnote_mark_run(writer, Some(&mark), true)?;
     }
 
     Ok(())
@@ -1995,36 +1977,12 @@ fn generate_footnotes_xml(writer: &mut Writer<&mut Vec<u8>>, doc: &Document) -> 
                             if use_custom {
                                 let seq = footnote.id - 1;
                                 let mark = circled_number_char(seq);
-                                p_w.create_element("w:r").write_inner_content(|r_w| {
-                                    r_w.create_element("w:rPr").write_inner_content(|rpr| {
-                                        rpr.create_element("w:rStyle")
-                                            .with_attribute(("w:val", "FootnoteReference"))
-                                            .write_empty()?;
-                                        Ok(())
-                                    })?;
-                                    r_w.create_element("w:t")
-                                        .write_text_content(BytesText::new(&mark))?;
-                                    Ok(())
-                                })?;
+                                write_footnote_mark_run(p_w, Some(&mark), false)?;
                             } else {
-                                p_w.create_element("w:r").write_inner_content(|r_w| {
-                                    r_w.create_element("w:rPr").write_inner_content(|rpr| {
-                                        rpr.create_element("w:rStyle")
-                                            .with_attribute(("w:val", "FootnoteReference"))
-                                            .write_empty()?;
-                                        Ok(())
-                                    })?;
-                                    r_w.create_element("w:footnoteRef").write_empty()?;
-                                    Ok(())
-                                })?;
+                                write_footnote_mark_run(p_w, None, false)?;
                             }
                             // Space after reference mark
-                            p_w.create_element("w:r").write_inner_content(|r_w| {
-                                r_w.create_element("w:t")
-                                    .with_attribute(("xml:space", "preserve"))
-                                    .write_text_content(BytesText::new(" "))?;
-                                Ok(())
-                            })?;
+                            write_text_run(p_w, " ", true)?;
                             // Content inlines
                             for inline in &footnote.content {
                                 write_inline(p_w, inline, doc)?;
@@ -2042,12 +2000,7 @@ fn generate_footnotes_xml(writer: &mut Writer<&mut Vec<u8>>, doc: &Document) -> 
 /// Write a `w:sectPr` element inside a paragraph's `w:pPr` for a section break.
 fn write_section_break<W: Write>(writer: &mut Writer<W>, section: &SectionBreak) -> io::Result<()> {
     writer.create_element("w:sectPr").write_inner_content(|w| {
-        let break_val = match section.break_type {
-            SectionBreakType::NextPage => "nextPage",
-            SectionBreakType::Continuous => "continuous",
-            SectionBreakType::EvenPage => "evenPage",
-            SectionBreakType::OddPage => "oddPage",
-        };
+        let break_val = section.break_type.ooxml_value();
         w.create_element("w:type")
             .with_attribute(("w:val", break_val))
             .write_empty()?;
@@ -2102,41 +2055,12 @@ fn generate_page_number_footer_xml(writer: &mut Writer<&mut Vec<u8>>) -> io::Res
                         .write_empty()?;
                     Ok(())
                 })?;
-                // fldChar begin
-                write_fld_char(pw, "begin")?;
-                // instrText with PAGE field code
-                pw.create_element("w:r").write_inner_content(|rw| {
-                    rw.create_element("w:instrText")
-                        .with_attribute(("xml:space", "preserve"))
-                        .write_text_content(BytesText::new(" PAGE "))?;
-                    Ok(())
-                })?;
-                // fldChar separate
-                write_fld_char(pw, "separate")?;
-                // Fallback display text
-                pw.create_element("w:r").write_inner_content(|rw| {
-                    rw.create_element("w:t")
-                        .write_text_content(BytesText::new("1"))?;
-                    Ok(())
-                })?;
-                // fldChar end
-                write_fld_char(pw, "end")?;
+                write_complex_field(pw, " PAGE ", "1", false)?;
                 Ok(())
             })?;
             Ok(())
         })?;
     Ok(())
-}
-
-/// Convert a `PageNumberFormat` to the OOXML `w:pgNumType/@w:fmt` value.
-fn page_number_format_val(fmt: &PageNumberFormat) -> &'static str {
-    match fmt {
-        PageNumberFormat::Decimal => "decimal",
-        PageNumberFormat::LowerRoman => "lowerRoman",
-        PageNumberFormat::UpperRoman => "upperRoman",
-        PageNumberFormat::LowerLetter => "lowerLetter",
-        PageNumberFormat::UpperLetter => "upperLetter",
-    }
 }
 
 fn generate_header_footer_part(
@@ -2176,7 +2100,7 @@ fn write_header_footer_paragraph<W: Write>(
             w.create_element("w:pPr").write_inner_content(|ppr| {
                 if let Some(alignment) = &para.alignment {
                     ppr.create_element("w:jc")
-                        .with_attribute(("w:val", alignment.as_ooxml_str()))
+                        .with_attribute(("w:val", alignment.ooxml_value()))
                         .write_empty()?;
                 }
                 Ok(())
@@ -2257,7 +2181,7 @@ fn generate_custom_xml_sources(
                     s.create_element("b:Tag")
                         .write_text_content(BytesText::new(&src.tag))?;
                     s.create_element("b:SourceType")
-                        .write_text_content(BytesText::new(src.source_type.as_ooxml_str()))?;
+                        .write_text_content(BytesText::new(src.source_type.ooxml_value()))?;
                     s.create_element("b:Guid")
                         .write_text_content(BytesText::new(&tag_to_guid(&src.tag)))?;
                     if !src.authors.is_empty() {
