@@ -1,5 +1,6 @@
 //! Geometric placement and construction of recovered content.
 
+use crate::convert::page::DEFAULT_BODY_SIZE_HALF_PT;
 use typort_ooxml::document::{
     Alignment, BlockElement, Document, InlineElement, Paragraph, ParagraphStyle, Run,
 };
@@ -18,8 +19,6 @@ const RECOVERED_LINE_Y_TOLERANCE_PT: f64 = 2.0;
 const ELEMENT_TEXT_PREFIX_CHARS: usize = 15;
 /// Minimum characters per recovered grid column.
 const MIN_RECOVERED_GRID_COLUMN_CHARS: usize = 3;
-/// Half-point fallback for recovered runs without an explicit rendered size.
-const DEFAULT_RECOVERED_RUN_SIZE_HALF_PT: u32 = 21;
 
 fn find_title_section_end(doc: &Document) -> usize {
     for (i, elem) in doc.body.elements.iter().enumerate() {
@@ -184,12 +183,7 @@ fn recovered_lines_are_contiguous(previous: &FrameLine, current: &FrameLine) -> 
         .runs
         .iter()
         .chain(&current.runs)
-        .map(|run| {
-            f64::from(
-                run.size_half_pt
-                    .unwrap_or(DEFAULT_RECOVERED_RUN_SIZE_HALF_PT),
-            ) / 2.0
-        })
+        .map(|run| f64::from(run.size_half_pt.unwrap_or(DEFAULT_BODY_SIZE_HALF_PT)) / 2.0)
         .fold(0.0_f64, f64::max);
     let vertical_gap = current.y_pt - previous.y_pt;
     vertical_gap >= 0.0 && vertical_gap <= font_size_pt * MAX_CONTIGUOUS_LINE_GAP_MULTIPLE
@@ -212,12 +206,7 @@ fn line_has_large_cluster_gap(line: &FrameLine) -> bool {
     let max_font_size_pt = line
         .runs
         .iter()
-        .map(|run| {
-            f64::from(
-                run.size_half_pt
-                    .unwrap_or(DEFAULT_RECOVERED_RUN_SIZE_HALF_PT),
-            ) / 2.0
-        })
+        .map(|run| f64::from(run.size_half_pt.unwrap_or(DEFAULT_BODY_SIZE_HALF_PT)) / 2.0)
         .fold(0.0_f64, f64::max);
     let gap_threshold = max_font_size_pt * LARGE_CLUSTER_GAP_MULTIPLE;
     line.x_clusters.windows(2).any(|pair| {

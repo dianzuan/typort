@@ -94,8 +94,8 @@ pub fn fixture_part(fixture: &str, part: &str) -> String {
 
 /// Convert `tests/fixtures/<fixture>.typ` with extra font directories loaded
 /// (e.g. `tests/fonts` for a variable-font fixture) and return the named docx
-/// part. `fixture_part` delegates here with an empty `font_dirs` slice so
-/// there is one fixture-conversion pipeline, not two.
+/// part. Both this and `fixture_part` build on `fixture_document*` and
+/// `fixture_package_from_document`, so there is one conversion pipeline.
 pub fn fixture_part_with_font_dirs(fixture: &str, part: &str, font_dirs: &[PathBuf]) -> String {
     fixture_package_from_document(&fixture_document_with_font_dirs(fixture, font_dirs))
         .part_text(part)

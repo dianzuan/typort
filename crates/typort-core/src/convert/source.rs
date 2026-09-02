@@ -13,7 +13,11 @@ pub(super) fn apply_first_line_indent(
     doc: &mut Document,
     body_pt: f64,
 ) {
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "non-negative em rounded to hundredths of a char"
+    )]
     let indent = if let Some(em) = ovr.first_line_indent_em {
         doc.style.first_line_indent_chars = Some((em * 100.0).round() as u32);
         Some(page::pt_to_twips(em * body_pt))

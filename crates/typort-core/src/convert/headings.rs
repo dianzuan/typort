@@ -11,7 +11,7 @@ pub(super) fn handle_heading(tag: &Tag, ctx: &mut WalkCtx) -> Option<usize> {
     let heading = content.to_packed::<HeadingElem>()?;
 
     let level = heading.resolve_level(StyleChain::default()).get();
-    #[allow(clippy::cast_possible_truncation)]
+    #[allow(clippy::cast_possible_truncation, reason = "clamped to 255 first")]
     let level_u8 = level.min(255) as u8;
 
     let mut para = Paragraph::new();

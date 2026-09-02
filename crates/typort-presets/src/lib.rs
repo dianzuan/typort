@@ -61,7 +61,11 @@ impl Preset {
 /// Convert centimeters to OOXML twips (1 cm = 567 twips).
 #[must_use]
 pub fn cm_to_twips(cm: f64) -> u32 {
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "preset margins are small non-negative lengths"
+    )]
     let twips = (cm * 567.0).round() as u32;
     twips
 }

@@ -32,5 +32,6 @@ pub use style::extract_document_style;
 pub(crate) use language::is_cjk_char;
 pub(super) use language::lang_region_to_bcp47;
 pub(super) use margin::find_body_zone;
+pub(super) use style::DEFAULT_BODY_SIZE_HALF_PT;
 pub(super) use style::apply_footnote_text_size;
 pub(super) use units::{pt_to_eighth_pt, pt_to_half_pt, pt_to_tenths, pt_to_twips};

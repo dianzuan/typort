@@ -192,7 +192,10 @@ pub enum InlineElement {
 }
 
 #[derive(Debug, Clone)]
-#[allow(clippy::struct_excessive_bools)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "mirrors the independent w:rPr toggles"
+)]
 pub struct Run {
     pub text: String,
     pub bold: bool,
@@ -351,7 +354,10 @@ pub enum HangingIndent {
 }
 
 #[derive(Debug, Clone, Default)]
-#[allow(clippy::struct_excessive_bools)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "mirrors the independent w:pPr toggles"
+)]
 pub struct Paragraph {
     /// Inline elements including text runs and footnote references.
     pub inlines: Vec<InlineElement>,
