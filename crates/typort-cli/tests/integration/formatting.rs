@@ -319,7 +319,7 @@ fn footnote_text_size_is_body_size_not_marker_size() {
 #[test]
 fn lang_german_is_de_de_not_guessed() {
     // A German document (no CJK) must derive de-DE from #set text(lang: "de"),
-    // not fall back to the en-US/zh-CN guess. Guards against P1 regressions.
+    // not fall back to the en-US/zh-CN guess. Guards against language-specific guesses.
     let styles = fixture_styles_xml("style_lang_de");
     assert!(
         styles.contains(r#"w:val="de-DE""#),

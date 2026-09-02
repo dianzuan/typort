@@ -104,10 +104,9 @@ pub fn write_docx<W: Write + Seek>(
     }
 
     // Write footer XML — either a PAGE field for page numbering, or static content
-    if let Some(pg_fmt) = &doc.page_numbering {
-        let fmt = pg_fmt.clone();
+    if doc.page_numbering.is_some() {
         zip.start_file("word/footer1.xml", options)?;
-        zip.write_all(&xml_part(|w| generate_page_number_footer_xml(w, &fmt))?)?;
+        zip.write_all(&xml_part(generate_page_number_footer_xml)?)?;
     } else if let Some(footer) = &doc.footer {
         zip.start_file("word/footer1.xml", options)?;
         zip.write_all(&xml_part(|w| generate_footer_xml(w, footer, &doc.style))?)?;
@@ -405,7 +404,6 @@ fn generate_rels(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<()> {
     Ok(())
 }
 
-#[allow(clippy::too_many_lines)]
 fn generate_document_rels(
     writer: &mut Writer<&mut Vec<u8>>,
     parts: DocParts,
@@ -705,7 +703,10 @@ fn write_section_page_settings<W: Write>(
     Ok(())
 }
 
-#[allow(clippy::too_many_lines)]
+#[allow(
+    clippy::too_many_lines,
+    reason = "writes the schema-ordered paragraph XML"
+)]
 fn write_paragraph<W: Write>(
     writer: &mut Writer<W>,
     para: &crate::document::Paragraph,
@@ -1102,7 +1103,7 @@ fn write_run<W: Write>(
     Ok(())
 }
 
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines, reason = "writes the schema-ordered table XML")]
 fn write_table<W: Write>(writer: &mut Writer<W>, table: &Table, ctx: &WriteCtx) -> io::Result<()> {
     // Determine number of columns from the first row for equal-width distribution
     let num_cols = table
@@ -1263,7 +1264,10 @@ fn write_table<W: Write>(writer: &mut Writer<W>, table: &Table, ctx: &WriteCtx) 
     Ok(())
 }
 
-#[allow(clippy::too_many_lines)]
+#[allow(
+    clippy::too_many_lines,
+    reason = "writes all numbering levels in schema order"
+)]
 fn generate_numbering_xml(writer: &mut Writer<&mut Vec<u8>>, doc: &Document) -> io::Result<()> {
     writer
         .create_element("w:numbering")
@@ -1482,7 +1486,6 @@ fn write_equation_number<W: Write>(writer: &mut Writer<W>, number: &str) -> io::
 }
 
 /// Write a `wp:inline` drawing element for an embedded image.
-#[allow(clippy::too_many_lines)]
 fn write_image_inline<W: Write>(
     writer: &mut Writer<W>,
     img: &ImageData,
@@ -2079,10 +2082,7 @@ fn generate_footer_xml(
 ///
 /// Produces a centered paragraph with `fldChar begin / instrText PAGE / fldChar separate /
 /// fallback text / fldChar end`.
-fn generate_page_number_footer_xml(
-    writer: &mut Writer<&mut Vec<u8>>,
-    _fmt: &PageNumberFormat,
-) -> io::Result<()> {
+fn generate_page_number_footer_xml(writer: &mut Writer<&mut Vec<u8>>) -> io::Result<()> {
     writer
         .create_element("w:ftr")
         .with_attribute((

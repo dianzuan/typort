@@ -79,7 +79,7 @@ fn issue_figure_caption_present() {
 fn issue_caption_not_duplicated_by_recovery() {
     // A figure/table caption must appear exactly once: the recovery pass must
     // not re-insert it as a duplicate paragraph. Guaranteed by semantic text
-    // dedup, not by hardcoded "图 "/"表 " keyword skipping (removed for P1).
+    // dedup, not by hardcoded "图 "/"表 " keyword skipping.
     // CJK captions exercise the very path the old keyword filter special-cased.
     let xml = fixture_doc_xml("issue_caption_dedup_cjk");
     for caption in ["一个矩形示意图的标题", "实验数据汇总表"] {

@@ -23,7 +23,6 @@ typst-library = "0.15.1"
 typst-syntax = "0.15.1"
 typst-kit = { version = "0.15.1", default-features = false, features = ["embedded-fonts", "scan-fonts", "system-packages", "system-downloader", "vendor-openssl"] }
 typst-utils = "0.15.1"
-typst-realize = "0.15.1"
 typst-html = "0.15.1"
 typst-pdf = "0.15.1"
 typst-render = "0.15.1"
@@ -71,6 +70,7 @@ codex = "0.3"
 
 # CLI
 clap = { version = "4", features = ["derive"] }
+tempfile = "3"
 
 # Internal crates
 typort-core = { version = "0.2.0", path = "crates/typort-core" }

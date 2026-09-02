@@ -1,4 +1,4 @@
-//! Tag-walker based Typst -> OOXML conversion (v2).
+//! Tag-walker based Typst -> OOXML conversion.
 //!
 //! Walks `HtmlDocument`'s `Tag` sequence. Each `Tag::Start` carries a
 //! `Location` that maps via the `Introspector` to the full Content AST for
@@ -270,8 +270,8 @@ pub fn convert(world: &TyportWorld) -> Result<Document, Vec<String>> {
     }
 
     // 15. Merge consecutive paragraphs that belong to the same visual line
-    if let Some(paged) = &paged_doc {
-        recovery::merge_same_line_paragraphs(&mut doc, paged);
+    if paged_doc.is_some() {
+        recovery::merge_same_line_paragraphs(&mut doc);
     }
 
     // 16. Final pass: coalesce adjacent equally-formatted text runs. Runs LAST,
@@ -562,7 +562,7 @@ fn walk_tags(children: &[HtmlNode], ctx: &mut WalkCtx) {
                             i = end;
                         }
                         "footnote" => {
-                            handle_block_footnote(tag, &children[i..], ctx.html_doc, ctx.doc);
+                            handle_block_footnote(&children[i..], ctx.doc);
                             let end = find_tag_end(children, i, tag.location());
                             i = end;
                         }
@@ -807,8 +807,8 @@ fn handle_html_element(elem: &HtmlElement, ctx: &mut WalkCtx) {
         "pre" => convert_code_block(elem, ctx.doc),
         "blockquote" => convert_blockquote(elem, ctx),
         "dl" => convert_term_list(elem, ctx.doc),
-        "ol" => convert_html_list(elem, ctx.doc, true, Some(ctx.html_doc)),
-        "ul" => convert_html_list(elem, ctx.doc, false, Some(ctx.html_doc)),
+        "ol" => convert_html_list(elem, ctx.doc, true, ctx.html_doc),
+        "ul" => convert_html_list(elem, ctx.doc, false, ctx.html_doc),
         "table" => convert_html_table(elem, None, ctx.doc, html, ctx.world),
         "figcaption" => {
             // Collect all figcaption content into a single paragraph
@@ -1043,7 +1043,6 @@ fn extract_heading_content(
 
 /// Handle a `par` Tag: collect inline children (text, strong, emph, equation, footnote)
 /// and emit a paragraph.
-#[allow(clippy::too_many_lines)]
 fn handle_par(slice: &[HtmlNode], ctx: &mut WalkCtx) {
     let mut para = Paragraph::new();
     // Skip the first Tag::Start("par") and collect inlines from the inner nodes
@@ -1796,12 +1795,7 @@ fn handle_equation(tag: &Tag, ctx: &mut WalkCtx) {
 }
 
 /// Handle a block-level footnote Tag.
-fn handle_block_footnote(
-    tag: &Tag,
-    children_from_here: &[HtmlNode],
-    _html_doc: &HtmlDocument,
-    doc: &mut Document,
-) {
+fn handle_block_footnote(children_from_here: &[HtmlNode], doc: &mut Document) {
     let footnote_id = footnote::find_footnote_id_in_range(children_from_here);
     if let Some(id) = footnote_id {
         // Add footnote ref to the last paragraph in the document
@@ -1814,7 +1808,6 @@ fn handle_block_footnote(
             doc.add_paragraph(para);
         }
     }
-    let _ = tag;
 }
 
 /// Handle a `table` Tag: find the HTML `<table>` element in the inner children and parse it.
@@ -1870,11 +1863,11 @@ fn handle_list(slice: &[HtmlNode], ordered: bool, ctx: &mut WalkCtx) {
         if let HtmlNode::Element(elem) = node {
             let tag = tag_name(elem);
             if (ordered && tag == "ol") || (!ordered && tag == "ul") {
-                convert_html_list(elem, ctx.doc, ordered, Some(ctx.html_doc));
+                convert_html_list(elem, ctx.doc, ordered, ctx.html_doc);
                 return;
             }
             // Recurse
-            if find_and_convert_list_in_elem(elem, ctx.doc, ordered, Some(ctx.html_doc)) {
+            if find_and_convert_list_in_elem(elem, ctx.doc, ordered, ctx.html_doc) {
                 return;
             }
         }
@@ -1889,7 +1882,7 @@ fn find_and_convert_list_in_elem(
     elem: &HtmlElement,
     doc: &mut Document,
     ordered: bool,
-    html_doc: Option<&HtmlDocument>,
+    html_doc: &HtmlDocument,
 ) -> bool {
     for child in &elem.children {
         if let HtmlNode::Element(inner) = child {
@@ -2095,7 +2088,7 @@ fn convert_table_row(tr: &HtmlElement, html_doc: &HtmlDocument) -> Option<RawTab
 
                 // Check for nested tables within the cell
                 let (final_paragraphs, cell_content) =
-                    extract_cell_content_with_nested_tables(td, is_header, html_doc, paragraphs);
+                    extract_cell_content_with_nested_tables(td, html_doc, paragraphs);
 
                 cells.push(TableCell {
                     paragraphs: final_paragraphs,
@@ -2194,7 +2187,6 @@ fn convert_cell_paragraphs(
 /// - `content` is non-empty only when nested tables are present
 fn extract_cell_content_with_nested_tables(
     td: &HtmlElement,
-    _is_header: bool,
     html_doc: &HtmlDocument,
     paragraphs: Vec<Paragraph>,
 ) -> (Vec<Paragraph>, Vec<CellContent>) {
@@ -2338,7 +2330,7 @@ fn convert_html_list(
     elem: &HtmlElement,
     doc: &mut Document,
     ordered: bool,
-    html_doc: Option<&HtmlDocument>,
+    html_doc: &HtmlDocument,
 ) {
     // typst-html carries `#enum(start: N)` as `<ol start="N">`; Word needs it
     // back as the numbering instance's level-0 startOverride.
@@ -2354,7 +2346,7 @@ fn convert_html_list_at_level(
     doc: &mut Document,
     level: u32,
     list_id: u32,
-    html_doc: Option<&HtmlDocument>,
+    html_doc: &HtmlDocument,
 ) {
     let is_sublist = |c: &HtmlNode| {
         matches!(c, HtmlNode::Element(el) if {
@@ -2383,7 +2375,7 @@ fn convert_html_list_at_level(
                             &li.children[range_start..idx],
                             &mut para,
                             InlineFmt::default(),
-                            html_doc,
+                            Some(html_doc),
                         );
                     }
                     range_start = idx + 1;
@@ -2643,7 +2635,7 @@ fn find_body(root: &HtmlElement) -> Option<&HtmlElement> {
 /// the `"section"` arm of `handle_html_element`). Hand-written paragraphs that
 /// merely look like a reference list are, to Typst, ordinary text, so typort
 /// converts them as ordinary text rather than guessing from heading keywords
-/// (which would assume the document's language — see CLAUDE.md philosophy P1).
+/// (which would assume the document's language — see CLAUDE.md language-neutrality rules).
 fn apply_paragraph_formatting(doc: &mut Document) {
     let mut after_heading = false;
     let mut is_first_element = true;

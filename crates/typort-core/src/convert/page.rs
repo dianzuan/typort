@@ -2593,7 +2593,7 @@ pub fn apply_styles_from_paged(paged: &PagedDocument, doc: &mut typort_ooxml::do
     }
 
     // Apply paragraph alignment from x-positions
-    apply_paragraph_alignment(paged, &paged_styles, doc);
+    apply_paragraph_alignment(&paged_styles, doc);
 
     // Drop per-run bold/size that merely restate the Heading style's own values:
     // the Heading{n} pStyle already supplies `<w:b/>` and the detected per-level
@@ -3082,7 +3082,6 @@ fn apply_overrides_to_paragraph(
 
 /// Apply paragraph alignment by cross-referencing rendered x-positions.
 fn apply_paragraph_alignment(
-    _paged: &PagedDocument,
     paged_styles: &[PagedRunStyle],
     doc: &mut typort_ooxml::document::Document,
 ) {

@@ -1,12 +1,6 @@
 //! Shared fixture-conversion and XML-scanning helpers for the area modules in
 //! the `integration` test binary. This file does not itself match Cargo's test
 //! entry-point patterns; `tests/integration/main.rs` pulls it in explicitly.
-//!
-//! Not every consuming binary/module uses every helper here, which would
-//! otherwise warn under `dead_code` from that binary's point of view — each
-//! such helper carries its own item-level `#[allow(dead_code)]` below rather
-//! than a blanket file-level allow, so an actually-unused *new* helper still
-//! warns.
 
 use std::io::Cursor;
 use std::path::PathBuf;

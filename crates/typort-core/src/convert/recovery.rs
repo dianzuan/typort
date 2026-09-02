@@ -1145,7 +1145,7 @@ fn collect_horizontal_lines(frame: &Frame, offset: Point, min_width: f64, lines:
 /// the paged output.  This fixes cases where Typst's HTML export splits inline
 /// content (e.g. `super()` calls interleaved with author names in a `#for` loop)
 /// into separate block-level elements that become separate Word paragraphs.
-pub(super) fn merge_same_line_paragraphs(doc: &mut Document, _paged: &PagedDocument) {
+pub(super) fn merge_same_line_paragraphs(doc: &mut Document) {
     let mut i = 0;
     while i + 1 < doc.body.elements.len() {
         let should_merge = {
@@ -1198,19 +1198,6 @@ pub(super) fn merge_same_line_paragraphs(doc: &mut Document, _paged: &PagedDocum
     }
 }
 
-/// Set table borders from the rules actually drawn in the `PagedDocument`.
-///
-/// Scope (a deliberate, documented heuristic — not a silent cap): this acts only
-/// when the rendered pages draw horizontal table rules but NO table vertical
-/// lines, which is the signature of three-line (三线表) tables. In that case every
-/// table is rendered three-line — top/bottom rules plus a header separator, with
-/// no vertical or inner-row rules — using the thickest/thinnest rule widths
-/// observed. If any vertical table line is present (a boxed grid), nothing is
-/// changed and the writer keeps its uniform-grid fallback. A document that mixes
-/// boxed and three-line tables therefore stays boxed (safe: never a false
-/// three-line). Per-table stroke reconstruction would need Typst's grid-line
-/// resolution (auto hline positions / `set`-rule strokes live outside the queried
-/// element), so this geometry signal is used instead.
 /// Per-table rule evidence harvested from the paged frames: horizontal rule
 /// thicknesses (eighths of a point) and whether any cell-height vertical line
 /// is drawn inside the table.

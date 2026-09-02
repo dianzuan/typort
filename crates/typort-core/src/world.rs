@@ -40,9 +40,8 @@ fn is_ext_b_subset(info: &FontInfo) -> bool {
 
 /// Build the font store, dropping any `…-ExtB` (Unicode Extension-B) subset face.
 ///
-/// Loads the bundled (`embedded`) and the system fonts — matching the old
-/// `include_system_fonts(true)` behavior — plus any faces found (recursively) in
-/// `extra_dirs`, then filters out the Ext-B subset faces (see
+/// Loads the bundled (`embedded`) and system fonts plus any faces found
+/// (recursively) in `extra_dirs`, then filters out the Ext-B subset faces (see
 /// [`is_ext_b_subset`]) before they enter the store, so the font book it exposes
 /// never contains them. `extra_dirs` is empty for [`TyportWorld::new`]; it exists
 /// so tests can vendor fonts under `tests/fonts/` instead of depending on what
@@ -176,23 +175,17 @@ impl World for TyportWorld {
         let resolved = match offset {
             None => now,
             Some(duration) => {
-                // `Duration::seconds()` is the total offset in seconds as `f64`;
-                // round to whole seconds and reject a non-finite or out-of-`i32`
-                // value (a real UTC offset is ±18h, well within range) so we never
-                // truncate — out-of-range just falls back to no adjustment below.
-                let rounded = duration.seconds().round();
-                if !rounded.is_finite()
-                    || rounded < f64::from(i32::MIN)
-                    || rounded > f64::from(i32::MAX)
-                {
-                    return None;
-                }
-                // Bounds-checked just above, so this `f64 -> i32` cannot truncate.
-                #[allow(
-                    clippy::cast_possible_truncation,
-                    reason = "rounded value verified in i32 range"
-                )]
-                let secs = rounded as i32;
+                let [weeks, days, hours, minutes, seconds] = duration.decompose();
+                let secs = weeks
+                    .checked_mul(7)?
+                    .checked_add(days)?
+                    .checked_mul(24)?
+                    .checked_add(hours)?
+                    .checked_mul(60)?
+                    .checked_add(minutes)?
+                    .checked_mul(60)?
+                    .checked_add(seconds)?;
+                let secs = i32::try_from(secs).ok()?;
                 now.to_offset(time::UtcOffset::from_whole_seconds(secs).ok()?)
             }
         };
