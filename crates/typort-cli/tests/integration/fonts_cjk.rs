@@ -203,7 +203,7 @@ fn no_math_fallback_font_on_plain_digit_or_whitespace() {
 #[test]
 fn variable_font_weight_bold_detection() {
     // Variable fonts (typst 0.15) report continuous weights; the paged-side bold
-    // detection (weight >= 700, convert/page.rs) must see the instantiated
+    // detection (weight >= 700, convert/page/run_style.rs) must see the instantiated
     // instance's weight, not the file default. Fonts vendored in tests/fonts.
     let fonts = std::path::PathBuf::from("../../tests/fonts");
     let doc_xml = crate::common::fixture_part_with_font_dirs(
@@ -235,7 +235,7 @@ fn variable_font_style_italic_detection() {
     // a separate italic face. `info().variant.style` (the file-default named
     // instance) stays Normal for such fonts even when `#text(style: "italic")`
     // resolves a nonzero axis coordinate at shape time — the paged-side italic
-    // detection (convert/page.rs `effective_style`) must read the resolved
+    // detection (convert/page/run_style.rs `effective_style`) must read the resolved
     // coordinate, not the file default. Font: tests/fonts/TyportSlantTest*,
     // a derivative of Karla with a synthetic `slnt` axis (no `ital` axis is
     // present in either font; `slnt` is what typst resolves for an italic

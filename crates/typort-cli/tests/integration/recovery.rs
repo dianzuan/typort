@@ -1,4 +1,4 @@
-//! Geometry-recovery heuristic tests (see convert/recovery/ and convert/page.rs).
+//! Geometry-recovery heuristic tests (see convert/recovery/ and convert/page/).
 
 use crate::common;
 use crate::common::{
