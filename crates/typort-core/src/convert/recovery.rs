@@ -7,11 +7,90 @@ use typort_ooxml::document::{
 };
 use typst::foundations::NativeElement;
 use typst::introspection::{Introspector, Location};
-use typst::layout::{Frame, FrameItem, Point};
+use typst::layout::{Frame, FrameItem};
 use typst_html::HtmlNode;
 use typst_layout::PagedDocument;
 
 use super::{collect_block_tag_locations, strip_cjk_spaces_str, strip_visual_markers};
+
+// Recovery heuristic thresholds. Keep every tuning knob in this block.
+
+/// Minimum rendered line length eligible for recovery.
+const MIN_RECOVERED_LINE_CHARS: usize = 2;
+/// Lines shorter than this use exact short-line matching only.
+const SHORT_LINE_CHAR_BOUNDARY: usize = 6;
+/// Minimum word count needed for majority word matching.
+const MIN_LINE_WORDS: usize = 2;
+/// Minimum word length included in majority matching.
+const MIN_SIGNIFICANT_WORD_CHARS: usize = 3;
+/// Minimum significant-word count needed for a majority decision.
+const MIN_SIGNIFICANT_WORDS: usize = 2;
+/// Minimum CJK characters in a word used for direct matching.
+const MIN_CJK_WORD_CHARS: usize = 4;
+/// Minimum CJK characters in a strong fragment match.
+const MIN_LONG_CJK_FRAGMENT_CHARS: usize = 8;
+/// Minimum CJK characters in a fragment used for majority matching.
+const MIN_SHORT_CJK_FRAGMENT_CHARS: usize = 4;
+/// Minimum short CJK fragments needed for a majority decision.
+const MIN_SHORT_CJK_FRAGMENTS: usize = 2;
+/// Minimum CJK projection length for matching a non-math line.
+const MIN_CJK_PROJECTION_CHARS: usize = 6;
+/// Minimum CJK projection length for matching a line containing math.
+const MIN_MATH_CJK_PROJECTION_CHARS: usize = 2;
+/// Minimum substantive emitted-heading run length used for title detection.
+const MIN_HEADING_RUN_CHARS: usize = 2;
+/// Minimum normalized table-cell text retained for matching.
+const MIN_TABLE_CELL_CHARS: usize = 2;
+/// Minimum recovered table-column text retained for matching.
+const MIN_TABLE_COLUMN_CHARS: usize = 3;
+/// Default body size in points when the recovery detector has no sample.
+const DEFAULT_RECOVERY_BODY_SIZE_PT: f64 = 10.5;
+/// Vertical bucket height in points used to assemble rendered lines.
+const LINE_Y_BUCKET_PT: f64 = 8.0;
+/// Default page width in points when paged geometry has no first page.
+const DEFAULT_PAGE_WIDTH_PT: f64 = 595.0;
+/// Page-width fraction contributing to the x-cluster gap threshold.
+const CLUSTER_PAGE_WIDTH_RATIO: f64 = 0.06;
+/// Absolute minimum x-cluster gap in points.
+const MIN_CLUSTER_GAP_PT: f64 = 20.0;
+/// Font-size multiple contributing to the x-cluster gap threshold.
+const CLUSTER_FONT_SIZE_MULTIPLE: f64 = 5.0;
+/// Minimum x-cluster count needed to recognize multi-column content.
+const MIN_COLUMN_CLUSTERS: usize = 2;
+/// Size multiple above which a multi-cluster line is treated as one title line.
+const LARGE_TEXT_BODY_SIZE_MULTIPLE: f64 = 1.3;
+/// Body-size fraction below which a recovered run is superscript.
+const SUPERSCRIPT_BODY_SIZE_RATIO: f64 = 0.8;
+/// Maximum combined character count for merging ordinary centered lines.
+const MAX_CENTERED_MERGE_CHARS: usize = 60;
+/// Font-size multiple bounding consecutive recovered-line baselines.
+const MAX_CONTIGUOUS_LINE_GAP_MULTIPLE: f64 = 2.0;
+/// Font-size multiple defining a visually large inter-cluster gap.
+const LARGE_CLUSTER_GAP_MULTIPLE: f64 = 3.0;
+/// Y-position tolerance in points when locating a recovered line.
+const RECOVERED_LINE_Y_TOLERANCE_PT: f64 = 2.0;
+/// Prefix length used to match paged text back to emitted elements.
+const ELEMENT_TEXT_PREFIX_CHARS: usize = 15;
+/// Page-width fraction a line must span to be a document rule candidate.
+const HORIZONTAL_RULE_PAGE_WIDTH_RATIO: f64 = 0.6;
+/// Minimum document-text bytes required before inserting a recovered rule.
+const MIN_RULE_DOCUMENT_TEXT_BYTES: usize = 10;
+/// Maximum vertical extent in points for a horizontal document rule.
+const MAX_HORIZONTAL_RULE_HEIGHT_PT: f64 = 5.0;
+/// Minimum Word border thickness in eighth-points.
+const MIN_TABLE_RULE_EIGHTH_PT: u32 = 2;
+/// Maximum minor-axis extent in points for a table rule.
+const TABLE_RULE_AXIS_TOLERANCE_PT: f64 = 0.5;
+/// Minimum horizontal table-rule length in points.
+const MIN_HORIZONTAL_TABLE_RULE_LENGTH_PT: f64 = 40.0;
+/// Minimum vertical table-rule length in points.
+const MIN_VERTICAL_TABLE_RULE_LENGTH_PT: f64 = 8.0;
+/// Minimum characters per recovered grid column.
+const MIN_RECOVERED_GRID_COLUMN_CHARS: usize = 3;
+/// Multiplier used to express strict or inclusive majority comparisons.
+const MAJORITY_SCALE: usize = 2;
+/// Half-point fallback for recovered runs without an explicit rendered size.
+const DEFAULT_RECOVERED_RUN_SIZE_HALF_PT: u32 = 21;
 
 /// A text line extracted from a `PagedDocument` frame, preserving run-level info.
 #[derive(Debug, Clone)]
@@ -97,7 +176,7 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
         if i < title_line_count {
             continue;
         }
-        if line.text.chars().count() < 2 {
+        if line.text.chars().count() < MIN_RECOVERED_LINE_CHARS {
             continue;
         }
         if line.all_math_font {
@@ -126,7 +205,7 @@ pub(super) fn recover_missing_content(paged: &PagedDocument, doc: &mut Document)
         // clusters and only when the model actually has a table, so genuine grid
         // content (no `BlockElement::Table`) is still recovered.
         if !table_cell_texts.is_empty()
-            && line.x_clusters.len() >= 2
+            && line.x_clusters.len() >= MIN_COLUMN_CLUSTERS
             && line_matches_table_cells(line, &table_cell_texts)
         {
             continue;
@@ -161,7 +240,7 @@ fn line_matches_existing_text(
     let demath = strip_math_italic(&line.text);
     let stripped = strip_visual_markers(&line.text);
     let demath_nospace = demath.replace(' ', "");
-    let short = line.text.chars().count() < 6;
+    let short = line.text.chars().count() < SHORT_LINE_CHAR_BOUNDARY;
     let short_exact = short
         && doc.body.elements.iter().any(|element| {
             if let BlockElement::Paragraph(paragraph) = element {
@@ -188,15 +267,15 @@ fn line_words_are_already_emitted(
     full_doc_text_nospace: &str,
 ) -> bool {
     let words: Vec<&str> = line.text.split_whitespace().collect();
-    if words.len() >= 2 {
+    if words.len() >= MIN_LINE_WORDS {
         let significant = words
             .iter()
-            .filter(|word| word.chars().count() >= 3)
+            .filter(|word| word.chars().count() >= MIN_SIGNIFICANT_WORD_CHARS)
             .count();
         let matched = words
             .iter()
             .filter(|word| {
-                if word.chars().count() < 3 {
+                if word.chars().count() < MIN_SIGNIFICANT_WORD_CHARS {
                     return false;
                 }
                 full_doc_text.contains(**word) || {
@@ -206,7 +285,7 @@ fn line_words_are_already_emitted(
                 }
             })
             .count();
-        if significant >= 2 && matched * 2 > significant {
+        if significant >= MIN_SIGNIFICANT_WORDS && matched * MAJORITY_SCALE > significant {
             return true;
         }
     }
@@ -216,12 +295,12 @@ fn line_words_are_already_emitted(
             .chars()
             .filter(|c| matches!(*c, '\u{4E00}'..='\u{9FFF}'))
             .count();
-        cjk_count >= 4 && full_doc_text.contains(*word)
+        cjk_count >= MIN_CJK_WORD_CHARS && full_doc_text.contains(*word)
     })
 }
 
 fn line_cjk_is_already_emitted(line: &FrameLine, full_doc_text: &str, doc_cjk: &str) -> bool {
-    let long_fragments = extract_cjk_fragments(&line.text, 8);
+    let long_fragments = extract_cjk_fragments(&line.text, MIN_LONG_CJK_FRAGMENT_CHARS);
     if long_fragments
         .iter()
         .any(|fragment| full_doc_text.contains(fragment))
@@ -229,13 +308,13 @@ fn line_cjk_is_already_emitted(line: &FrameLine, full_doc_text: &str, doc_cjk: &
         return true;
     }
 
-    let short_fragments = extract_cjk_fragments(&line.text, 4);
-    if short_fragments.len() >= 2 {
+    let short_fragments = extract_cjk_fragments(&line.text, MIN_SHORT_CJK_FRAGMENT_CHARS);
+    if short_fragments.len() >= MIN_SHORT_CJK_FRAGMENTS {
         let matched = short_fragments
             .iter()
             .filter(|fragment| full_doc_text.contains(*fragment))
             .count();
-        if matched * 2 > short_fragments.len() {
+        if matched * MAJORITY_SCALE > short_fragments.len() {
             return true;
         }
     }
@@ -252,7 +331,8 @@ fn line_cjk_is_already_emitted(line: &FrameLine, full_doc_text: &str, doc_cjk: &
     let has_math = line.text.chars().any(|c| {
         ('\u{1D400}'..='\u{1D7FF}').contains(&c) || ('\u{2200}'..='\u{22FF}').contains(&c)
     });
-    (cjk_len >= 6 || (cjk_len >= 2 && has_math)) && doc_cjk.contains(&line_cjk)
+    (cjk_len >= MIN_CJK_PROJECTION_CHARS || (cjk_len >= MIN_MATH_CJK_PROJECTION_CHARS && has_math))
+        && doc_cjk.contains(&line_cjk)
 }
 
 fn extract_header_footer_text(doc: &Document) -> String {
@@ -296,32 +376,36 @@ fn cluster_by_x<'a>(
     clusters
 }
 
-#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
 pub(super) fn extract_lines_from_all_pages(
     paged: &PagedDocument,
     margins: super::page::MarginsPt,
 ) -> Vec<FrameLine> {
     let mut all_lines = Vec::new();
 
-    let body_size = paged.pages().first().map_or(10.5, |p| {
-        let mut items = Vec::new();
-        collect_text_items_with_pos(&p.frame, Point::zero(), &mut items);
-        let mut sizes: HashMap<i32, usize> = HashMap::new();
-        for item in &items {
-            *sizes.entry((item.size_pt * 10.0) as i32).or_default() += item.text.len();
-        }
-        // Tie-break on the smaller size so the detected body size is
-        // deterministic (a bare `max_by_key` would pick whichever size the
-        // HashMap iterated first when two tie on glyph count).
-        sizes
-            .into_iter()
-            .max_by_key(|(s, c)| (*c, std::cmp::Reverse(*s)))
-            .map_or(10.5, |(s, _)| f64::from(s) / 10.0)
-    });
+    let body_size = paged
+        .pages()
+        .first()
+        .map_or(DEFAULT_RECOVERY_BODY_SIZE_PT, |p| {
+            let mut items = Vec::new();
+            collect_text_items_with_pos(&p.frame, &mut items);
+            let mut sizes: HashMap<u32, usize> = HashMap::new();
+            for item in &items {
+                *sizes
+                    .entry(super::page::pt_to_tenths(item.size_pt))
+                    .or_default() += item.text.len();
+            }
+            // Tie-break on the smaller size so the detected body size is
+            // deterministic (a bare `max_by_key` would pick whichever size the
+            // HashMap iterated first when two tie on glyph count).
+            super::stats::dominant_key(sizes.iter().map(|(size, count)| (size, *count)))
+                .map_or(DEFAULT_RECOVERY_BODY_SIZE_PT, |size| {
+                    f64::from(*size) / 10.0
+                })
+        });
 
     for (page_idx, page) in paged.pages().iter().enumerate() {
         let mut text_items = Vec::new();
-        collect_text_items_with_pos(&page.frame, Point::zero(), &mut text_items);
+        collect_text_items_with_pos(&page.frame, &mut text_items);
 
         // Drop header/footer chrome (running heads, page numbers) before it
         // becomes a candidate body line. We use the *same* margin boundary that
@@ -337,9 +421,9 @@ pub(super) fn extract_lines_from_all_pages(
         );
         text_items.retain(|item| body_top <= item.y && item.y <= body_bottom);
 
-        let mut y_groups: BTreeMap<i64, Vec<&FrameTextItem>> = BTreeMap::new();
+        let mut y_groups: BTreeMap<u64, Vec<&FrameTextItem>> = BTreeMap::new();
         for item in &text_items {
-            let y_key = (item.y / 8.0).round() as i64;
+            let y_key = (item.y / LINE_Y_BUCKET_PT).round().to_bits();
             y_groups.entry(y_key).or_default().push(item);
         }
 
@@ -347,17 +431,19 @@ pub(super) fn extract_lines_from_all_pages(
             let page_width_pt = paged
                 .pages()
                 .first()
-                .map_or(595.0, |p| p.frame.width().to_pt());
+                .map_or(DEFAULT_PAGE_WIDTH_PT, |p| p.frame.width().to_pt());
             let max_font_size = items.iter().map(|i| i.size_pt).fold(0.0_f64, f64::max);
-            let gap_threshold = (page_width_pt * 0.06).max(20.0).max(max_font_size * 5.0);
+            let gap_threshold = (page_width_pt * CLUSTER_PAGE_WIDTH_RATIO)
+                .max(MIN_CLUSTER_GAP_PT)
+                .max(max_font_size * CLUSTER_FONT_SIZE_MULTIPLE);
             let raw_clusters = cluster_by_x(items, gap_threshold);
 
-            let clusters = if raw_clusters.len() >= 2 {
+            let clusters = if raw_clusters.len() >= MIN_COLUMN_CLUSTERS {
                 let max_size = raw_clusters
                     .iter()
                     .flat_map(|c| c.iter().map(|i| i.size_pt))
                     .fold(0.0_f64, f64::max);
-                if max_size > body_size * 1.3 {
+                if max_size > body_size * LARGE_TEXT_BODY_SIZE_MULTIPLE {
                     vec![raw_clusters.into_iter().flatten().collect()]
                 } else {
                     raw_clusters
@@ -374,13 +460,11 @@ pub(super) fn extract_lines_from_all_pages(
                 let mut cluster_runs = Vec::new();
                 let cluster_x: f64 = cluster.first().map_or(0.0, |i| i.x);
                 for item in cluster {
-                    let is_super = item.size_pt < body_size * 0.8;
+                    let is_super = item.size_pt < body_size * SUPERSCRIPT_BODY_SIZE_RATIO;
                     let mut run = Run::new(&item.text);
                     run.superscript = is_super;
-                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                    let half_pt = (item.size_pt * 2.0).round() as u32;
-                    #[allow(clippy::cast_sign_loss)]
-                    if half_pt != (body_size * 2.0).round().max(0.0) as u32 {
+                    let half_pt = super::page::pt_to_half_pt(item.size_pt);
+                    if half_pt != super::page::pt_to_half_pt(body_size) {
                         run.size_half_pt = Some(half_pt);
                     }
                     cluster_runs.push(run.clone());
@@ -394,7 +478,8 @@ pub(super) fn extract_lines_from_all_pages(
             }
 
             let trimmed = full_text.trim().to_string();
-            let avg_y = items.iter().map(|i| i.y).sum::<f64>() / items.len() as f64;
+            let item_count = u32::try_from(items.len()).map_or(f64::from(u32::MAX), f64::from);
+            let avg_y = items.iter().map(|i| i.y).sum::<f64>() / item_count;
             let all_math_font = items.iter().all(|i| i.font_name.contains("Math"));
             if !trimmed.is_empty() {
                 all_lines.push(FrameLine {
@@ -411,35 +496,22 @@ pub(super) fn extract_lines_from_all_pages(
     all_lines
 }
 
-fn collect_text_items_with_pos(frame: &Frame, offset: Point, items: &mut Vec<FrameTextItem>) {
-    for (pos, item) in frame.items() {
-        let abs_x = offset.x + pos.x;
-        let abs_y = offset.y + pos.y;
-        match item {
-            FrameItem::Text(text_item) => {
-                let text = text_item.text.to_string();
-                if !text.is_empty() {
-                    let font_name = text_item.font.info().family.clone();
-                    items.push(FrameTextItem {
-                        y: abs_y.to_pt(),
-                        x: abs_x.to_pt(),
-                        text,
-                        size_pt: text_item.size.to_pt(),
-                        font_name,
-                    });
-                }
+fn collect_text_items_with_pos(frame: &Frame, items: &mut Vec<FrameTextItem>) {
+    super::frames::visit_frame_items(frame, true, &mut |position, item| {
+        if let FrameItem::Text(text_item) = item {
+            let text = text_item.text.to_string();
+            if !text.is_empty() {
+                let font_name = text_item.font.info().family.clone();
+                items.push(FrameTextItem {
+                    y: position.y.to_pt(),
+                    x: position.x.to_pt(),
+                    text,
+                    size_pt: text_item.size.to_pt(),
+                    font_name,
+                });
             }
-            // Skip drawing canvases (CeTZ plots etc.): their text labels are
-            // baked into the rasterized figure image, so recovering them as
-            // body text would duplicate them as stray paragraphs. Detected by
-            // Bézier curve content — tables and rules use only straight lines.
-            FrameItem::Group(group) if !super::image::frame_has_curve(&group.frame) => {
-                let new_offset = Point::new(abs_x, abs_y);
-                collect_text_items_with_pos(&group.frame, new_offset, items);
-            }
-            _ => {}
         }
-    }
+    });
 }
 
 fn count_title_lines(paged_lines: &[FrameLine], doc: &Document) -> usize {
@@ -452,8 +524,10 @@ fn count_title_lines(paged_lines: &[FrameLine], doc: &Document) -> usize {
                 // Match on substantive heading text only. A heading's number prefix
                 // ("A ", "1 ") is now a separate one-char run; matching on it would
                 // misclassify any title-page line that merely starts with "A"/"1".
-                p.text_runs()
-                    .any(|r| r.text.trim().chars().count() >= 2 && line.text.contains(&r.text))
+                p.text_runs().any(|r| {
+                    r.text.trim().chars().count() >= MIN_HEADING_RUN_CHARS
+                        && line.text.contains(&r.text)
+                })
             } else {
                 false
             }
@@ -470,30 +544,33 @@ fn count_title_lines(paged_lines: &[FrameLine], doc: &Document) -> usize {
 /// Map Unicode Mathematical Italic/Bold/Script characters to ASCII equivalents.
 /// Paged output renders math as Unicode math italic (U+1D400-U+1D7FF) while
 /// OMML stores them as plain ASCII with formatting attributes.
-#[allow(clippy::cast_possible_truncation)]
 fn strip_math_italic(text: &str) -> String {
     text.chars()
         .map(|c| {
-            let cp = c as u32;
+            let cp = u32::from(c);
             match cp {
                 // Math italic small a-z: U+1D44E-U+1D467
-                0x1D44E..=0x1D467 => (b'a' + (cp - 0x1D44E) as u8) as char,
+                0x1D44E..=0x1D467 => math_letter(c, cp, 0x1D44E, 'a'),
                 // Math italic capital A-Z: U+1D434-U+1D44D
-                0x1D434..=0x1D44D => (b'A' + (cp - 0x1D434) as u8) as char,
+                0x1D434..=0x1D44D => math_letter(c, cp, 0x1D434, 'A'),
                 // Math bold small a-z: U+1D41A-U+1D433
-                0x1D41A..=0x1D433 => (b'a' + (cp - 0x1D41A) as u8) as char,
+                0x1D41A..=0x1D433 => math_letter(c, cp, 0x1D41A, 'a'),
                 // Math bold capital A-Z: U+1D400-U+1D419
-                0x1D400..=0x1D419 => (b'A' + (cp - 0x1D400) as u8) as char,
+                0x1D400..=0x1D419 => math_letter(c, cp, 0x1D400, 'A'),
                 // Math bold italic small a-z: U+1D482-U+1D49B
-                0x1D482..=0x1D49B => (b'a' + (cp - 0x1D482) as u8) as char,
+                0x1D482..=0x1D49B => math_letter(c, cp, 0x1D482, 'a'),
                 // Math bold italic capital A-Z: U+1D468-U+1D481
-                0x1D468..=0x1D481 => (b'A' + (cp - 0x1D468) as u8) as char,
+                0x1D468..=0x1D481 => math_letter(c, cp, 0x1D468, 'A'),
                 // Math italic h: U+210E
                 0x210E => 'h',
                 _ => c,
             }
         })
         .collect()
+}
+
+fn math_letter(original: char, codepoint: u32, range_start: u32, ascii_start: char) -> char {
+    char::from_u32(u32::from(ascii_start) + codepoint - range_start).unwrap_or(original)
 }
 
 /// Cancel every whitespace character, so a paged render and the emitted text of the
@@ -635,7 +712,7 @@ fn collect_cells_from_table(table: &Table, out: &mut Vec<String>) {
 
 fn push_cell_text(para: &Paragraph, out: &mut Vec<String>) {
     let text = cancel_whitespace(&strip_math_italic(&para.full_text_content()));
-    if text.chars().count() >= 2 {
+    if text.chars().count() >= MIN_TABLE_CELL_CHARS {
         out.push(text);
     }
 }
@@ -652,7 +729,7 @@ fn line_matches_table_cells(line: &FrameLine, cells: &[String]) -> bool {
             let joined: String = c.runs.iter().map(|r| r.text.as_str()).collect();
             cancel_whitespace(&strip_math_italic(&joined))
         })
-        .filter(|t| t.chars().count() >= 3)
+        .filter(|t| t.chars().count() >= MIN_TABLE_COLUMN_CHARS)
         .collect();
     if cols.is_empty() {
         return false;
@@ -661,7 +738,7 @@ fn line_matches_table_cells(line: &FrameLine, cells: &[String]) -> bool {
         .iter()
         .filter(|col| cells.iter().any(|cell| cell.contains(col.as_str())))
         .count();
-    matched * 2 >= cols.len()
+    matched * MAJORITY_SCALE >= cols.len()
 }
 
 pub(super) fn extract_doc_text(doc: &Document) -> String {
@@ -703,11 +780,6 @@ fn find_title_section_end(doc: &Document) -> usize {
     doc.body.elements.len()
 }
 
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn pt_to_twips(pt: f64) -> u32 {
-    (pt * 20.0).round().max(0.0) as u32
-}
-
 fn insert_missing_at_position(
     doc: &mut Document,
     missing_lines: &[FrameLine],
@@ -729,15 +801,15 @@ fn insert_missing_at_position(
         para.page_from_paged = Some(line.page_idx + 1);
 
         let has_large_gap = line_has_large_cluster_gap(line);
-        let is_real_grid = line.x_clusters.len() >= 2
+        let is_real_grid = line.x_clusters.len() >= MIN_COLUMN_CLUSTERS
             && has_large_gap
-            && line
-                .x_clusters
-                .iter()
-                .all(|c| c.runs.iter().map(|r| r.text.chars().count()).sum::<usize>() >= 3);
+            && line.x_clusters.iter().all(|c| {
+                c.runs.iter().map(|r| r.text.chars().count()).sum::<usize>()
+                    >= MIN_RECOVERED_GRID_COLUMN_CHARS
+            });
         if is_real_grid {
             let last_cluster = &line.x_clusters[line.x_clusters.len() - 1];
-            let tab_pos = pt_to_twips(last_cluster.x_pt);
+            let tab_pos = super::page::pt_to_twips(last_cluster.x_pt);
             let tab_stop = if tab_pos > 0 {
                 tab_pos
             } else {
@@ -752,7 +824,7 @@ fn insert_missing_at_position(
                     para.push_run(run.clone());
                 }
             }
-        } else if line.x_clusters.len() >= 2 {
+        } else if line.x_clusters.len() >= MIN_COLUMN_CLUSTERS {
             // Multiple clusters with small gaps — join with spaces, not tabs. Insert
             // an NBSP at the boundary only when neither side already carries a
             // whitespace character. Clusters recovered from paged text items
@@ -827,7 +899,7 @@ fn merge_centered_paragraphs(
                 matches!(previous.alignment, Some(Alignment::Center))
                     && matches!(current.alignment, Some(Alignment::Center))
                     && previous_size == current_size
-                    && (combined_length < 60 || same_non_default_size)
+                    && (combined_length < MAX_CENTERED_MERGE_CHARS || same_non_default_size)
                     && previous_line
                         .is_some_and(|line| recovered_lines_are_contiguous(line, current_line))
             } else {
@@ -858,10 +930,15 @@ fn recovered_lines_are_contiguous(previous: &FrameLine, current: &FrameLine) -> 
         .runs
         .iter()
         .chain(&current.runs)
-        .map(|run| f64::from(run.size_half_pt.unwrap_or(21)) / 2.0)
+        .map(|run| {
+            f64::from(
+                run.size_half_pt
+                    .unwrap_or(DEFAULT_RECOVERED_RUN_SIZE_HALF_PT),
+            ) / 2.0
+        })
         .fold(0.0_f64, f64::max);
     let vertical_gap = current.y_pt - previous.y_pt;
-    vertical_gap >= 0.0 && vertical_gap <= font_size_pt * 2.0
+    vertical_gap >= 0.0 && vertical_gap <= font_size_pt * MAX_CONTIGUOUS_LINE_GAP_MULTIPLE
 }
 
 fn first_text_size(paragraph: &Paragraph) -> Option<u32> {
@@ -874,25 +951,29 @@ fn first_text_size(paragraph: &Paragraph) -> Option<u32> {
     })
 }
 
-// Character counts in one rendered line are far below f64's exact integer range.
-#[allow(clippy::cast_precision_loss)]
 fn line_has_large_cluster_gap(line: &FrameLine) -> bool {
-    if line.x_clusters.len() < 2 {
+    if line.x_clusters.len() < MIN_COLUMN_CLUSTERS {
         return false;
     }
     let max_font_size_pt = line
         .runs
         .iter()
-        .map(|run| f64::from(run.size_half_pt.unwrap_or(21)) / 2.0)
+        .map(|run| {
+            f64::from(
+                run.size_half_pt
+                    .unwrap_or(DEFAULT_RECOVERED_RUN_SIZE_HALF_PT),
+            ) / 2.0
+        })
         .fold(0.0_f64, f64::max);
-    let gap_threshold = max_font_size_pt * 3.0;
+    let gap_threshold = max_font_size_pt * LARGE_CLUSTER_GAP_MULTIPLE;
     line.x_clusters.windows(2).any(|pair| {
         let left_char_count: usize = pair[0]
             .runs
             .iter()
             .map(|run| run.text.chars().count())
             .sum();
-        let left_end = pair[0].x_pt + left_char_count as f64 * max_font_size_pt;
+        let left_char_count = u32::try_from(left_char_count).map_or(f64::from(u32::MAX), f64::from);
+        let left_end = pair[0].x_pt + left_char_count * max_font_size_pt;
         pair[1].x_pt - left_end > gap_threshold
     })
 }
@@ -909,7 +990,7 @@ fn find_insert_position_by_y(
     let missing_idx = all_page_lines.iter().position(|line| {
         line.text == first_missing.text
             && line.page_idx == first_missing.page_idx
-            && (line.y_pt - first_missing.y_pt).abs() < 2.0
+            && (line.y_pt - first_missing.y_pt).abs() < RECOVERED_LINE_Y_TOLERANCE_PT
     });
 
     if let Some(idx) = missing_idx {
@@ -928,7 +1009,7 @@ fn find_element_by_text(doc: &Document, text: &str) -> Option<usize> {
     if text.is_empty() {
         return None;
     }
-    let search_prefix: String = text.chars().take(15).collect();
+    let search_prefix: String = text.chars().take(ELEMENT_TEXT_PREFIX_CHARS).collect();
     for (i, elem) in doc.body.elements.iter().enumerate() {
         let elem_text = match elem {
             BlockElement::Paragraph(p) => p.text_content(),
@@ -1027,11 +1108,6 @@ pub(super) fn source_declares_line_rule(source: &str) -> bool {
 }
 
 /// Detect horizontal line shapes and insert horizontal rule paragraphs.
-#[allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::cast_precision_loss
-)]
 pub(super) fn insert_horizontal_rules_from_paged(
     paged: &PagedDocument,
     doc: &mut Document,
@@ -1059,10 +1135,10 @@ pub(super) fn insert_horizontal_rules_from_paged(
 
     for (page_idx, page) in paged.pages().iter().enumerate() {
         let page_width = page.frame.width().to_pt();
-        let content_width = page_width * 0.6;
+        let content_width = page_width * HORIZONTAL_RULE_PAGE_WIDTH_RATIO;
 
         let mut lines = Vec::new();
-        collect_horizontal_lines(&page.frame, Point::zero(), content_width, &mut lines);
+        collect_horizontal_lines(&page.frame, content_width, &mut lines);
 
         for line_y in lines {
             hrules.push((page_idx + 1, line_y));
@@ -1088,9 +1164,12 @@ pub(super) fn insert_horizontal_rules_from_paged(
                 .position(|&p| p >= *page_num)
                 .unwrap_or(total_elements)
         } else {
-            let normalized = f64::from(*page_num as u32 - 1) / f64::from(total_pages as u32);
-            let idx = (normalized * total_elements as f64).round() as usize;
-            idx.min(total_elements)
+            super::stats::proportional_index_rounded(
+                page_num.saturating_sub(1),
+                total_pages,
+                total_elements,
+            )
+            .min(total_elements)
         };
 
         let already_has_hrule = doc.body.elements.get(insert_idx).is_some_and(|e| {
@@ -1105,7 +1184,7 @@ pub(super) fn insert_horizontal_rules_from_paged(
             continue;
         }
 
-        if full_doc_text.len() < 10 {
+        if full_doc_text.len() < MIN_RULE_DOCUMENT_TEXT_BYTES {
             continue;
         }
 
@@ -1117,28 +1196,18 @@ pub(super) fn insert_horizontal_rules_from_paged(
     }
 }
 
-fn collect_horizontal_lines(frame: &Frame, offset: Point, min_width: f64, lines: &mut Vec<f64>) {
-    for (pos, item) in frame.items() {
-        let abs_x = offset.x + pos.x;
-        let abs_y = offset.y + pos.y;
-        match item {
-            FrameItem::Shape(shape, _) => {
-                if let typst::visualize::Geometry::Line(end_pt) = &shape.geometry {
-                    let line_width = end_pt.x.to_pt().abs();
-                    let line_height = end_pt.y.to_pt().abs();
-                    if line_width >= min_width && line_height < 5.0 {
-                        lines.push(abs_y.to_pt());
-                    }
-                }
+fn collect_horizontal_lines(frame: &Frame, min_width: f64, lines: &mut Vec<f64>) {
+    super::frames::visit_frame_items(frame, true, &mut |position, item| {
+        if let FrameItem::Shape(shape, _) = item
+            && let typst::visualize::Geometry::Line(end_pt) = &shape.geometry
+        {
+            let line_width = end_pt.x.to_pt().abs();
+            let line_height = end_pt.y.to_pt().abs();
+            if line_width >= min_width && line_height < MAX_HORIZONTAL_RULE_HEIGHT_PT {
+                lines.push(position.y.to_pt());
             }
-            // Skip drawing canvases: a plot's axis line is not a document rule.
-            FrameItem::Group(group) if !super::image::frame_has_curve(&group.frame) => {
-                let new_offset = Point::new(abs_x, abs_y);
-                collect_horizontal_lines(&group.frame, new_offset, min_width, lines);
-            }
-            _ => {}
         }
-    }
+    });
 }
 
 /// Merge consecutive paragraphs whose text appears on the same visual line in
@@ -1302,7 +1371,7 @@ fn collect_table_rules(
     per_table: &mut HashMap<Location, TableRules>,
 ) {
     use typst::introspection::Tag;
-    for (_pos, item) in frame.items() {
+    super::frames::visit_frame_items(frame, false, &mut |_, item| {
         match item {
             FrameItem::Tag(Tag::Start(content, _)) => {
                 if content.elem() == typst_library::model::TableElem::ELEM
@@ -1322,31 +1391,32 @@ fn collect_table_rules(
             }
             FrameItem::Shape(shape, _) => {
                 let Some(&owner) = stack.first() else {
-                    continue; // not inside any table — footnote separator, #line(), …
+                    return; // not inside any table — footnote separator, #line(), …
                 };
                 if let typst::visualize::Geometry::Line(end) = &shape.geometry {
                     let dx = end.x.to_pt().abs();
                     let dy = end.y.to_pt().abs();
                     let thickness_pt = shape.stroke.as_ref().map_or(0.0, |s| s.thickness.to_pt());
                     if thickness_pt <= 0.0 {
-                        continue;
+                        return;
                     }
-                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                    let sz = ((thickness_pt * 8.0).round() as u32).max(2);
+                    let sz =
+                        super::page::pt_to_eighth_pt(thickness_pt).max(MIN_TABLE_RULE_EIGHTH_PT);
                     let rules = per_table.entry(owner).or_default();
-                    if dy < 0.5 && dx >= 40.0 {
+                    if dy < TABLE_RULE_AXIS_TOLERANCE_PT
+                        && dx >= MIN_HORIZONTAL_TABLE_RULE_LENGTH_PT
+                    {
                         // A wide, flat rule — a horizontal table line.
                         rules.sizes.push(sz);
-                    } else if dx < 0.5 && dy >= 8.0 {
+                    } else if dx < TABLE_RULE_AXIS_TOLERANCE_PT
+                        && dy >= MIN_VERTICAL_TABLE_RULE_LENGTH_PT
+                    {
                         // A vertical line tall enough to be a cell border → boxed grid.
                         rules.has_vertical = true;
                     }
                 }
             }
-            FrameItem::Group(group) => {
-                collect_table_rules(&group.frame, stack, order, per_table);
-            }
             _ => {}
         }
-    }
+    });
 }

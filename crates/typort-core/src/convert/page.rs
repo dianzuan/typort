@@ -12,7 +12,7 @@ use typort_ooxml::document::{
     PageNumberFormat, PageSettings, Paragraph, ParagraphStyle, Run, SectionBreak, SectionBreakType,
 };
 use typst::World;
-use typst::layout::{Frame, FrameItem, Point};
+use typst::layout::{Frame, FrameItem};
 use typst_layout::PagedDocument;
 use typst_library::foundations::PathOrStr;
 
@@ -23,6 +23,105 @@ type StyleOverrideMaps = (
     HashMap<typst_syntax::Span, Vec<(String, RunStyleOverride)>>,
     HashMap<String, Vec<RunStyleOverride>>,
 );
+
+// Paged-style heuristic thresholds. Keep every tuning knob in this block.
+
+/// Pages sampled for the glyph-weighted document-style detector.
+const DOCUMENT_STYLE_SAMPLE_PAGES: usize = 3;
+/// Half-point fallback when no rendered body size is available.
+const DEFAULT_BODY_SIZE_HALF_PT: u32 = 21;
+/// Cap-height ratio used when rendered font metrics are unavailable.
+const DEFAULT_CAP_HEIGHT_RATIO: f64 = 0.66;
+/// Minimum text fragments needed to infer a first-line indent.
+const MIN_INDENT_FRAGMENTS: usize = 4;
+/// Minimum left-edge samples needed to compare indent positions.
+const MIN_INDENT_EDGES: usize = 2;
+/// Minimum x clusters needed to distinguish margin and indent positions.
+const MIN_INDENT_CLUSTERS: usize = 2;
+/// Maximum x-distance in points for fragments to share an indent cluster.
+const INDENT_CLUSTER_TOLERANCE_PT: f64 = 3.0;
+/// Minimum detected first-line indent in points.
+const MIN_FIRST_LINE_INDENT_PT: f64 = 1.0;
+/// Maximum detected indent as a multiple of body size.
+const MAX_FIRST_LINE_INDENT_BODY_MULTIPLE: f64 = 6.0;
+/// Fallback first-line indent as a multiple of body size.
+const DEFAULT_FIRST_LINE_INDENT_BODY_MULTIPLE: f64 = 2.0;
+/// Fallback line pitch as a multiple of body size.
+const DEFAULT_LINE_PITCH_BODY_MULTIPLE: f64 = 1.65;
+/// Half-point tolerance for selecting body-sized lines.
+const BODY_SIZE_TOLERANCE_HALF_PT: u32 = 1;
+/// Minimum body baselines needed to infer line spacing.
+const MIN_LINE_SPACING_BASELINES: usize = 2;
+/// Y-distance in points below which repeated baselines are deduplicated.
+const LINE_Y_DEDUP_TOLERANCE_PT: f64 = 0.5;
+/// Smallest plausible line pitch as a multiple of body size.
+const MIN_LINE_PITCH_BODY_MULTIPLE: f64 = 0.8;
+/// Largest plausible line pitch as a multiple of body size.
+const MAX_LINE_PITCH_BODY_MULTIPLE: f64 = 3.0;
+/// Minimum emitted line spacing in twips.
+const MIN_LINE_SPACING_TWIPS: u32 = 160;
+/// Maximum emitted line spacing in twips.
+const MAX_LINE_SPACING_TWIPS: u32 = 960;
+/// Pages sampled by the independently line-weighted justification detector.
+const JUSTIFICATION_SAMPLE_PAGES: usize = 3;
+/// Minimum rendered items needed to attempt justification detection.
+const MIN_JUSTIFICATION_ITEMS: usize = 4;
+/// Maximum baseline difference in points for items on the same line.
+const JUSTIFICATION_LINE_Y_TOLERANCE_PT: f64 = 2.0;
+/// Minimum line count needed after grouping or full-line filtering.
+const MIN_JUSTIFICATION_LINES: usize = 3;
+/// Fraction of the median right edge a line must reach to count as full.
+const FULL_LINE_RIGHT_EDGE_RATIO: f64 = 0.85;
+/// Maximum right-edge standard deviation in points for justified text.
+const JUSTIFIED_RIGHT_EDGE_STD_DEV_PT: f64 = 3.0;
+/// Smallest plausible code or footnote size in half-points.
+const MIN_AUXILIARY_TEXT_SIZE_HALF_PT: u32 = 12;
+/// Body-size decrement used by code and footnote fallbacks.
+const AUXILIARY_TEXT_SIZE_DECREMENT_HALF_PT: u32 = 3;
+/// Minimum fallback code or footnote size in half-points.
+const MIN_AUXILIARY_FALLBACK_SIZE_HALF_PT: u32 = 14;
+/// Minimum global count for a footnote-size fallback candidate.
+const MIN_FOOTNOTE_SIZE_COUNT: usize = 3;
+/// Minimum semantic footnote text length used for paged matching.
+const MIN_FOOTNOTE_TEXT_CHARS: usize = 4;
+/// Minimum rendered footnote fragment length used for paged matching.
+const MIN_FOOTNOTE_FRAGMENT_CHARS: usize = 3;
+/// Fallback heading-size offsets from the body size, in half-points.
+const DEFAULT_HEADING_SIZE_OFFSETS: [u32; 5] = [9, 7, 5, 3, 1];
+/// Pages sampled for heading-gap detection.
+const HEADING_SPACING_SAMPLE_PAGES: usize = 5;
+/// Minimum items needed to infer heading spacing.
+const MIN_HEADING_SPACING_ITEMS: usize = 3;
+/// Y-distance in points below which spacing samples are deduplicated.
+const SPACING_Y_DEDUP_TOLERANCE_PT: f64 = 1.0;
+/// Largest heading-neighbor gap as a multiple of body size.
+const MAX_HEADING_GAP_BODY_MULTIPLE: f64 = 15.0;
+/// Maximum inferred heading-before spacing in twips.
+const MAX_HEADING_BEFORE_TWIPS: u32 = 1500;
+/// Maximum inferred heading-after spacing in twips.
+const MAX_HEADING_AFTER_TWIPS: u32 = 800;
+/// Pages sampled by the independently gap-weighted body-spacing detector.
+const BODY_SPACING_SAMPLE_PAGES: usize = 3;
+/// Minimum items needed to infer body paragraph spacing.
+const MIN_BODY_SPACING_ITEMS: usize = 4;
+/// Smallest paragraph gap as a multiple of body size.
+const MIN_PARAGRAPH_GAP_BODY_MULTIPLE: f64 = 1.8;
+/// Largest paragraph gap as a multiple of body size.
+const MAX_PARAGRAPH_GAP_BODY_MULTIPLE: f64 = 8.0;
+/// Maximum inferred body paragraph spacing in twips.
+const MAX_BODY_SPACING_TWIPS: u32 = 1000;
+/// Page-dimension difference in twips that signals a section change.
+const SECTION_DIMENSION_TOLERANCE_TWIPS: u32 = 20;
+/// Fraction of each margin retained as a guard between body and margin content.
+const BODY_ZONE_MARGIN_RATIO: f64 = 0.9;
+/// Fraction of page center used to recognize centered margin text.
+const MARGIN_CENTER_TOLERANCE_RATIO: f64 = 0.15;
+/// OpenType weight at which rendered text is treated as bold.
+const BOLD_WEIGHT_THRESHOLD: u16 = 700;
+/// Binary `ital` variation-axis value at which rendered text is italic.
+const ITALIC_AXIS_THRESHOLD: f32 = 0.5;
+/// Fraction of page width used to recognize centered headings.
+const HEADING_CENTER_TOLERANCE_RATIO: f64 = 0.05;
 
 /// Extract document style (fonts, sizes, spacing) from the rendered `PagedDocument`.
 ///
@@ -36,10 +135,9 @@ pub fn extract_document_style(paged: &PagedDocument) -> DocumentStyle {
     let mut y_positions: Vec<(f64, u32)> = Vec::new();
     let mut body_cap_heights: Vec<f64> = Vec::new();
 
-    for page in paged.pages().iter().take(3) {
+    for page in paged.pages().iter().take(DOCUMENT_STYLE_SAMPLE_PAGES) {
         collect_font_info_split(
             &page.frame,
-            Point::zero(),
             &mut ascii_font_counts,
             &mut cjk_font_counts,
             &mut size_counts,
@@ -52,25 +150,28 @@ pub fn extract_document_style(paged: &PagedDocument) -> DocumentStyle {
     // the alphabetically-first name so the choice is deterministic across runs
     // (a bare `max_by_key` on count would pick whichever the HashMap happened to
     // iterate first).
-    let body_font_ascii = ascii_font_counts
-        .iter()
-        .max_by_key(|(f, c)| (**c, std::cmp::Reverse((**f).clone())))
-        .map_or_else(|| "Times New Roman".to_string(), |(f, _)| f.clone());
+    let body_font_ascii = super::stats::dominant_key(
+        ascii_font_counts
+            .iter()
+            .map(|(font, count)| (font.as_str(), *count)),
+    )
+    .map_or_else(|| "Times New Roman".to_string(), ToString::to_string);
 
-    let body_font_east_asia = cjk_font_counts
-        .iter()
-        .max_by_key(|(f, c)| (**c, std::cmp::Reverse((**f).clone())))
-        .map_or_else(|| body_font_ascii.clone(), |(f, _)| f.clone());
+    let body_font_east_asia = super::stats::dominant_key(
+        cjk_font_counts
+            .iter()
+            .map(|(font, count)| (font.as_str(), *count)),
+    )
+    .map_or_else(|| body_font_ascii.clone(), ToString::to_string);
 
     // Detect body size (most common). On a count tie, prefer the smaller size:
     // body text is the baseline, and emphasis/headings are larger. The
     // `Reverse(size)` tie-break also makes the result deterministic — without it
     // a single heading line tying the body line (e.g. a one-line document) would
     // flip the detected body size between runs (HashMap iteration order).
-    let body_size_half_pt = size_counts
-        .iter()
-        .max_by_key(|(size, count)| (**count, std::cmp::Reverse(**size)))
-        .map_or(21, |(size, _)| *size);
+    let body_size_half_pt =
+        super::stats::dominant_key(size_counts.iter().map(|(size, count)| (size, *count)))
+            .map_or(DEFAULT_BODY_SIZE_HALF_PT, |size| *size);
 
     let body_pt = f64::from(body_size_half_pt) / 2.0;
     let first_line_indent_twips = detect_first_line_indent(paged, body_pt);
@@ -79,27 +180,28 @@ pub fn extract_document_style(paged: &PagedDocument) -> DocumentStyle {
     // Determine body font's cap-height ratio from collected metrics.
     // Cap-height is the text box height Typst uses for line layout.
     let body_cap_height_ratio = if body_cap_heights.is_empty() {
-        0.66
+        DEFAULT_CAP_HEIGHT_RATIO
     } else {
         let mut sorted = body_cap_heights.clone();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        sorted[sorted.len() / 2]
+        super::stats::median(&mut sorted).unwrap_or(DEFAULT_CAP_HEIGHT_RATIO)
     };
 
     // Detect code font (monospace font that isn't the body font)
-    let code_font = ascii_font_counts
-        .iter()
-        .filter(|(f, _)| {
-            let fl = f.to_lowercase();
-            (fl.contains("mono")
-                || fl.contains("courier")
-                || fl.contains("consol")
-                || fl.contains("fira code")
-                || fl.contains("source code"))
-                && f.as_str() != body_font_ascii
-        })
-        .max_by_key(|(f, c)| (**c, std::cmp::Reverse((**f).clone())))
-        .map_or_else(|| "Courier New".to_string(), |(f, _)| f.clone());
+    let code_font = super::stats::dominant_key(
+        ascii_font_counts
+            .iter()
+            .filter(|(f, _)| {
+                let fl = f.to_lowercase();
+                (fl.contains("mono")
+                    || fl.contains("courier")
+                    || fl.contains("consol")
+                    || fl.contains("fira code")
+                    || fl.contains("source code"))
+                    && f.as_str() != body_font_ascii
+            })
+            .map(|(font, count)| (font.as_str(), *count)),
+    )
+    .map_or_else(|| "Courier New".to_string(), ToString::to_string);
 
     // Detect sizes for code, footnotes, headings from actual rendered data
     let code_size_half_pt = detect_code_size(&size_counts, body_size_half_pt);
@@ -163,14 +265,14 @@ pub(crate) fn is_cjk_char(c: char) -> bool {
 
 fn detect_first_line_indent(paged: &PagedDocument, body_pt: f64) -> u32 {
     let Some(page) = paged.pages().first() else {
-        return pt_to_twips(body_pt * 2.0);
+        return pt_to_twips(body_pt * DEFAULT_FIRST_LINE_INDENT_BODY_MULTIPLE);
     };
 
     let mut fragments = Vec::new();
-    collect_text_fragments(&page.frame, Point::zero(), &mut fragments);
+    collect_text_fragments(&page.frame, &mut fragments);
 
-    if fragments.len() < 4 {
-        return pt_to_twips(body_pt * 2.0);
+    if fragments.len() < MIN_INDENT_FRAGMENTS {
+        return pt_to_twips(body_pt * DEFAULT_FIRST_LINE_INDENT_BODY_MULTIPLE);
     }
 
     // Group by y (lines), find the left-most x per line.
@@ -189,14 +291,17 @@ fn detect_first_line_indent(paged: &PagedDocument, body_pt: f64) -> u32 {
     let mut left_edges: Vec<f64> = body_frags.iter().map(|f| f.x).collect();
     left_edges.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
-    if left_edges.len() < 2 {
-        return pt_to_twips(body_pt * 2.0);
+    if left_edges.len() < MIN_INDENT_EDGES {
+        return pt_to_twips(body_pt * DEFAULT_FIRST_LINE_INDENT_BODY_MULTIPLE);
     }
 
     // Find the two most common left-edge positions (body margin + indented margin)
     let mut x_clusters: Vec<(f64, usize)> = Vec::new();
     for &x in &left_edges {
-        if let Some(c) = x_clusters.iter_mut().find(|(cx, _)| (x - *cx).abs() < 3.0) {
+        if let Some(c) = x_clusters
+            .iter_mut()
+            .find(|(cx, _)| (x - *cx).abs() < INDENT_CLUSTER_TOLERANCE_PT)
+        {
             c.1 += 1;
         } else {
             x_clusters.push((x, 1));
@@ -204,40 +309,44 @@ fn detect_first_line_indent(paged: &PagedDocument, body_pt: f64) -> u32 {
     }
     x_clusters.sort_by_key(|b| std::cmp::Reverse(b.1));
 
-    if x_clusters.len() >= 2 {
+    if x_clusters.len() >= MIN_INDENT_CLUSTERS {
         let margin_x = x_clusters[0].0.min(x_clusters[1].0);
         let indent_x = x_clusters[0].0.max(x_clusters[1].0);
         let indent_pt = indent_x - margin_x;
-        if indent_pt > 1.0 && indent_pt < body_pt * 6.0 {
+        if indent_pt > MIN_FIRST_LINE_INDENT_PT
+            && indent_pt < body_pt * MAX_FIRST_LINE_INDENT_BODY_MULTIPLE
+        {
             return pt_to_twips(indent_pt);
         }
     }
 
     // Fallback: 2 chars wide
-    pt_to_twips(body_pt * 2.0)
+    pt_to_twips(body_pt * DEFAULT_FIRST_LINE_INDENT_BODY_MULTIPLE)
 }
 
 fn detect_line_spacing(y_positions: &[(f64, u32)], body_size_half_pt: u32) -> u32 {
     let body_pt = f64::from(body_size_half_pt) / 2.0;
-    let default_twips = pt_to_twips(body_pt * 1.65);
+    let default_twips = pt_to_twips(body_pt * DEFAULT_LINE_PITCH_BODY_MULTIPLE);
 
     // Filter to only body-sized text items (within ±1 half-point of detected body size)
     let mut body_ys: Vec<f64> = y_positions
         .iter()
-        .filter(|(_, sz)| sz.abs_diff(body_size_half_pt) <= 1)
+        .filter(|(_, sz)| sz.abs_diff(body_size_half_pt) <= BODY_SIZE_TOLERANCE_HALF_PT)
         .map(|(y, _)| *y)
         .collect();
 
-    if body_ys.len() < 2 {
+    if body_ys.len() < MIN_LINE_SPACING_BASELINES {
         return default_twips;
     }
     body_ys.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    body_ys.dedup_by(|a, b| (*a - *b).abs() < 0.5);
+    body_ys.dedup_by(|a, b| (*a - *b).abs() < LINE_Y_DEDUP_TOLERANCE_PT);
 
     let mut gaps: Vec<f64> = Vec::new();
     for pair in body_ys.windows(2) {
         let gap = pair[1] - pair[0];
-        if gap > body_pt * 0.8 && gap < body_pt * 3.0 {
+        if gap > body_pt * MIN_LINE_PITCH_BODY_MULTIPLE
+            && gap < body_pt * MAX_LINE_PITCH_BODY_MULTIPLE
+        {
             gaps.push(gap);
         }
     }
@@ -251,13 +360,11 @@ fn detect_line_spacing(y_positions: &[(f64, u32)], body_size_half_pt: u32) -> u3
         let key = pt_to_half_pt(g);
         *gap_counts.entry(key).or_insert(0) += 1;
     }
-    let mode_key = gap_counts
-        .into_iter()
-        .max_by_key(|(key, count)| (*count, std::cmp::Reverse(*key)))
-        .map_or(0, |(key, _)| key);
+    let mode_key = super::stats::dominant_key(gap_counts.iter().map(|(key, count)| (key, *count)))
+        .map_or(0, |key| *key);
     let mode_pitch = f64::from(mode_key) / 2.0;
     let spacing = pt_to_twips(mode_pitch);
-    spacing.clamp(160, 960)
+    spacing.clamp(MIN_LINE_SPACING_TWIPS, MAX_LINE_SPACING_TWIPS)
 }
 
 /// Detect whether the document body text is justified or left-aligned.
@@ -274,22 +381,16 @@ fn detect_justification(paged: &PagedDocument) -> String {
     // We group text items by y-position (line), then compute the right edge per line.
     let mut line_items: Vec<(f64, f64)> = Vec::new(); // (y, right_edge_x)
 
-    for page in paged.pages().iter().take(3) {
+    for page in paged.pages().iter().take(JUSTIFICATION_SAMPLE_PAGES) {
         let page_width = page.frame.width().to_pt();
         let page_height = page.frame.height().to_pt();
         // Default-margin body zone (see detect_first_line_indent): style-time
         // heuristic only, overridden by `#set par(justify:)` when declared.
         let (body_top, body_bottom) = find_body_zone(page_width, page_height, None, None);
-        collect_right_edges(
-            &page.frame,
-            Point::zero(),
-            body_top,
-            body_bottom,
-            &mut line_items,
-        );
+        collect_right_edges(&page.frame, body_top, body_bottom, &mut line_items);
     }
 
-    if line_items.len() < 4 {
+    if line_items.len() < MIN_JUSTIFICATION_ITEMS {
         // Not enough data to decide; Typst default is left-aligned
         return "left".to_string();
     }
@@ -300,10 +401,8 @@ fn detect_justification(paged: &PagedDocument) -> String {
     let mut line_right_edges: Vec<f64> = Vec::new();
     let mut current_y = line_items[0].0;
     let mut current_max_x = line_items[0].1;
-    let y_tolerance = 2.0; // items within 2pt are on the same line
-
     for &(y, right_x) in &line_items[1..] {
-        if (y - current_y).abs() <= y_tolerance {
+        if (y - current_y).abs() <= JUSTIFICATION_LINE_Y_TOLERANCE_PT {
             // Same line: update max right edge
             if right_x > current_max_x {
                 current_max_x = right_x;
@@ -317,37 +416,31 @@ fn detect_justification(paged: &PagedDocument) -> String {
     }
     line_right_edges.push(current_max_x); // last line
 
-    if line_right_edges.len() < 3 {
+    if line_right_edges.len() < MIN_JUSTIFICATION_LINES {
         return "left".to_string();
     }
 
     // Exclude the last line of each paragraph — it's typically shorter.
     // We detect paragraph-final lines as lines whose right edge is significantly
     // shorter than the median right edge.
-    line_right_edges.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let median_right = line_right_edges[line_right_edges.len() / 2];
+    let median_right = super::stats::median(&mut line_right_edges).unwrap_or(0.0);
 
-    // Keep only lines whose right edge is within 80% of the median (full lines).
+    // Keep only lines whose right edge is within 85% of the median (full lines).
     let full_lines: Vec<f64> = line_right_edges
         .iter()
         .copied()
-        .filter(|&x| x >= median_right * 0.85)
+        .filter(|&x| x >= median_right * FULL_LINE_RIGHT_EDGE_RATIO)
         .collect();
 
-    if full_lines.len() < 3 {
+    if full_lines.len() < MIN_JUSTIFICATION_LINES {
         return "left".to_string();
     }
 
-    // Compute standard deviation of full-line right edges.
-    #[allow(clippy::cast_precision_loss)]
-    let n = full_lines.len() as f64;
-    let mean: f64 = full_lines.iter().sum::<f64>() / n;
-    let variance: f64 = full_lines.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n;
-    let std_dev = variance.sqrt();
+    let std_dev = super::stats::standard_deviation(&full_lines).unwrap_or(f64::INFINITY);
 
-    // Justified text: right edges are very uniform (std_dev < 2pt).
+    // Justified text: right edges are very uniform (std_dev < 3pt).
     // Ragged text: right edges vary by many points (std_dev > 5pt typically).
-    if std_dev < 3.0 {
+    if std_dev < JUSTIFIED_RIGHT_EDGE_STD_DEV_PT {
         "both".to_string()
     } else {
         "left".to_string()
@@ -357,39 +450,36 @@ fn detect_justification(paged: &PagedDocument) -> String {
 /// Collect (y, `right_edge_x`) pairs for text items in the body zone.
 fn collect_right_edges(
     frame: &Frame,
-    offset: Point,
     body_top: f64,
     body_bottom: f64,
     items: &mut Vec<(f64, f64)>,
 ) {
-    for (pos, item) in frame.items() {
-        let abs_x = offset.x + pos.x;
-        let abs_y = offset.y + pos.y;
-        match item {
-            FrameItem::Text(text_item) => {
-                let y = abs_y.to_pt();
-                if y >= body_top && y <= body_bottom {
-                    let right_edge = abs_x.to_pt() + text_item.width().to_pt();
-                    items.push((y, right_edge));
-                }
+    super::frames::visit_frame_items(frame, false, &mut |position, item| {
+        if let FrameItem::Text(text_item) = item {
+            let y = position.y.to_pt();
+            if y >= body_top && y <= body_bottom {
+                let right_edge = position.x.to_pt() + text_item.width().to_pt();
+                items.push((y, right_edge));
             }
-            FrameItem::Group(group) => {
-                let new_offset = Point::new(abs_x, abs_y);
-                collect_right_edges(&group.frame, new_offset, body_top, body_bottom, items);
-            }
-            _ => {}
         }
-    }
+    });
 }
 
 /// Detect code block font size: the most common size smaller than body that's used with mono fonts.
 /// Falls back to `body_size - 3` half-points.
 fn detect_code_size(size_counts: &HashMap<u32, usize>, body_size: u32) -> u32 {
-    size_counts
-        .iter()
-        .filter(|(sz, _)| **sz < body_size && **sz >= 12)
-        .max_by_key(|(sz, c)| (**c, std::cmp::Reverse(**sz)))
-        .map_or(body_size.saturating_sub(3).max(14), |(sz, _)| *sz)
+    super::stats::dominant_key(
+        size_counts
+            .iter()
+            .filter(|(size, _)| **size < body_size && **size >= MIN_AUXILIARY_TEXT_SIZE_HALF_PT)
+            .map(|(size, count)| (size, *count)),
+    )
+    .map_or(
+        body_size
+            .saturating_sub(AUXILIARY_TEXT_SIZE_DECREMENT_HALF_PT)
+            .max(MIN_AUXILIARY_FALLBACK_SIZE_HALF_PT),
+        |size| *size,
+    )
 }
 
 /// Fallback footnote text size from the global histogram: the smallest size with
@@ -399,9 +489,18 @@ fn detect_code_size(size_counts: &HashMap<u32, usize>, body_size: u32) -> u32 {
 fn detect_footnote_size(size_counts: &HashMap<u32, usize>, body_size: u32) -> u32 {
     size_counts
         .iter()
-        .filter(|(sz, count)| **sz < body_size && **count >= 3 && **sz >= 12)
+        .filter(|(sz, count)| {
+            **sz < body_size
+                && **count >= MIN_FOOTNOTE_SIZE_COUNT
+                && **sz >= MIN_AUXILIARY_TEXT_SIZE_HALF_PT
+        })
         .min_by_key(|(sz, _)| *sz)
-        .map_or(body_size.saturating_sub(3).max(14), |(sz, _)| *sz)
+        .map_or(
+            body_size
+                .saturating_sub(AUXILIARY_TEXT_SIZE_DECREMENT_HALF_PT)
+                .max(MIN_AUXILIARY_FALLBACK_SIZE_HALF_PT),
+            |(sz, _)| *sz,
+        )
 }
 
 /// Refine `doc.style.footnote_size_half_pt` from the actual footnote entries when a
@@ -439,7 +538,7 @@ fn detect_footnote_text_size(
         }
     }
     let haystack: String = haystack.chars().filter(|c| !c.is_whitespace()).collect();
-    if haystack.chars().count() < 4 {
+    if haystack.chars().count() < MIN_FOOTNOTE_TEXT_CHARS {
         return None;
     }
     let mut size_counts: HashMap<u32, usize> = HashMap::new();
@@ -448,33 +547,22 @@ fn detect_footnote_text_size(
     }
     // The footnote body is the dominant matched size; a tie prefers the smaller
     // size (footnotes are smaller than any body text that coincidentally matches).
-    size_counts
-        .into_iter()
-        .max_by_key(|(sz, count)| (*count, std::cmp::Reverse(*sz)))
-        .map(|(sz, _)| sz)
+    super::stats::dominant_key(size_counts.iter().map(|(size, count)| (size, *count))).copied()
 }
 
 /// Accumulate sizes of rendered text fragments that belong to the footnote body
 /// `haystack`. A fragment must be ≥3 chars and a substring of the footnote text, so
 /// single-glyph markers and unrelated body text do not register.
 fn collect_footnote_text_sizes(frame: &Frame, haystack: &str, out: &mut HashMap<u32, usize>) {
-    for (_, item) in frame.items() {
-        match item {
-            FrameItem::Text(t) => {
-                // Gate on length BEFORE allocating the filtered copy — most
-                // runs on a page are short shaped fragments, and this walk
-                // visits every text item on every page.
-                if t.text.chars().filter(|c| !c.is_whitespace()).count() >= 3 {
-                    let frag: String = t.text.chars().filter(|c| !c.is_whitespace()).collect();
-                    if haystack.contains(frag.as_str()) {
-                        *out.entry(pt_to_half_pt(t.size.to_pt())).or_insert(0) += t.glyphs.len();
-                    }
-                }
+    super::frames::visit_frame_items(frame, false, &mut |_, item| {
+        let FrameItem::Text(text) = item else { return };
+        if text.text.chars().filter(|c| !c.is_whitespace()).count() >= MIN_FOOTNOTE_FRAGMENT_CHARS {
+            let fragment: String = text.text.chars().filter(|c| !c.is_whitespace()).collect();
+            if haystack.contains(fragment.as_str()) {
+                *out.entry(pt_to_half_pt(text.size.to_pt())).or_insert(0) += text.glyphs.len();
             }
-            FrameItem::Group(group) => collect_footnote_text_sizes(&group.frame, haystack, out),
-            _ => {}
         }
-    }
+    });
 }
 
 /// Detect heading sizes from rendered text: sizes larger than body, sorted descending.
@@ -485,13 +573,7 @@ fn detect_heading_sizes(size_counts: &HashMap<u32, usize>, body_size: u32) -> [u
         .filter(|sz| *sz > body_size)
         .collect();
     larger.sort_unstable_by(|a, b| b.cmp(a));
-    let mut result = [
-        body_size + 9,
-        body_size + 7,
-        body_size + 5,
-        body_size + 3,
-        body_size + 1,
-    ];
+    let mut result = DEFAULT_HEADING_SIZE_OFFSETS.map(|offset| body_size + offset);
     for (i, &sz) in larger.iter().take(5).enumerate() {
         result[i] = sz;
     }
@@ -512,14 +594,14 @@ fn detect_heading_spacing_per_level(
     let default_after = [120; 5];
 
     let mut items: Vec<(f64, u32)> = Vec::new();
-    for page in paged.pages().iter().take(5) {
-        collect_y_and_size(&page.frame, Point::zero(), &mut items);
+    for page in paged.pages().iter().take(HEADING_SPACING_SAMPLE_PAGES) {
+        collect_y_and_size(&page.frame, &mut items);
     }
-    if items.len() < 3 {
+    if items.len() < MIN_HEADING_SPACING_ITEMS {
         return (default_before, default_after);
     }
     items.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    items.dedup_by(|a, b| (a.0 - b.0).abs() < 1.0);
+    items.dedup_by(|a, b| (a.0 - b.0).abs() < SPACING_Y_DEDUP_TOLERANCE_PT);
 
     let body_pt = f64::from(body_size) / 2.0;
 
@@ -536,13 +618,13 @@ fn detect_heading_spacing_per_level(
 
         if i > 0 {
             let gap = y - items[i - 1].0;
-            if gap > 0.0 && gap < body_pt * 15.0 {
+            if gap > 0.0 && gap < body_pt * MAX_HEADING_GAP_BODY_MULTIPLE {
                 before_per_level[level].push(gap);
             }
         }
         if i + 1 < items.len() {
             let gap = items[i + 1].0 - y;
-            if gap > 0.0 && gap < body_pt * 15.0 {
+            if gap > 0.0 && gap < body_pt * MAX_HEADING_GAP_BODY_MULTIPLE {
                 after_per_level[level].push(gap);
             }
         }
@@ -554,15 +636,13 @@ fn detect_heading_spacing_per_level(
     for level in 0..5 {
         if !before_per_level[level].is_empty() {
             let gaps = &mut before_per_level[level];
-            gaps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-            let median = gaps[gaps.len() / 2];
-            result_before[level] = pt_to_twips(median).min(1500);
+            let median = super::stats::median(gaps).unwrap_or(0.0);
+            result_before[level] = pt_to_twips(median).min(MAX_HEADING_BEFORE_TWIPS);
         }
         if !after_per_level[level].is_empty() {
             let gaps = &mut after_per_level[level];
-            gaps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-            let median = gaps[gaps.len() / 2];
-            result_after[level] = pt_to_twips(median).min(800);
+            let median = super::stats::median(gaps).unwrap_or(0.0);
+            result_after[level] = pt_to_twips(median).min(MAX_HEADING_AFTER_TWIPS);
         }
     }
 
@@ -577,14 +657,14 @@ fn detect_body_paragraph_spacing(
     paged: &PagedDocument,
 ) -> (u32, u32) {
     let mut items: Vec<(f64, u32)> = Vec::new();
-    for page in paged.pages().iter().take(3) {
-        collect_y_and_size(&page.frame, Point::zero(), &mut items);
+    for page in paged.pages().iter().take(BODY_SPACING_SAMPLE_PAGES) {
+        collect_y_and_size(&page.frame, &mut items);
     }
-    if items.len() < 4 {
+    if items.len() < MIN_BODY_SPACING_ITEMS {
         return (0, 0);
     }
     items.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    items.dedup_by(|a, b| (a.0 - b.0).abs() < 1.0);
+    items.dedup_by(|a, b| (a.0 - b.0).abs() < SPACING_Y_DEDUP_TOLERANCE_PT);
 
     let body_pt = f64::from(body_size) / 2.0;
     let heading_min = heading_sizes.iter().copied().min().unwrap_or(body_size + 1);
@@ -599,7 +679,9 @@ fn detect_body_paragraph_spacing(
             let gap = pair[1].0 - pair[0].0;
             // Normal line gaps are ~body_pt * 1.65. Paragraph gaps are larger.
             // Filter to gaps that are plausibly paragraph breaks (> 1.8x body size)
-            if gap > body_pt * 1.8 && gap < body_pt * 8.0 {
+            if gap > body_pt * MIN_PARAGRAPH_GAP_BODY_MULTIPLE
+                && gap < body_pt * MAX_PARAGRAPH_GAP_BODY_MULTIPLE
+            {
                 body_gaps.push(gap);
             }
         }
@@ -609,8 +691,7 @@ fn detect_body_paragraph_spacing(
         return (0, 0);
     }
 
-    body_gaps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let median = body_gaps[body_gaps.len() / 2];
+    let median = super::stats::median(&mut body_gaps).unwrap_or(0.0);
 
     // The gap includes line height. Paragraph spacing = gap - normal_line_height.
     // Normal line height ≈ body_pt * (1 + leading). We use the median of intra-paragraph
@@ -619,88 +700,64 @@ fn detect_body_paragraph_spacing(
     for pair in items.windows(2) {
         if pair[0].1 < heading_min && pair[1].1 < heading_min {
             let gap = pair[1].0 - pair[0].0;
-            if gap > body_pt * 0.8 && gap <= body_pt * 1.8 {
+            if gap > body_pt * MIN_LINE_PITCH_BODY_MULTIPLE
+                && gap <= body_pt * MIN_PARAGRAPH_GAP_BODY_MULTIPLE
+            {
                 line_gaps.push(gap);
             }
         }
     }
 
     let normal_line_gap = if line_gaps.is_empty() {
-        body_pt * 1.65
+        body_pt * DEFAULT_LINE_PITCH_BODY_MULTIPLE
     } else {
-        line_gaps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        line_gaps[line_gaps.len() / 2]
+        super::stats::median(&mut line_gaps).unwrap_or(body_pt * DEFAULT_LINE_PITCH_BODY_MULTIPLE)
     };
 
     let spacing_pt = (median - normal_line_gap).max(0.0);
-    let spacing_twips = pt_to_twips(spacing_pt).min(1000);
+    let spacing_twips = pt_to_twips(spacing_pt).min(MAX_BODY_SPACING_TWIPS);
 
     // Use same value for before and after (Typst uses symmetric par spacing)
     (spacing_twips, spacing_twips)
 }
 
-fn collect_y_and_size(frame: &Frame, offset: Point, items: &mut Vec<(f64, u32)>) {
-    for (pos, item) in frame.items() {
-        let abs_y = offset.y + pos.y;
-        match item {
-            FrameItem::Text(text_item) => {
-                let size_half_pt = pt_to_half_pt(text_item.size.to_pt());
-                items.push((abs_y.to_pt(), size_half_pt));
-            }
-            FrameItem::Group(group) => {
-                collect_y_and_size(&group.frame, Point::new(offset.x + pos.x, abs_y), items);
-            }
-            _ => {}
+fn collect_y_and_size(frame: &Frame, items: &mut Vec<(f64, u32)>) {
+    super::frames::visit_frame_items(frame, false, &mut |position, item| {
+        if let FrameItem::Text(text) = item {
+            items.push((position.y.to_pt(), pt_to_half_pt(text.size.to_pt())));
         }
-    }
+    });
 }
 
 /// Recursively collect font info split by script (ASCII vs CJK), sizes, and y-positions.
 fn collect_font_info_split(
     frame: &Frame,
-    offset: Point,
     ascii_fonts: &mut HashMap<String, usize>,
     cjk_fonts: &mut HashMap<String, usize>,
     size_counts: &mut HashMap<u32, usize>,
     y_positions: &mut Vec<(f64, u32)>,
     body_cap_heights: &mut Vec<f64>,
 ) {
-    for (pos, item) in frame.items() {
-        let abs_y = offset.y + pos.y;
-        match item {
-            FrameItem::Text(text_item) => {
-                let family = text_item.font.info().family.clone();
-                let size_half_pt = pt_to_half_pt(text_item.size.to_pt());
-                let glyph_count = text_item.glyphs.len();
-                *size_counts.entry(size_half_pt).or_insert(0) += glyph_count;
-                y_positions.push((abs_y.to_pt(), size_half_pt));
-                let cap_h = text_item.font.metrics().cap_height.get();
-                body_cap_heights.push(cap_h);
+    super::frames::visit_frame_items(frame, false, &mut |position, item| {
+        if let FrameItem::Text(text_item) = item {
+            let family = text_item.font.info().family.clone();
+            let size_half_pt = pt_to_half_pt(text_item.size.to_pt());
+            let glyph_count = text_item.glyphs.len();
+            *size_counts.entry(size_half_pt).or_insert(0) += glyph_count;
+            y_positions.push((position.y.to_pt(), size_half_pt));
+            let cap_h = text_item.font.metrics().cap_height.get();
+            body_cap_heights.push(cap_h);
 
-                let has_cjk = text_item.text.chars().any(is_cjk_char);
-                let has_ascii = text_item.text.chars().any(|c| c.is_ascii_alphabetic());
-                if has_cjk {
-                    *cjk_fonts.entry(family.clone()).or_insert(0) += glyph_count;
-                }
-                if has_ascii || !has_cjk {
-                    *ascii_fonts.entry(family).or_insert(0) += glyph_count;
-                }
+            let has_cjk = text_item.text.chars().any(is_cjk_char);
+            let has_ascii = text_item.text.chars().any(|c| c.is_ascii_alphabetic());
+            if has_cjk {
+                *cjk_fonts.entry(family.clone()).or_insert(0) += glyph_count;
             }
-            FrameItem::Group(group) => {
-                let new_offset = Point::new(offset.x + pos.x, abs_y);
-                collect_font_info_split(
-                    &group.frame,
-                    new_offset,
-                    ascii_fonts,
-                    cjk_fonts,
-                    size_counts,
-                    y_positions,
-                    body_cap_heights,
-                );
+            if has_ascii || !has_cjk {
+                *ascii_fonts.entry(family).or_insert(0) += glyph_count;
             }
-            _ => {}
         }
-    }
+    });
 }
 
 /// Extract page dimensions from the `PagedDocument` and apply to `PageSettings`.
@@ -1721,6 +1778,20 @@ pub(super) fn pt_to_half_pt(pt: f64) -> u32 {
     (pt * 2.0).round().max(0.0) as u32
 }
 
+/// Convert a length in points to tenths of a point, truncating like the legacy
+/// recovery body-size histogram. See [`pt_to_twips`] for the cast rationale.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+pub(super) fn pt_to_tenths(pt: f64) -> u32 {
+    (pt * 10.0).max(0.0) as u32
+}
+
+/// Convert a stroke thickness in points to Word eighth-points, rounded.
+/// See [`pt_to_twips`] for the cast rationale.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+pub(super) fn pt_to_eighth_pt(pt: f64) -> u32 {
+    (pt * 8.0).round().max(0.0) as u32
+}
+
 /// Build a BCP-47 language tag (for Word's `w:lang`) from a Typst `lang` code
 /// plus an optional `region`, exactly as declared in `#set text(...)`.
 ///
@@ -1802,8 +1873,9 @@ pub fn detect_section_breaks(paged: &PagedDocument) -> Vec<DetectedSection> {
     for i in 1..paged.pages().len() {
         let curr_w = pt_to_twips(paged.pages()[i].frame.width().to_pt());
         let curr_h = pt_to_twips(paged.pages()[i].frame.height().to_pt());
-        let tol = 20; // 1pt tolerance for rounding
-        if curr_w.abs_diff(prev_width) > tol || curr_h.abs_diff(prev_height) > tol {
+        if curr_w.abs_diff(prev_width) > SECTION_DIMENSION_TOLERANCE_TWIPS
+            || curr_h.abs_diff(prev_height) > SECTION_DIMENSION_TOLERANCE_TWIPS
+        {
             let margin = default_margin_pt(
                 prev_w.to_pt().min(paged.pages()[i].frame.width().to_pt()),
                 prev_h.to_pt().min(paged.pages()[i].frame.height().to_pt()),
@@ -1875,7 +1947,7 @@ pub fn apply_section_breaks(
             let total_pages = element_page_map
                 .len()
                 .max(sections.last().map_or(1, |s| s.start_page + 1));
-            section.start_page * total_elements / total_pages.max(1)
+            super::stats::proportional_index(section.start_page, total_pages, total_elements)
         };
 
         // Find the nearest paragraph at or before `approx_idx`
@@ -1921,29 +1993,20 @@ struct TextFragment {
     text: String,
 }
 
-/// Recursively collect text fragments with absolute positions from a frame.
-fn collect_text_fragments(frame: &Frame, offset: Point, items: &mut Vec<TextFragment>) {
-    for (pos, item) in frame.items() {
-        let abs_x = offset.x + pos.x;
-        let abs_y = offset.y + pos.y;
-        match item {
-            FrameItem::Text(text_item) => {
-                let text = text_item.text.to_string();
-                if !text.is_empty() {
-                    items.push(TextFragment {
-                        y: abs_y.to_pt(),
-                        x: abs_x.to_pt(),
-                        text,
-                    });
-                }
+/// Collect text fragments with absolute positions from a frame.
+fn collect_text_fragments(frame: &Frame, items: &mut Vec<TextFragment>) {
+    super::frames::visit_frame_items(frame, false, &mut |position, item| {
+        if let FrameItem::Text(text_item) = item {
+            let text = text_item.text.to_string();
+            if !text.is_empty() {
+                items.push(TextFragment {
+                    y: position.y.to_pt(),
+                    x: position.x.to_pt(),
+                    text,
+                });
             }
-            FrameItem::Group(group) => {
-                let new_offset = Point::new(abs_x, abs_y);
-                collect_text_fragments(&group.frame, new_offset, items);
-            }
-            _ => {}
         }
-    }
+    });
 }
 
 /// Compute the default Typst margin for a page in pt.
@@ -2000,8 +2063,8 @@ pub(super) fn find_body_zone(
     // defaults to 0.3, so header text is at ~margin * 0.7 from top.
     // Use margin * 0.9 as the boundary to safely include all header content
     // above the body zone.
-    let body_top = mt * 0.9;
-    let body_bottom = page_height - mb * 0.9;
+    let body_top = mt * BODY_ZONE_MARGIN_RATIO;
+    let body_bottom = page_height - mb * BODY_ZONE_MARGIN_RATIO;
     (body_top, body_bottom)
 }
 
@@ -2017,12 +2080,12 @@ pub fn extract_footer(paged: &PagedDocument, margins: MarginsPt) -> Option<Heade
     extract_margin_zone(paged, MarginZone::Bottom, margins)
 }
 
+#[derive(Clone, Copy)]
 enum MarginZone {
     Top,
     Bottom,
 }
 
-#[allow(clippy::needless_pass_by_value)]
 fn extract_margin_zone(
     paged: &PagedDocument,
     zone: MarginZone,
@@ -2033,7 +2096,7 @@ fn extract_margin_zone(
     let page_height = page.frame.height().to_pt();
 
     let mut fragments = Vec::new();
-    collect_text_fragments(&page.frame, Point::zero(), &mut fragments);
+    collect_text_fragments(&page.frame, &mut fragments);
 
     let (body_top, body_bottom) = find_body_zone(
         page_width,
@@ -2068,7 +2131,7 @@ fn extract_margin_zone(
         para.alignment = Some(Alignment::Right);
     } else if items
         .iter()
-        .all(|f| (f.x - page_center).abs() < page_center * 0.15)
+        .all(|f| (f.x - page_center).abs() < page_center * MARGIN_CENTER_TOLERANCE_RATIO)
     {
         para.alignment = Some(Alignment::Center);
     }
@@ -2171,7 +2234,7 @@ fn extract_footer_text_from_page(frame: &Frame, margins: MarginsPt) -> Option<St
     let page_height = frame.height().to_pt();
 
     let mut fragments = Vec::new();
-    collect_text_fragments(frame, Point::zero(), &mut fragments);
+    collect_text_fragments(frame, &mut fragments);
 
     let (_body_top, body_bottom) = find_body_zone(
         page_width,
@@ -2335,60 +2398,46 @@ fn collect_paged_run_styles(paged: &PagedDocument) -> Vec<PagedRunStyle> {
     let mut items = Vec::new();
     for page in paged.pages() {
         let page_width = page.frame.width().to_pt();
-        collect_styles_from_frame(&page.frame, Point::zero(), page_width, &mut items);
+        collect_styles_from_frame(&page.frame, page_width, &mut items);
     }
     items
 }
 
-fn collect_styles_from_frame(
-    frame: &Frame,
-    offset: Point,
-    page_width: f64,
-    items: &mut Vec<PagedRunStyle>,
-) {
-    for (pos, item) in frame.items() {
-        let abs_x = offset.x + pos.x;
-        let abs_y = offset.y + pos.y;
-        match item {
-            FrameItem::Text(text_item) => {
-                let text = text_item.text.to_string();
-                if text.is_empty() {
-                    continue;
-                }
-                let info = text_item.font.info();
-                let spans: Vec<typst_syntax::Span> =
-                    text_item.glyphs.iter().map(|g| g.span.0).collect();
-                // Compute the artifact signals before `text` is moved into the
-                // struct. `text` is non-empty (early-continue above), so the
-                // `all(..)` whitespace check can't vacuously succeed.
-                let is_math_font = info.flags.contains(typst_library::text::FontFlags::MATH);
-                let is_whitespace = text.chars().all(char::is_whitespace);
-                items.push(PagedRunStyle {
-                    text,
-                    spans,
-                    font_family: info.family.clone(),
-                    size_pt: text_item.size.to_pt(),
-                    color_hex: extract_non_black_color(&text_item.fill),
-                    is_bold: effective_weight(&text_item.font) >= 700,
-                    is_italic: matches!(
-                        effective_style(&text_item.font),
-                        typst_library::text::FontStyle::Italic
-                            | typst_library::text::FontStyle::Oblique
-                    ),
-                    is_math_font,
-                    is_whitespace,
-                    x: abs_x.to_pt(),
-                    text_width: text_item.width().to_pt(),
-                    page_width,
-                });
+fn collect_styles_from_frame(frame: &Frame, page_width: f64, items: &mut Vec<PagedRunStyle>) {
+    super::frames::visit_frame_items(frame, false, &mut |position, item| {
+        if let FrameItem::Text(text_item) = item {
+            let text = text_item.text.to_string();
+            if text.is_empty() {
+                return;
             }
-            FrameItem::Group(group) => {
-                let new_offset = Point::new(abs_x, abs_y);
-                collect_styles_from_frame(&group.frame, new_offset, page_width, items);
-            }
-            _ => {}
+            let info = text_item.font.info();
+            let spans: Vec<typst_syntax::Span> =
+                text_item.glyphs.iter().map(|g| g.span.0).collect();
+            // Compute the artifact signals before `text` is moved into the
+            // struct. `text` is non-empty (early-continue above), so the
+            // `all(..)` whitespace check can't vacuously succeed.
+            let is_math_font = info.flags.contains(typst_library::text::FontFlags::MATH);
+            let is_whitespace = text.chars().all(char::is_whitespace);
+            items.push(PagedRunStyle {
+                text,
+                spans,
+                font_family: info.family.clone(),
+                size_pt: text_item.size.to_pt(),
+                color_hex: extract_non_black_color(&text_item.fill),
+                is_bold: effective_weight(&text_item.font) >= BOLD_WEIGHT_THRESHOLD,
+                is_italic: matches!(
+                    effective_style(&text_item.font),
+                    typst_library::text::FontStyle::Italic
+                        | typst_library::text::FontStyle::Oblique
+                ),
+                is_math_font,
+                is_whitespace,
+                x: position.x.to_pt(),
+                text_width: text_item.width().to_pt(),
+                page_width,
+            });
         }
-    }
+    });
 }
 
 /// Finds the resolved coordinate for a variation axis on a shaped
@@ -2459,7 +2508,9 @@ fn effective_weight(instance: &typst_library::text::FontInstance) -> u16 {
 fn effective_style(instance: &typst_library::text::FontInstance) -> typst_library::text::FontStyle {
     use typst_library::text::{FontStyle, StandardAxes};
 
-    if variation_coordinate(instance, StandardAxes::ITAL).is_some_and(|v| v.0 >= 0.5) {
+    if variation_coordinate(instance, StandardAxes::ITAL)
+        .is_some_and(|v| v.0 >= ITALIC_AXIS_THRESHOLD)
+    {
         FontStyle::Italic
     } else if variation_coordinate(instance, StandardAxes::SLNT).is_some_and(|v| v.0 != 0.0) {
         FontStyle::Oblique
@@ -2500,18 +2551,13 @@ fn detect_rendered_body_style(styles: &[PagedRunStyle]) -> (String, String, u32)
     // deterministic and consistent with `extract_document_style`; otherwise a
     // one-line-each document would flip body size between runs (HashMap order)
     // and shuffle which runs receive an explicit size override.
-    let body_font_ascii = ascii_font_counts
-        .into_iter()
-        .max_by_key(|(f, c)| (*c, std::cmp::Reverse(*f)))
-        .map_or_else(|| "Times New Roman".to_string(), |(f, _)| f.to_string());
-    let body_font_cjk = cjk_font_counts
-        .into_iter()
-        .max_by_key(|(f, c)| (*c, std::cmp::Reverse(*f)))
-        .map_or_else(|| body_font_ascii.clone(), |(f, _)| f.to_string());
-    let body_size = size_counts
-        .into_iter()
-        .max_by_key(|(s, c)| (*c, std::cmp::Reverse(*s)))
-        .map_or(21, |(s, _)| s);
+    let body_font_ascii = super::stats::dominant_key(ascii_font_counts)
+        .map_or_else(|| "Times New Roman".to_string(), ToString::to_string);
+    let body_font_cjk = super::stats::dominant_key(cjk_font_counts)
+        .map_or_else(|| body_font_ascii.clone(), ToString::to_string);
+    let body_size =
+        super::stats::dominant_key(size_counts.iter().map(|(size, count)| (size, *count)))
+            .map_or(DEFAULT_BODY_SIZE_HALF_PT, |size| *size);
 
     (body_font_ascii, body_font_cjk, body_size)
 }
@@ -2539,6 +2585,17 @@ struct RunStyleOverride {
     size_half_pt: Option<u32>,
     force_bold: Option<bool>,
     force_italic: Option<bool>,
+}
+
+impl RunStyleOverride {
+    fn is_empty(&self) -> bool {
+        self.color.is_none()
+            && self.font_ascii.is_none()
+            && self.font_east_asia.is_none()
+            && self.size_half_pt.is_none()
+            && self.force_bold.is_none()
+            && self.force_italic.is_none()
+    }
 }
 
 /// Apply all per-run styles (color, font, size, bold, italic) and paragraph
@@ -2872,17 +2929,6 @@ fn build_style_override_maps(
             Some(size_half)
         };
 
-        let has_override = color.is_some()
-            || font_ascii.is_some()
-            || font_east_asia.is_some()
-            || size_override.is_some()
-            || item.is_bold
-            || item.is_italic;
-
-        if !has_override {
-            continue;
-        }
-
         let ovr = RunStyleOverride {
             color,
             font_ascii,
@@ -2891,6 +2937,10 @@ fn build_style_override_maps(
             force_bold: if item.is_bold { Some(true) } else { None },
             force_italic: if item.is_italic { Some(true) } else { None },
         };
+
+        if ovr.is_empty() {
+            continue;
+        }
 
         for &span in &item.spans {
             if !span.is_detached() {
@@ -2909,13 +2959,7 @@ fn build_style_override_maps(
             size_half_pt: ovr.size_half_pt.filter(|&s| s >= body_size_half_pt),
             ..ovr.clone()
         };
-        if text_ovr.color.is_some()
-            || text_ovr.font_ascii.is_some()
-            || text_ovr.font_east_asia.is_some()
-            || text_ovr.size_half_pt.is_some()
-            || text_ovr.force_bold.is_some()
-            || text_ovr.force_italic.is_some()
-        {
+        if !text_ovr.is_empty() {
             text_overrides
                 .entry(item.text.clone())
                 .or_default()
@@ -3144,7 +3188,7 @@ fn apply_paragraph_alignment(
 
         let text_center = f64::midpoint(min_x, max_x);
         let page_center = page_width / 2.0;
-        let tolerance = page_width * 0.05;
+        let tolerance = page_width * HEADING_CENTER_TOLERANCE_RATIO;
 
         // A line that begins at the left margin is left-aligned, regardless of where
         // its midpoint falls — this is what tells a wide left heading apart from a

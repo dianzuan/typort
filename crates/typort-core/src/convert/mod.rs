@@ -10,10 +10,12 @@ mod breaks;
 mod coalesce;
 mod fmt;
 mod footnote;
+mod frames;
 mod image;
 pub mod inline;
 pub mod page;
 mod recovery;
+mod stats;
 mod table_align;
 mod table_width;
 
@@ -483,7 +485,6 @@ fn apply_source_overrides(
     // Body paragraph spacing: Typst's par.spacing replaces leading in the gap
     // between paragraphs. Word adds w:after on top of line pitch.
     // To compensate: w:after = max(0, par_spacing - leading).
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let par_spacing_pt = if let Some(em) = ovr.par_spacing_em {
         em * body_pt
     } else if let Some(twips) = ovr.par_spacing_twips {
@@ -491,9 +492,8 @@ fn apply_source_overrides(
     } else {
         1.2 * body_pt
     };
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let after_extra = if par_spacing_pt > leading_pt {
-        ((par_spacing_pt - leading_pt) * 20.0).round() as u32
+        page::pt_to_twips(par_spacing_pt - leading_pt)
     } else {
         0
     };
@@ -504,11 +504,10 @@ fn apply_source_overrides(
     // Typst's line pitch = cap_height × font_size + leading, where cap_height
     // is the default top-edge metric (not ascender). We emit this as
     // w:lineRule="atLeast" in twips for precise control.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     {
         let cap_height_pt = doc.style.body_cap_height_ratio * body_pt;
         let line_pitch_pt = cap_height_pt + leading_pt;
-        doc.style.line_spacing = (line_pitch_pt * 20.0).round() as u32;
+        doc.style.line_spacing = page::pt_to_twips(line_pitch_pt);
     }
 
     // Paragraph justification
@@ -527,7 +526,6 @@ fn apply_source_overrides(
     // add just the excess of heading.above beyond (body.after + leading).
     {
         let scales = [1.4_f64, 1.2, 1.0, 1.0, 1.0];
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         for (level, &scale) in scales.iter().enumerate() {
             let heading_pt = f64::from(doc.style.heading_sizes[level]) / 2.0;
             let above_em = if level == 0 { 1.8 } else { 1.44 } / scale;
@@ -536,13 +534,13 @@ fn apply_source_overrides(
             let below_pt = below_em * heading_pt;
             let effective_after = f64::from(after_extra) / 20.0 + leading_pt;
             doc.style.heading_spacing_before[level] = if above_pt > effective_after {
-                ((above_pt - effective_after) * 20.0).round() as u32
+                page::pt_to_twips(above_pt - effective_after)
             } else {
                 0
             };
             let below_effective = below_pt.max(par_spacing_pt);
             doc.style.heading_spacing_after[level] = if below_effective > leading_pt {
-                ((below_effective - leading_pt) * 20.0).round() as u32
+                page::pt_to_twips(below_effective - leading_pt)
             } else {
                 0
             };

@@ -236,11 +236,9 @@ on:
 
 - **Text normalization matching** across two very different pipelines (strip CJK
   spaces, strip math italics, strip visual markers, strip heading numbering).
-- **Magic thresholds**: minimum line lengths (2/5/6/8 chars), a math-character
-  ratio (`math*4 > total`), an ~85% page-fullness heuristic for implicit page
-  breaks, a 15%-of-page-center alignment threshold, a 2.0pt y-position tolerance,
-  a default 0.66 cap-height ratio, and a "first 3 pages" sampling window for body
-  style.
+- **Geometry and text thresholds** collected in the documented constants blocks
+  at the top of `convert/page.rs` and `convert/recovery.rs`. Those blocks are the
+  authoritative tuning references for the paged-style and recovery heuristics.
 
 These heuristics are individually justified but collectively brittle: both false
 negatives (real content skipped) and false positives (content duplicated) are
