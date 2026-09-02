@@ -54,7 +54,7 @@ has no semantic HTML representation:
 - **Layout-only constructs vanish.** `#align(center)[...]`, `#place(...)`, some
   `#grid(...)` layouts, and `#line()` rules have no HTML element, so they are
   *absent from the DOM*. typort recovers them by diffing rendered text lines
-  against the model (`convert/recovery.rs`).
+  against the model (`convert/recovery/`).
 - **Page-level facts don't exist before pagination.** Page size, margins, columns,
   headers/footers (which live in the page-margin zones), page breaks, and page
   numbering only come into being once the document is laid out — i.e. only from
@@ -177,8 +177,14 @@ they exercise that public API as integration tests.
 | `convert/postprocess.rs` | Paragraph-indent cleanup and document metadata extraction. |
 | `convert/dom.rs` | Shared HTML DOM, tag, attribute, text, location, and alignment helpers. |
 | `convert/page.rs` | Reverse-engineers page settings and styles from Paged geometry; parses AST `set`-rule data (incl. `par(hanging-indent:)`); normalizes math-fallback fonts; strips redundant heading run props. |
-| `convert/recovery.rs` | Recovers layout-only content HTML dropped; horizontal rules; per-table border styling from each table's own paged tag bracket; same-line paragraph merging. |
-| `convert/coalesce.rs` | Final pass: merges adjacent runs with identical effective `rPr` and folds whitespace-only runs, undoing the per-text-node run shattering. |
+| `convert/recovery/mod.rs` | Orchestrates recovery of layout-only content HTML dropped and re-exports the recovery passes. |
+| `convert/recovery/lines.rs` | Extracts positioned rendered lines and run/x-cluster data from paged frames. |
+| `convert/recovery/deduplication.rs` | Builds the emitted-text corpus and decides which rendered lines are already represented. |
+| `convert/recovery/insertion.rs` | Places genuinely missing rendered lines into the document model. |
+| `convert/recovery/horizontal_rules.rs` | Recovers source-declared horizontal rules and maps emitted elements to paged locations. |
+| `convert/recovery/table_rules.rs` | Derives each table's border style from its own paged tag bracket. |
+| `convert/text_norm.rs` | Shared walk/recovery normalisation for visual markers, CJK spacing/fragments, math italics, whitespace, and citation markers. |
+| `convert/coalesce.rs` | Final pass: merges same-line paragraphs, coalesces adjacent runs with identical effective `rPr`, and folds whitespace-only runs. |
 | `convert/table_width.rs` | Turns a `TableElem`'s declared column `TrackSizings` (fr/rel/auto) into per-cell `w:tcW` percentages. |
 | `convert/table_align.rs` | Faithful table-cell alignment from the semantic `TableElem`: horizontal → cell-paragraph `w:jc`, vertical → `w:vAlign`. |
 | `convert/breaks.rs` | Explicit `#pagebreak()`/`#colbreak()` recovery from the source AST (both are consumed at compile time), positioned by run spans, expanding local function calls, and following `#include` chains. |
@@ -245,27 +251,31 @@ classification (e.g. in `sum_i a_i = S`, the `= S` stays outside the n-ary).
 - No extensible arrows.
 - Word forces the Cambria Math font in math zones.
 
-## The fragile seam: `recovery.rs`
+## The fragile seam: `convert/recovery/`
 
 The honest part of this document. The recovery layer is where typort does, in
 miniature, the very PDF→Word inference it set out to avoid — because some content
 (`#align(center)`, `#place`, grids) reaches the model *only* as geometry.
 
-`recover_missing_content` extracts every rendered text line with its position,
-then **text-diffs** it against what already made it into the model, inserting
-genuinely-missing lines at the geometrically-correct slot. Its correctness depends
-on:
+`recovery/mod.rs::recover_missing_content` orchestrates this seam:
+`recovery/lines.rs` extracts every rendered text line with its position,
+`recovery/deduplication.rs` **text-diffs** it against what already made it into
+the model, and `recovery/insertion.rs` inserts genuinely-missing lines at the
+geometrically-correct slot. `recovery/horizontal_rules.rs` and
+`recovery/table_rules.rs` contain the two rule-shape paths. Correctness depends on:
 
-- **Text normalization matching** across two very different pipelines (strip CJK
-  spaces, strip math italics, strip visual markers, strip heading numbering).
+- **Text normalization matching** across two very different pipelines. The shared
+  normalisers in `convert/text_norm.rs` strip CJK spaces, math italics, visual
+  markers, whitespace, citation markers, and identify CJK fragments.
 - **Geometry and text thresholds** collected in the documented constants blocks
-  at the top of `convert/page.rs` and `convert/recovery.rs`. Those blocks are the
-  authoritative tuning references for the paged-style and recovery heuristics.
+  at the top of `convert/page.rs` and the responsible `convert/recovery/*.rs`
+  module. Those blocks are the authoritative tuning references for the paged-style
+  and recovery heuristics.
 
 These heuristics are individually justified but collectively brittle: both false
 negatives (real content skipped) and false positives (content duplicated) are
 possible. Most of the project's known edge-case bugs live here. **Anyone touching
-this file should add a fixture-based regression test for the specific case.**
+this directory should add a fixture-based regression test for the specific case.**
 
 ## Language neutrality (how it stays universal)
 

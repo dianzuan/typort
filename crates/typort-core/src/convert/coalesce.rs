@@ -18,7 +18,7 @@
 //! breaks must stay two `<w:br/>`s) and never absorb folded whitespace.
 
 use typort_ooxml::document::{
-    Document, InlineElement, Paragraph, Run, for_each_paragraph_in_block_mut,
+    BlockElement, Document, InlineElement, Paragraph, Run, for_each_paragraph_in_block_mut,
 };
 
 /// Merge adjacent equally-formatted text runs across the whole document.
@@ -201,6 +201,63 @@ fn run_text(inline: &InlineElement) -> String {
 fn set_run_text_empty(inline: &mut InlineElement) {
     if let InlineElement::Text(run) = inline {
         run.text.clear();
+    }
+}
+
+/// Merge consecutive paragraphs whose text appears on the same visual line in
+/// the paged output.  This fixes cases where Typst's HTML export splits inline
+/// content (e.g. `super()` calls interleaved with author names in a `#for` loop)
+/// into separate block-level elements that become separate Word paragraphs.
+pub(super) fn merge_same_line_paragraphs(doc: &mut Document) {
+    let mut i = 0;
+    while i + 1 < doc.body.elements.len() {
+        let should_merge = {
+            let (left, right) = doc.body.elements.split_at(i + 1);
+            let Some(BlockElement::Paragraph(p1)) = left.last() else {
+                i += 1;
+                continue;
+            };
+            let Some(BlockElement::Paragraph(p2)) = right.first() else {
+                i += 1;
+                continue;
+            };
+
+            // Both must be non-heading, non-list paragraphs
+            if p1.style.is_some()
+                || p2.style.is_some()
+                || p1.list_info.is_some()
+                || p2.list_info.is_some()
+            {
+                false
+            } else {
+                // Merge when p1 is all-superscript runs (split inline super() calls)
+                // into p2 (the text paragraph that follows). This handles the
+                // pattern where #for loop generates super() before author names.
+                !p1.inlines.is_empty()
+                    && p1.inlines.iter().all(|inl| {
+                        matches!(
+                            inl,
+                            InlineElement::Text(r) if r.superscript || r.text.trim().is_empty()
+                        )
+                    })
+            }
+        };
+
+        if should_merge {
+            // Remove the all-super p1 and prepend its inlines into p2
+            let BlockElement::Paragraph(p1) = doc.body.elements.remove(i) else {
+                unreachable!()
+            };
+            let BlockElement::Paragraph(p2) = &mut doc.body.elements[i] else {
+                unreachable!()
+            };
+            let mut merged = p1.inlines;
+            merged.extend(std::mem::take(&mut p2.inlines));
+            p2.inlines = merged;
+            // Don't increment i — check the merged paragraph against the next
+        } else {
+            i += 1;
+        }
     }
 }
 

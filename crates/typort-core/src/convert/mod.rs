@@ -27,6 +27,7 @@ mod stats;
 mod table_align;
 mod table_width;
 mod tables;
+mod text_norm;
 
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
@@ -51,16 +52,13 @@ use typst_library::text::{Lang, Region, SmartQuoteElem, SmartQuoter, SmartQuotes
 use crate::world::TyportWorld;
 use fmt::InlineFmt;
 
-use block::{
-    emit_block_equation, is_inline_equation_at, strip_cjk_spaces_str, strip_visual_markers,
-    walk_tags,
-};
+use block::{emit_block_equation, is_inline_equation_at, walk_tags};
 use dom::{
-    children_are_inline, collect_block_tag_locations, collect_deep_text, collect_flat_text,
-    collect_li_ids, content_at_location, detect_alignment, drain_text_runs, element_at_location,
-    find_body, find_first_element, find_img_src, find_tag_end, first_biblioref_href,
-    get_attr_value, has_attr_value, is_block_equation, is_doc_endnotes_section, run_with_span,
-    sanitize_anchor, subtree_has_element, tag_name,
+    children_are_inline, collect_deep_text, collect_flat_text, collect_li_ids, content_at_location,
+    detect_alignment, drain_text_runs, element_at_location, find_body, find_first_element,
+    find_img_src, find_tag_end, first_biblioref_href, get_attr_value, has_attr_value,
+    is_block_equation, is_doc_endnotes_section, run_with_span, sanitize_anchor,
+    subtree_has_element, tag_name,
 };
 use headings::handle_heading;
 use inline_walk::{InlineOptions, collect_inlines};
@@ -340,7 +338,7 @@ fn run_post_passes(
 
     // Merge consecutive paragraphs that belong to the same visual line.
     if paged_doc.is_some() {
-        recovery::merge_same_line_paragraphs(doc);
+        coalesce::merge_same_line_paragraphs(doc);
     }
 
     // Coalesce adjacent equally-formatted text runs last, after every per-run

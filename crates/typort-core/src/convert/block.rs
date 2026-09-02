@@ -1,11 +1,13 @@
+use super::text_norm::strip_cjk_spaces;
+
 use super::{
     Alignment, BlockElement, Content, Document, EquationElem, EquationState, HangingIndent,
-    HtmlDocument, HtmlElement, HtmlNode, InlineElement, InlineFmt, InlineOptions, Location,
-    Numbering, OutlineElem, Paragraph, ParagraphStyle, Run, Tag, WalkCtx, children_are_inline,
+    HtmlDocument, HtmlElement, HtmlNode, InlineFmt, InlineOptions, Location, Numbering,
+    OutlineElem, Paragraph, ParagraphStyle, Run, Tag, WalkCtx, children_are_inline,
     collect_deep_text, collect_inlines, collect_li_ids, content_at_location, convert_html_list,
     convert_html_table, detect_alignment, element_at_location, find_img_src, find_tag_end,
     footnote, handle_heading, handle_list_tag, handle_table_tag, has_attr_value, image,
-    is_block_equation, is_doc_endnotes_section, page, run_with_span, sanitize_anchor,
+    is_block_equation, is_doc_endnotes_section, run_with_span, sanitize_anchor,
     subtree_has_element, tag_name,
 };
 
@@ -410,71 +412,6 @@ pub(super) fn handle_par_with_inline_equations(
 
     // Return index of last consumed node (cursor - 1 since the outer loop does i += 1)
     cursor.saturating_sub(1)
-}
-
-pub(super) fn strip_cjk_spaces(para: &mut Paragraph) {
-    let mut remove_indices = Vec::new();
-    for i in 1..para.inlines.len().saturating_sub(1) {
-        let InlineElement::Text(run) = &para.inlines[i] else {
-            continue;
-        };
-        if run.text.trim() != "" {
-            continue;
-        }
-        let prev = &para.inlines[i - 1];
-        let next = &para.inlines[i + 1];
-        let prev_ends_cjk = matches!(prev, InlineElement::Text(r)
-            if r.text.chars().last().is_some_and(page::is_cjk_char));
-        let next_starts_cjk = matches!(next, InlineElement::Text(r)
-            if r.text.chars().next().is_some_and(page::is_cjk_char));
-        let prev_is_math = matches!(prev, InlineElement::Math { .. });
-        let next_is_math = matches!(next, InlineElement::Math { .. });
-        // A space adjacent to CJK on one side carries no meaning when the other
-        // side is CJK text or an inline equation — Chinese needs no separator from
-        // a neighbouring character or formula. (A space between Latin text and an
-        // equation IS kept: Typst trims the source space and Word needs it back,
-        // e.g. "the value x is".)
-        if (prev_ends_cjk && (next_starts_cjk || next_is_math)) || (prev_is_math && next_starts_cjk)
-        {
-            remove_indices.push(i);
-        }
-    }
-    for idx in remove_indices.into_iter().rev() {
-        para.inlines.remove(idx);
-    }
-}
-
-pub(super) fn strip_visual_markers(s: &str) -> String {
-    let trimmed = s.trim_start_matches(['•', '‣', '◦', '▪', '▸', '–', '—']);
-    let trimmed = trimmed.trim_start();
-    // Strip leading "1." or "1.1" or "1.1.1" numbering patterns
-    let trimmed = if let Some(rest) = trimmed.strip_prefix(|c: char| c.is_ascii_digit()) {
-        let rest = rest.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.');
-        rest.trim_start()
-    } else {
-        trimmed
-    };
-    trimmed.to_string()
-}
-
-pub(super) fn strip_cjk_spaces_str(s: &str) -> String {
-    let chars: Vec<char> = s.chars().collect();
-    let mut out = String::with_capacity(s.len());
-    let mut i = 0;
-    while i < chars.len() {
-        if chars[i] == ' '
-            && i > 0
-            && i + 1 < chars.len()
-            && page::is_cjk_char(chars[i - 1])
-            && page::is_cjk_char(chars[i + 1])
-        {
-            i += 1;
-            continue;
-        }
-        out.push(chars[i]);
-        i += 1;
-    }
-    out
 }
 
 /// Check if position `idx` in `children` is a `Tag::Start("equation")` for an

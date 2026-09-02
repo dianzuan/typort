@@ -73,12 +73,14 @@ anyone "simplify" it back to a dual-compilation description. Full detail in
   new positional parameter.
 - **File size:** don't grow files reflexively. The HTML walk is split by
   responsibility under `convert/` (`block`, `inline_walk`, `headings`, `tables`,
-  `lists`, `source`, `smallcaps`, `postprocess`, and `dom`) and the OOXML writer
-  by emitted part under `typort-ooxml/src/writer/`; put a new converter or part
-  writer in its matching module rather than growing the entry module. Tests are
-  already split this way: `crates/typort-cli/tests/integration/` is one file per
-  test area (see the Testing section below) — add a new area module rather than
-  growing an existing one.
+  `lists`, `source`, `smallcaps`, `postprocess`, and `dom`); recovery is split under
+  `convert/recovery/` (`lines`, `deduplication`, `insertion`, `horizontal_rules`,
+  and `table_rules`), with shared walk/recovery text normalisation in
+  `convert/text_norm.rs`. The OOXML writer is split by emitted part under
+  `typort-ooxml/src/writer/`; put a new converter or part writer in its matching
+  module rather than growing the entry module. Tests are already split this way:
+  `crates/typort-cli/tests/integration/` is one file per test area (see the Testing
+  section below) — add a new area module rather than growing an existing one.
 
 ## Testing
 
@@ -87,7 +89,7 @@ anyone "simplify" it back to a dual-compilation description. Full detail in
   `math`, `tables`, `structure`, `headings`, `formatting`, `images`, `recovery`,
   `lists`, `footnotes`, `misc`, `bibliography`, `fonts_cjk`, `golden`, and `visual`
   area modules, with fixture conversion shared through `tests/common`.
-- **Any change to `convert/recovery.rs` or the `convert/page.rs` heuristics must
+- **Any change under `convert/recovery/` or to the `convert/page.rs` heuristics must
   ship with a fixture-based regression test** for the specific case — that code is
   the most fragile part of the system (geometry → semantics inference with magic
   thresholds; see ARCHITECTURE.md "fragile seam").
@@ -159,9 +161,9 @@ the *approach* is reused, not re-introduced:
    in `apply_paragraph_formatting`; it is driven by the semantic
    `doc-bibliography` role during the HTML walk (a hand-written `= 参考文献`
    heading is just text to Typst, so typort treats it as text).
-2. Caption skipping in `convert/recovery.rs` no longer matches `表 ` / `图 ` /
-   `Table ` / `Figure `; captions are deduplicated by the semantic text the
-   figure path already emitted.
+2. Caption skipping in `convert/recovery/deduplication.rs` no longer matches `表 ` /
+   `图 ` / `Table ` / `Figure `; captions are deduplicated by the semantic text
+   the figure path already emitted.
 3. Document language is derived from `#set text(lang:, region:)`
    (`apply_language_override`), not guessed from CJK-glyph presence.
 

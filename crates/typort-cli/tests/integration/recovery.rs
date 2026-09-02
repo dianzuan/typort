@@ -1,4 +1,4 @@
-//! Geometry-recovery heuristic tests (see convert/recovery.rs and convert/page.rs).
+//! Geometry-recovery heuristic tests (see convert/recovery/ and convert/page.rs).
 
 use crate::common;
 use crate::common::{
@@ -19,7 +19,7 @@ fn long_left_heading_not_misclassified_as_centered() {
 
 #[test]
 fn recovery_does_not_inject_citation_or_duplicate_orphans() {
-    // Regression for recover_missing_content (recovery.rs): paged body lines whose
+    // Regression for recover_missing_content (recovery/mod.rs): paged body lines whose
     // prose is broken up by OMML math and superscript citations used to be misjudged
     // as "missing" and prepended at body index 0, injecting citation-number strings
     // and duplicated body sentences as orphans above the abstract. See
@@ -63,7 +63,7 @@ fn recovery_does_not_inject_citation_or_duplicate_orphans() {
 
 #[test]
 fn recovery_dedups_heading_with_number_beyond_old_table() {
-    // Regression for recover_missing_content (recovery.rs): a SHORT heading whose
+    // Regression for recover_missing_content (recovery/mod.rs): a SHORT heading whose
     // Typst-computed number is outside the old hardcoded Chinese-numeral table
     // (一..十五) — here "十六、讨论" / "十七、综述" — was re-scraped from page
     // geometry and injected as a duplicate orphan, because the short-line (<6 char)
@@ -91,7 +91,7 @@ fn recovery_dedups_heading_with_number_beyond_old_table() {
 
 #[test]
 fn recovery_keeps_centered_enumerated_line_not_over_suppressed() {
-    // Regression for recover_missing_content (recovery.rs) "site 2": the old code
+    // Regression for recover_missing_content (recovery/mod.rs) "site 2": the old code
     // stripped a hardcoded Chinese-numeral prefix before the CJK-projection dedup,
     // which OVER-SUPPRESSED a legitimate layout-only centered line ("三、甲乙丙，丁戊己")
     // whose number-stripped projection collided with body prose ("甲乙丙丁戊己").
@@ -543,7 +543,7 @@ fn wrapped_table_row_not_recovered_as_orphan() {
 #[test]
 fn recovered_cluster_join_does_not_double_existing_space() {
     // Regression: recover_missing_content's x_clusters joiner (the "multiple
-    // clusters with small gaps" branch in recovery.rs) unconditionally inserted an
+    // clusters with small gaps" branch in recovery/insertion.rs) unconditionally inserted an
     // NBSP run between clusters, even when the boundary already carried a source
     // whitespace character. complex_paper.typ:13 has "上海 200433" — ONE ASCII
     // space — but the second recovered cluster's first run text begins with that
