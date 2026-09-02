@@ -64,7 +64,7 @@ has no semantic HTML representation:
   pulls the original `EquationElem` Content tree through the **introspector** and
   converts it to OMML (`typort-math`); the HTML walk skips the `<math>` node so
   the equation's glyphs aren't re-emitted as duplicate literal text
-  (`convert/mod.rs`, `"math"` arm). MathML→OMML transliteration is a possible
+  (`convert/inline_walk.rs`, `"math"` arm). MathML→OMML transliteration is a possible
   future alternative, but the Content tree is the richer source today.
 
 ### Why Paged alone is not enough
@@ -102,21 +102,17 @@ for the exact order.
                                     │              │
                                     ▼              ▼
                     ┌─────────────────────────────────────────────┐
-                    │  convert():                                   │
-                    │   1-3  page setup + document style (Paged)    │
-                    │   3b   AST overrides (authoritative)          │
-                    │   4-7  walk HTML tags → emit BlockElements,   │
-                    │        querying introspector for detail;      │
-                    │        <img> content decoded from src data-   │
-                    │        URLs; figure rasters keyed by Location │
-                    │   9    headers/footers/page numbering (Paged) │
-                    │   10   recover layout-only content (Paged)    │
-                    │   11   title/author metadata; bibliography    │
-                    │   12   per-run styles + alignment (Paged);    │
-                    │        AST par(hanging-indent); heading-run   │
-                    │        prop strip                             │
-                    │   13-15 section breaks, rules, line-merging   │
-                    │   16   coalesce adjacent equal-format runs    │
+                    │  convert(): five named phases                 │
+                    │   1  compile HTML + Paged targets             │
+                    │   2  apply page + style, then AST overrides   │
+                    │   3  walk HTML body → emit BlockElements;     │
+                    │      decode <img> data URLs; attach figure    │
+                    │      rasters by Location                      │
+                    │   4  apply headers/footers/page numbering     │
+                    │   5  run recovery and post-processing passes │
+                    │      (metadata, bibliography, per-run styles,│
+                    │      source breaks/smallcaps/hanging indents, │
+                    │      sections, rules, merging, coalescing)    │
                     └───────────────┬─────────────────────────────┘
                                     ▼
                           typort_ooxml::Document   (the IR)
@@ -170,8 +166,17 @@ they exercise that public API as integration tests.
 | File | Responsibility |
 |------|----------------|
 | `world.rs` | `TyportWorld`: implements Typst's `World` trait (source, system fonts, `@preview` package download, `Feature::Html`). |
-| `convert/mod.rs` | The pipeline + the HTML tag walker + most element converters. |
-| `convert/page.rs` | Reverse-engineers page settings and styles from Paged geometry; parses AST `set`-rule overrides (incl. `par(hanging-indent:)`); normalizes math-fallback fonts; strips redundant heading run props. |
+| `convert/mod.rs` | Entry orchestration: module declarations/re-exports, `WalkCtx`, equation state, and the five named pipeline phases. |
+| `convert/block.rs` | Block-level HTML tag walk and dispatch, paragraphs, equations, figures, code blocks, blockquotes, and term lists. |
+| `convert/inline_walk.rs` | HTML inline traversal: formatted spans, links, citations, footnotes, images, and inline equations. |
+| `convert/headings.rs` | Semantic heading conversion, numbering, smart quotes, and inline heading content. |
+| `convert/tables.rs` | HTML table conversion, cells and nested tables, plus rowspan post-processing. |
+| `convert/lists.rs` | Ordered and unordered HTML list conversion, including nested levels. |
+| `convert/source.rs` | Gathers and applies authoritative source-AST style and paragraph overrides. |
+| `convert/smallcaps.rs` | Recovers consumed `smallcaps` calls and aliases from the source AST. |
+| `convert/postprocess.rs` | Paragraph-indent cleanup and document metadata extraction. |
+| `convert/dom.rs` | Shared HTML DOM, tag, attribute, text, location, and alignment helpers. |
+| `convert/page.rs` | Reverse-engineers page settings and styles from Paged geometry; parses AST `set`-rule data (incl. `par(hanging-indent:)`); normalizes math-fallback fonts; strips redundant heading run props. |
 | `convert/recovery.rs` | Recovers layout-only content HTML dropped; horizontal rules; per-table border styling from each table's own paged tag bracket; same-line paragraph merging. |
 | `convert/coalesce.rs` | Final pass: merges adjacent runs with identical effective `rPr` and folds whitespace-only runs, undoing the per-text-node run shattering. |
 | `convert/table_width.rs` | Turns a `TableElem`'s declared column `TrackSizings` (fr/rel/auto) into per-cell `w:tcW` percentages. |
@@ -180,7 +185,7 @@ they exercise that public API as integration tests.
 | `convert/bibliography.rs` | Citation data via the semantic `BibliographyElem` (+ re-parsing `.bib`/`.yml` with hayagriva). |
 | `convert/footnote.rs` | Footnote bodies from the HTML `doc-endnotes` section. |
 | `convert/image.rs` | Image content decoded from each `<img>`'s base64 src data-URL (typst-html 0.15 embeds the bytes in the DOM); Paged frames contribute display sizes (by content hash) and drawing-canvas rasters keyed by their figure's `Location`. |
-| `convert/inline.rs` | Inline formatting (bold/italic/…) → styled runs. |
+| `convert/inline.rs` | Typst Content-AST inline formatting (bold/italic/…) → styled runs. |
 
 ## The IR: `typort_ooxml::Document`
 

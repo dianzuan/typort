@@ -71,10 +71,11 @@ anyone "simplify" it back to a dual-compilation description. Full detail in
   former `clippy.toml` `too-many-arguments-threshold` override was removed once
   that debt was repaid — new shared state goes into one of these structs, not a
   new positional parameter.
-- **File size:** several files are large (`convert/mod.rs` at 3000+ lines). The
-  OOXML writer is split by emitted part under `typort-ooxml/src/writer/`; keep
-  additions in the matching module. When adding a new element converter, prefer
-  a new module/file over appending. Tests are
+- **File size:** don't grow files reflexively. The HTML walk is split by
+  responsibility under `convert/` (`block`, `inline_walk`, `headings`, `tables`,
+  `lists`, `source`, `smallcaps`, `postprocess`, and `dom`) and the OOXML writer
+  by emitted part under `typort-ooxml/src/writer/`; put a new converter or part
+  writer in its matching module rather than growing the entry module. Tests are
   already split this way: `crates/typort-cli/tests/integration/` is one file per
   test area (see the Testing section below) — add a new area module rather than
   growing an existing one.
