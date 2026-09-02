@@ -5,10 +5,9 @@ use typst::layout::{Frame, FrameItem};
 use typst_layout::PagedDocument;
 
 use super::language::is_cjk_char;
+use super::style::DEFAULT_BODY_SIZE_HALF_PT;
 use super::units::pt_to_half_pt;
 
-/// Half-point fallback when no rendered body size is available.
-const DEFAULT_BODY_SIZE_HALF_PT: u32 = 21;
 /// OpenType weight at which rendered text is treated as bold.
 const BOLD_WEIGHT_THRESHOLD: u16 = 700;
 /// Binary `ital` variation-axis value at which rendered text is italic.

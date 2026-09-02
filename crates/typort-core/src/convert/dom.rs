@@ -161,10 +161,6 @@ pub(super) fn collect_flat_text(nodes: &[HtmlNode]) -> String {
     text
 }
 
-// ---------------------------------------------------------------------------
-// Helper functions
-// ---------------------------------------------------------------------------
-
 /// Find the index of the `Tag::End` matching the given start location.
 pub(super) fn find_tag_end(
     children: &[HtmlNode],
@@ -305,7 +301,7 @@ pub(super) fn collect_li_ids(nodes: &[HtmlNode], out: &mut Vec<Option<String>>) 
 }
 
 // ---------------------------------------------------------------------------
-// Alignment detection (I5)
+// Alignment detection
 // ---------------------------------------------------------------------------
 
 /// Detect paragraph alignment from an HTML element's `style` attribute.

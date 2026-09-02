@@ -18,7 +18,7 @@ use super::units::{pt_to_half_pt, pt_to_twips};
 /// Pages sampled for the glyph-weighted document-style detector.
 const DOCUMENT_STYLE_SAMPLE_PAGES: usize = 3;
 /// Half-point fallback when no rendered body size is available.
-const DEFAULT_BODY_SIZE_HALF_PT: u32 = 21;
+pub(super) const DEFAULT_BODY_SIZE_HALF_PT: u32 = 21;
 /// Cap-height ratio used when rendered font metrics are unavailable.
 const DEFAULT_CAP_HEIGHT_RATIO: f64 = 0.66;
 /// Minimum text fragments needed to infer a first-line indent.

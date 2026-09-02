@@ -147,7 +147,7 @@ pub(super) fn extract_cjk_fragments(text: &str, min_len: usize) -> Vec<String> {
     let mut fragments = Vec::new();
     let mut current = String::new();
     for c in text.chars() {
-        if matches!(c, '\u{4E00}'..='\u{9FFF}' | '\u{3400}'..='\u{4DBF}') {
+        if is_cjk_ideograph(c) {
             current.push(c);
         } else if current.chars().count() >= min_len {
             fragments.push(std::mem::take(&mut current));
