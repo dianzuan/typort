@@ -1,8 +1,9 @@
 //! Tests that don't fit a more specific area.
 
-use crate::common::{fixture_doc_xml, fixture_styles_xml};
-use std::io::Cursor;
-use std::path::Path;
+use crate::common::{
+    fixture_dir, fixture_doc_xml, fixture_document, fixture_package, fixture_package_from_document,
+    fixture_styles_xml,
+};
 
 #[test]
 fn italic_text_produces_w_i_element() {
@@ -20,23 +21,17 @@ fn italic_text_produces_w_i_element() {
 
 #[test]
 fn docx_contains_core_properties() {
-    let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/hello.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
+    let package = fixture_package("hello");
 
     // Verify docProps/core.xml exists
-    let names: Vec<String> = reader.file_names().map(String::from).collect();
+    let names: Vec<&str> = package.part_names().collect();
     assert!(
-        names.iter().any(|n| n == "docProps/core.xml"),
+        names.contains(&"docProps/core.xml"),
         "docx should contain docProps/core.xml, got: {names:?}"
     );
 
     // Verify core.xml content
-    let core_xml = std::io::read_to_string(reader.by_name("docProps/core.xml").unwrap()).unwrap();
+    let core_xml = package.part_text("docProps/core.xml");
     assert!(
         core_xml.contains("cp:coreProperties"),
         "core.xml should have cp:coreProperties root element"
@@ -55,14 +50,14 @@ fn docx_contains_core_properties() {
     );
 
     // Verify _rels/.rels references core properties
-    let rels_xml = std::io::read_to_string(reader.by_name("_rels/.rels").unwrap()).unwrap();
+    let rels_xml = package.part_text("_rels/.rels");
     assert!(
         rels_xml.contains("core-properties"),
         "_rels/.rels should reference core-properties"
     );
 
     // Verify content types include core properties
-    let ct_xml = std::io::read_to_string(reader.by_name("[Content_Types].xml").unwrap()).unwrap();
+    let ct_xml = package.part_text("[Content_Types].xml");
     assert!(
         ct_xml.contains("core-properties"),
         "content types should reference core-properties"
@@ -71,8 +66,7 @@ fn docx_contains_core_properties() {
 
 #[test]
 fn metadata_title_extracted_from_first_heading() {
-    let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/hello.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
+    let doc = fixture_document("hello");
 
     assert_eq!(
         doc.metadata.title.as_deref(),
@@ -83,28 +77,11 @@ fn metadata_title_extracted_from_first_heading() {
 
 #[test]
 fn preset_overrides_page_margins() {
-    let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/hello.typ")).unwrap();
-    let mut doc = typort_core::convert::convert(&world).unwrap();
+    let mut doc = fixture_document("hello");
 
     // Load the test preset fixture
-    let preset =
-        typort_presets::load_preset(Path::new("../../tests/fixtures/presets"), "example").unwrap();
-
-    // Apply preset page margins
-    if let Some(page) = &preset.page {
-        if let Some(top) = page.margin_top_cm {
-            doc.page_settings.margin_top = typort_presets::cm_to_twips(top);
-        }
-        if let Some(bottom) = page.margin_bottom_cm {
-            doc.page_settings.margin_bottom = typort_presets::cm_to_twips(bottom);
-        }
-        if let Some(left) = page.margin_left_cm {
-            doc.page_settings.margin_left = typort_presets::cm_to_twips(left);
-        }
-        if let Some(right) = page.margin_right_cm {
-            doc.page_settings.margin_right = typort_presets::cm_to_twips(right);
-        }
-    }
+    let preset = typort_presets::load_preset(&fixture_dir("presets"), "example").unwrap();
+    preset.apply(&mut doc);
 
     // Verify margins were overridden
     assert_eq!(
@@ -125,11 +102,8 @@ fn preset_overrides_page_margins() {
     );
 
     // Write and verify margins appear in the XML
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let package = fixture_package_from_document(&doc);
+    let doc_xml = package.part_text("word/document.xml");
     assert!(
         doc_xml.contains("w:top=\"1440\""),
         "page margins should reflect preset values"
@@ -137,113 +111,6 @@ fn preset_overrides_page_margins() {
     assert!(
         doc_xml.contains("w:left=\"1797\""),
         "page margins should reflect preset values"
-    );
-}
-
-#[test]
-fn features_footnote_restart_and_font_hint() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-
-    // Feature 1: Footnote per-page restart (matching Typst's default numbering)
-    let settings_xml =
-        std::io::read_to_string(reader.by_name("word/settings.xml").unwrap()).unwrap();
-    assert!(
-        settings_xml.contains("w:footnotePr"),
-        "settings.xml should contain w:footnotePr"
-    );
-    assert!(
-        settings_xml.contains("eachPage"),
-        "settings.xml should restart numbering each page"
-    );
-
-    // Feature 1: sectPr also has footnote properties
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
-    // The sectPr should contain footnotePr
-    let sect_pr_pos = doc_xml.find("w:sectPr").expect("should have sectPr");
-    let after_sect = &doc_xml[sect_pr_pos..];
-    assert!(
-        after_sect.contains("w:footnotePr"),
-        "sectPr should contain w:footnotePr for per-section footnote restart"
-    );
-
-    // Feature 9: East Asian font hint
-    let styles_xml = std::io::read_to_string(reader.by_name("word/styles.xml").unwrap()).unwrap();
-    assert!(
-        styles_xml.contains("w:hint=\"eastAsia\""),
-        "styles.xml should contain w:hint=\"eastAsia\" for proper font selection"
-    );
-}
-
-#[test]
-fn footnote_circled_numbering_format_emitted() {
-    // Regression (typst 0.15 migration): the `doc-noteref` role moved ONTO the
-    // `<sup>` element (whose child is `<a>N`), so detect_footnote_format's old
-    // `<sup>`-child scan never matched and the circled (①②③) footnote numbering
-    // format was silently dropped — Word then rendered ①②③ as 1,2,3. fn25_test
-    // declares `#set footnote(numbering: "①")`.
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/fn25_test.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let settings_xml =
-        std::io::read_to_string(reader.by_name("word/settings.xml").unwrap()).unwrap();
-    assert!(
-        settings_xml.contains("decimalEnclosedCircle"),
-        "circled footnote numbering must emit w:numFmt=decimalEnclosedCircle, got: {settings_xml}"
-    );
-}
-
-#[test]
-fn footnote_math_not_duplicated() {
-    // Regression (typst 0.15 migration): collect_footnote_inlines descended into
-    // the new native MathML `<math>` element and emitted the equation a SECOND
-    // time as literal Mathematical-Alphanumeric glyphs in a body `<w:t>` run, on
-    // top of the correct OMML. Body runs must carry no math-script glyphs (those
-    // belong only in OMML `<m:t>`).
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/edge_math_in_footnote.typ"))
-            .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let fn_xml = std::io::read_to_string(reader.by_name("word/footnotes.xml").unwrap()).unwrap();
-    assert!(
-        fn_xml.contains("<m:oMath>"),
-        "footnote math should be present as OMML, got: {fn_xml}"
-    );
-    let mut rest = fn_xml.as_str();
-    let mut leaked = false;
-    while let Some(pos) = rest.find("<w:t") {
-        rest = &rest[pos + 4..];
-        let Some(open_end) = rest.find('>') else {
-            break;
-        };
-        let head = &rest[..open_end];
-        // a body text run is `<w:t>` or `<w:t attr…>`, not `<w:tab/>`
-        if (head.is_empty() || head.starts_with(' '))
-            && let Some(close) = rest[open_end + 1..].find("</w:t>")
-            && rest[open_end + 1..open_end + 1 + close]
-                .chars()
-                .any(|c| ('\u{1D400}'..='\u{1D7FF}').contains(&c))
-        {
-            leaked = true;
-            break;
-        }
-        rest = &rest[open_end..];
-    }
-    assert!(
-        !leaked,
-        "footnote math must not be duplicated as literal glyphs in a <w:t> run: {fn_xml}"
     );
 }
 
@@ -260,63 +127,9 @@ fn features_suppress_indent_after_heading() {
 }
 
 #[test]
-fn features_table_width_percentage() {
-    let doc_xml = fixture_doc_xml("complex_paper");
-
-    // Feature 6: Table uses percentage width (100%)
-    assert!(
-        doc_xml.contains("<w:tblW w:w=\"5000\" w:type=\"pct\"/>"),
-        "table should have 100% width via pct type"
-    );
-    // Feature 6: Cells have width defined
-    assert!(
-        doc_xml.contains("w:tcW"),
-        "table cells should have w:tcW width elements"
-    );
-}
-
-#[test]
-fn features_chinese_heading_numbering_definition() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/complex_paper.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let num_xml = std::io::read_to_string(reader.by_name("word/numbering.xml").unwrap()).unwrap();
-
-    // Feature 2: Chinese heading numbering abstract definition exists
-    assert!(
-        num_xml.contains("chineseCountingThousand"),
-        "numbering.xml should contain chineseCountingThousand format"
-    );
-    assert!(
-        num_xml.contains("decimalEnclosedCircleChinese"),
-        "numbering.xml should contain decimalEnclosedCircleChinese for level 4"
-    );
-    assert!(
-        num_xml.contains("w:abstractNumId=\"3\""),
-        "numbering.xml should have abstractNumId 3 for Chinese headings"
-    );
-    assert!(
-        num_xml.contains("w:numId=\"3\""),
-        "numbering.xml should have numId 3 instance for Chinese headings"
-    );
-}
-
-#[test]
 fn doc_title_from_set_document() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/doc_title.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let core_xml = std::io::read_to_string(reader.by_name("docProps/core.xml").unwrap()).unwrap();
+    let package = fixture_package("doc_title");
+    let core_xml = package.part_text("docProps/core.xml");
 
     assert!(
         core_xml.contains("My Custom Title"),
@@ -330,31 +143,12 @@ fn doc_title_from_set_document() {
 
 #[test]
 fn doc_author_from_set_document() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/doc_title.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let core_xml = std::io::read_to_string(reader.by_name("docProps/core.xml").unwrap()).unwrap();
+    let package = fixture_package("doc_title");
+    let core_xml = package.part_text("docProps/core.xml");
 
     assert!(
         core_xml.contains("Author Name"),
         "core.xml dc:creator should be 'Author Name'. Got: {core_xml}"
-    );
-}
-
-#[test]
-fn show_rule_heading_centered() {
-    let doc_xml = fixture_doc_xml("centered_heading");
-
-    // The heading should be detected as centered from the PagedDocument
-    // Look for a Heading1 paragraph with center alignment
-    assert!(
-        doc_xml.contains(r#"<w:jc w:val="center"/>"#),
-        "centered heading should have w:jc center. Got:\n{doc_xml}"
     );
 }
 
@@ -367,50 +161,6 @@ fn show_rule_colored_bold() {
     assert!(
         doc_xml.contains(r#"<w:color w:val="FF4136"/>"#),
         "red bold text should have w:color FF4136. Got:\n{doc_xml}"
-    );
-}
-
-#[test]
-fn large_title_not_split_by_tabs() {
-    let doc_xml = fixture_doc_xml("large_title_test");
-
-    // The large centered title "大标题测试文档" should NOT be split by tab characters.
-    // Previously, large CJK characters at 22pt exceeded the x-cluster gap threshold,
-    // causing each character to be treated as a separate column.
-    assert!(
-        !doc_xml.contains("<w:tab/>"),
-        "large title should not contain tab separators. Got:\n{doc_xml}"
-    );
-
-    // The title characters should all be present
-    assert!(
-        doc_xml.contains('大') && doc_xml.contains('标') && doc_xml.contains('文'),
-        "title characters should be in the output"
-    );
-}
-
-#[test]
-fn show_rule_heading_font_and_size() {
-    let doc_xml = fixture_doc_xml("show_rule_styles");
-
-    // Heading should be centered (from show rule: align(center))
-    assert!(
-        doc_xml.contains(r#"<w:jc w:val="center"/>"#),
-        "heading should be centered via show rule. Got:\n{doc_xml}"
-    );
-
-    // Heading font should be overridden to DejaVu Sans (from show rule)
-    assert!(
-        doc_xml.contains("DejaVu Sans"),
-        "heading should use DejaVu Sans font from show rule. Got:\n{doc_xml}"
-    );
-
-    // Heading size 18pt = 36 half-points now lives in the Heading1 STYLE (the
-    // run inherits it), not as a redundant per-run <w:sz>.
-    let styles_xml = fixture_styles_xml("show_rule_styles");
-    assert!(
-        styles_xml.contains(r#"<w:sz w:val="36"/>"#),
-        "Heading1 style should define size 36 half-points (18pt). Got:\n{styles_xml}"
     );
 }
 
@@ -497,39 +247,77 @@ fn body_size_from_show_template_not_nested_block() {
 }
 
 #[test]
-fn heading_run_props_not_redundant_with_style() {
-    // A plain heading run must NOT repeat the Heading style's bold/size: the
-    // pStyle already carries them, and duplicating them fights a Word template.
-    // A genuinely-distinct inline span (italic) inside a heading must survive.
-    // See tests/fixtures/heading_redundant_run_props.typ.
-    let doc_xml = fixture_doc_xml("heading_redundant_run_props");
+fn issue_today_is_real_date_not_fixed() {
+    // World::today() must return the real current date, not a fixed placeholder.
+    // Compare against the system date computed the same way at test time, so the
+    // assertion holds on any day. Falls back to UTC if the local zone is
+    // unavailable — matching the implementation in world.rs.
+    let now = time::OffsetDateTime::now_local().unwrap_or_else(|_| time::OffsetDateTime::now_utc());
+    let expected = format!(
+        "{:04}-{:02}-{:02}",
+        now.year(),
+        now.month() as u8,
+        now.day()
+    );
+    let xml = fixture_doc_xml("issue_today_real_date");
+    assert!(
+        xml.contains(&expected),
+        "document should contain today's date {expected}, but did not (fixed placeholder?)"
+    );
+}
 
-    // Isolate the plain heading paragraph; its run should carry no redundant
-    // <w:b/>/<w:sz> (those live in the Heading1 style).
-    let plain = doc_xml
-        .split("<w:p>")
-        .find(|p| p.contains("Plain Heading One"))
-        .expect("plain heading paragraph present");
+#[test]
+fn edge_empty_paragraphs_no_crash() {
+    let xml = fixture_doc_xml("edge_empty_paragraphs");
     assert!(
-        plain.contains(r#"<w:pStyle w:val="Heading1"/>"#),
-        "plain heading should carry Heading1 pStyle. Got:\n{plain}"
+        xml.contains("First paragraph"),
+        "first text should be present"
     );
     assert!(
-        !plain.contains("<w:b/>"),
-        "plain heading run must not repeat the style's <w:b/>. Got:\n{plain}"
+        xml.contains("Third paragraph"),
+        "third text should be present"
     );
     assert!(
-        !plain.contains("<w:sz "),
-        "plain heading run must not repeat the style's <w:sz>. Got:\n{plain}"
+        xml.contains("Last paragraph"),
+        "last text should be present"
     );
+}
 
-    // The italic span inside the second heading must keep its distinct override.
-    let styled = doc_xml
-        .split("<w:p>")
-        .find(|p| p.contains("Italic"))
-        .expect("styled heading paragraph present");
+#[test]
+fn edge_theorem_proof_content() {
+    let xml = fixture_doc_xml("edge_theorem_proof");
+    for text in [
+        "Continuity",
+        "Intermediate Value",
+        "Theorem",
+        "Proof",
+        "Definition",
+        "bounded monotone",
+        "Preliminaries",
+    ] {
+        assert!(xml.contains(text), "'{text}' should be present");
+    }
     assert!(
-        styled.contains("<w:i/>"),
-        "italic span inside a heading must keep <w:i/>. Got:\n{styled}"
+        xml.contains("<m:oMathPara>"),
+        "math in definition should produce OMML"
     );
+}
+
+#[test]
+fn issue_custom_doc_properties_metadata() {
+    let xml = fixture_doc_xml("issue_custom_doc_properties");
+    assert!(
+        xml.contains("Abstract"),
+        "abstract heading should be present"
+    );
+    assert!(
+        xml.contains("Introduction"),
+        "intro heading should be present"
+    );
+}
+
+#[test]
+fn issue_metadata_case_dedup() {
+    let xml = fixture_doc_xml("issue_metadata_case_dedup");
+    assert!(xml.contains("test document"), "document body text present");
 }

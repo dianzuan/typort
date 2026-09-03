@@ -1,9 +1,10 @@
-# TyportSlantTest[wght,slnt].ttf is a modified version of Karla[wght].ttf
-# (see OFL-Karla.txt), used only as a test fixture: it adds a nominal `slnt`
-# variation axis (no glyph deltas) and is renamed throughout its `name`
-# table to "Typort Slant Test" / "TyportSlantTest" per OFL section 2 —
-# regenerate with tests/fonts/make_slant_test_font.py. Original copyright below,
-# retained per OFL section 2 condition 2.
+# TyportSlantTest[wght,slnt].ttf is a test-fixture derivative of
+# Karla[wght].ttf (see OFL-Karla.txt). It adds a nominal `slnt` variation axis
+# with a range of -15 (slanted) to 0 (upright) and no glyph deltas. The family,
+# full, unique, PostScript, typographic-family, and variations-PostScript
+# name-table records were renamed to "Typort Slant Test" / "TyportSlantTest",
+# and the STAT table was rebuilt from the source font's `wght` axis and the new
+# `slnt` axis. The original copyright below is retained under OFL section 2.
 
 Copyright 2019 The Karla Project Authors (https://github.com/googlefonts/karla)
 

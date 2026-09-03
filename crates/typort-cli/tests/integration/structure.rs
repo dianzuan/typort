@@ -1,8 +1,9 @@
 //! Document structure: TOC, headers/footers, columns, section breaks, pagebreaks, hrules, page numbering.
 
-use crate::common::fixture_doc_xml;
-use std::io::Cursor;
-use std::path::Path;
+use crate::common::{
+    fixture_doc_xml, fixture_document, fixture_package, fixture_package_from_document,
+    paragraph_texts,
+};
 
 #[test]
 fn toc_produces_field_code() {
@@ -26,9 +27,7 @@ fn toc_produces_field_code() {
 fn toc_document_model_has_toc_inline() {
     use typort_ooxml::document::{BlockElement, InlineElement};
 
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/toc_test.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
+    let doc = fixture_document("toc_test");
 
     let has_toc = doc.body.elements.iter().any(|e| {
         if let BlockElement::Paragraph(p) = e {
@@ -47,10 +46,7 @@ fn toc_document_model_has_toc_inline() {
 
 #[test]
 fn header_footer_produces_xml_parts() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/header_footer_test.typ"))
-            .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
+    let doc = fixture_document("header_footer_test");
 
     // Verify the document model has header and footer content
     assert!(
@@ -62,30 +58,28 @@ fn header_footer_produces_xml_parts() {
         "document should detect footer from header_footer_test.typ"
     );
 
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let names: Vec<String> = reader.file_names().map(String::from).collect();
+    let package = fixture_package_from_document(&doc);
+    let names: Vec<&str> = package.part_names().collect();
 
     // Check that header/footer XML parts exist in the ZIP
     assert!(
-        names.iter().any(|n| n == "word/header1.xml"),
+        names.contains(&"word/header1.xml"),
         "should have word/header1.xml in docx, got: {names:?}"
     );
     assert!(
-        names.iter().any(|n| n == "word/footer1.xml"),
+        names.contains(&"word/footer1.xml"),
         "should have word/footer1.xml in docx, got: {names:?}"
     );
 
     // Verify header content
-    let header_xml = std::io::read_to_string(reader.by_name("word/header1.xml").unwrap()).unwrap();
+    let header_xml = package.part_text("word/header1.xml");
     assert!(
         header_xml.contains("Document Title"),
         "header1.xml should contain 'Document Title'"
     );
 
     // Verify footer content
-    let footer_xml = std::io::read_to_string(reader.by_name("word/footer1.xml").unwrap()).unwrap();
+    let footer_xml = package.part_text("word/footer1.xml");
     assert!(
         footer_xml.contains("Page footer text"),
         "footer1.xml should contain 'Page footer text'"
@@ -124,9 +118,7 @@ fn header_footer_referenced_in_sect_pr() {
 
 #[test]
 fn columns_detected_in_document_model() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/columns_test.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
+    let doc = fixture_document("columns_test");
 
     // Verify the document model detected 2 columns
     assert_eq!(
@@ -141,10 +133,7 @@ fn wide_table_is_not_misread_as_page_columns() {
     // business_report has a 4-column #table but no page-level columns. The page
     // column count comes only from the source AST, so a wide table's aligned
     // cell edges must not be mistaken for a multi-column page layout.
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/business_report.typ"))
-            .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
+    let doc = fixture_document("business_report");
     assert_eq!(
         doc.page_settings.columns, None,
         "a document whose only `columns:` is on a #table must stay single-column"
@@ -155,10 +144,7 @@ fn wide_table_is_not_misread_as_page_columns() {
 fn page_columns_func_call_form_detected() {
     // The `#page(columns: 2)[…]` function-call form (not just `#set page(...)`)
     // must be recognized from the source AST.
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/issue_column_break.typ"))
-            .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
+    let doc = fixture_document("issue_column_break");
     assert_eq!(
         doc.page_settings.columns,
         Some(2),
@@ -203,10 +189,7 @@ fn section_break_produces_multiple_sect_pr() {
 fn section_break_document_model_has_section_break() {
     use typort_ooxml::document::{BlockElement, SectionBreakType};
 
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/section_break_test.typ"))
-            .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
+    let doc = fixture_document("section_break_test");
 
     // Find paragraphs with section breaks in the document model
     let section_breaks: Vec<_> = doc
@@ -404,9 +387,7 @@ fn imported_template_line_rule_recovered() {
 fn pagebreak_document_model_has_pagebreak_inline() {
     use typort_ooxml::document::{BlockElement, InlineElement};
 
-    let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/pagebreak_test.typ"))
-        .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
+    let doc = fixture_document("pagebreak_test");
 
     // At least one paragraph should contain a PageBreak inline element
     let has_pagebreak = doc.body.elements.iter().any(|e| {
@@ -431,10 +412,7 @@ fn pagebreak_document_model_has_pagebreak_inline() {
 fn pagebreak_after_nearly_full_page_is_detected() {
     use typort_ooxml::document::{BlockElement, InlineElement};
 
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/pagebreak_full_page.typ"))
-            .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
+    let doc = fixture_document("pagebreak_full_page");
 
     // The document model must contain at least one PageBreak inline element.
     let has_pagebreak = doc.body.elements.iter().any(|e| {
@@ -479,9 +457,7 @@ fn hrule_produces_paragraph_with_bottom_border() {
 
 #[test]
 fn hrule_document_model_has_horizontal_rule_flag() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/hrule_test.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
+    let doc = fixture_document("hrule_test");
 
     // At least one paragraph should have the horizontal_rule flag set
     let has_hrule = doc.body.elements.iter().any(|e| {
@@ -514,9 +490,7 @@ fn hrule_content_is_preserved() {
 
 #[test]
 fn page_numbering_typ_generates_page_field_footer() {
-    let world = typort_core::TyportWorld::new(Path::new("../../tests/fixtures/page_numbering.typ"))
-        .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
+    let doc = fixture_document("page_numbering");
 
     // Page numbering should be detected
     assert!(
@@ -531,18 +505,15 @@ fn page_numbering_typ_generates_page_field_footer() {
     );
 
     // Write to docx and verify footer XML
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let names: Vec<String> = reader.file_names().map(String::from).collect();
+    let package = fixture_package_from_document(&doc);
+    let names: Vec<&str> = package.part_names().collect();
 
     assert!(
-        names.iter().any(|n| n == "word/footer1.xml"),
+        names.contains(&"word/footer1.xml"),
         "docx should contain word/footer1.xml, got: {names:?}"
     );
 
-    let footer_xml = std::io::read_to_string(reader.by_name("word/footer1.xml").unwrap()).unwrap();
+    let footer_xml = package.part_text("word/footer1.xml");
 
     // Footer should contain PAGE field code
     assert!(
@@ -559,7 +530,7 @@ fn page_numbering_typ_generates_page_field_footer() {
     );
 
     // Document body should reference the footer
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let doc_xml = package.part_text("word/document.xml");
     assert!(
         doc_xml.contains("w:footerReference"),
         "sectPr should reference footer: {doc_xml}"
@@ -586,7 +557,7 @@ fn source_line_call_still_produces_a_rule() {
 fn pagebreak_after_a_list_lands_after_the_list() {
     // A #pagebreak() after an ordered list (before the next heading) must land after
     // the LAST list item, not before the list — the anchor must descend into the
-    // nested list-item markup. See tests/fixtures/pagebreak_after_list.typ.
+    // nested list-item markup. See the `pagebreak_after_list` fixture.
     let doc_xml = fixture_doc_xml("pagebreak_after_list");
     let last_item = doc_xml
         .find("Last recommendation item.")
@@ -613,43 +584,12 @@ fn page_number_footer_does_not_leak_into_body() {
     // and were emitted as centered bare-number paragraphs. The fix filters every
     // page's text items to the body zone (the same margin boundary the footer
     // detector uses to LOCATE the footer) before they become candidate lines.
-    // See tests/fixtures/edge_page_number_not_in_body.typ.
-    let world = typort_core::TyportWorld::new(Path::new(
-        "../../tests/fixtures/edge_page_number_not_in_body.typ",
-    ))
-    .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    // See the `edge_page_number_not_in_body` fixture.
+    let package = fixture_package("edge_page_number_not_in_body");
+    let doc_xml = package.part_text("word/document.xml");
 
     // Collect each body paragraph's joined run text (w:t only).
-    let para_texts: Vec<String> = doc_xml
-        .match_indices("<w:p>")
-        .map(|(start, _)| {
-            let end = doc_xml[start..]
-                .find("</w:p>")
-                .map_or(doc_xml.len(), |e| start + e);
-            let block = &doc_xml[start..end];
-            let mut t = String::new();
-            let mut rest = block;
-            while let Some(o) = rest.find("<w:t") {
-                let after = &rest[o..];
-                if let Some(gt) = after.find('>') {
-                    let content = &after[gt + 1..];
-                    if let Some(close) = content.find("</w:t>") {
-                        t.push_str(&content[..close]);
-                        rest = &content[close..];
-                        continue;
-                    }
-                }
-                break;
-            }
-            t
-        })
-        .collect();
+    let para_texts = paragraph_texts(doc_xml);
 
     // A bare page-number paragraph is 1..=4 chars drawn from roman-numeral
     // letters and decimal digits only (matches `^[ivxlcdm0-9]{1,4}$`,
@@ -676,9 +616,179 @@ fn page_number_footer_does_not_leak_into_body() {
     );
 
     // The legitimate footer field must still be present (page numbering intact).
-    let footer_xml = std::io::read_to_string(reader.by_name("word/footer1.xml").unwrap()).unwrap();
+    let footer_xml = package.part_text("word/footer1.xml");
     assert!(
         footer_xml.contains(" PAGE "),
         "footer1.xml should retain the PAGE field: {footer_xml}"
+    );
+}
+
+#[test]
+fn edge_academic_template_structure() {
+    let xml = fixture_doc_xml("edge_academic_template");
+    for text in [
+        "Introduction",
+        "Main Results",
+        "Definitions",
+        "Theorem",
+        "Conclusion",
+        "Supplementary",
+    ] {
+        assert!(xml.contains(text), "heading '{text}' should be present");
+    }
+    assert!(
+        xml.contains("Heading1"),
+        "level-1 headings should use Heading1 style"
+    );
+    assert!(
+        xml.contains("Heading2"),
+        "level-2 headings should use Heading2 style"
+    );
+    assert!(xml.contains("Abstract"), "abstract text should be present");
+    assert!(xml.contains("Keywords"), "keywords should be present");
+    assert!(xml.contains("Convergence"), "title word should be present");
+    assert!(
+        xml.contains("<m:oMathPara>"),
+        "display math should produce OMML"
+    );
+}
+
+#[test]
+fn edge_landscape_pages_orientation() {
+    let xml = fixture_doc_xml("edge_landscape_pages");
+    assert!(
+        xml.contains("Portrait Section"),
+        "portrait heading should be present"
+    );
+    assert!(
+        xml.contains("Landscape Section"),
+        "landscape heading should be present"
+    );
+    assert!(
+        xml.contains("Back to Portrait"),
+        "return-to-portrait heading should be present"
+    );
+    assert!(
+        xml.contains("orient"),
+        "landscape section should produce orient attribute"
+    );
+    let sect_count = xml.matches("<w:sectPr>").count() + xml.matches("<w:sectPr ").count();
+    assert!(
+        sect_count >= 3,
+        "should have at least 3 section breaks for orientation changes, got {sect_count}"
+    );
+}
+
+#[test]
+fn edge_multi_section_different_page_sizes() {
+    let xml = fixture_doc_xml("edge_multi_section");
+    for text in ["Section One", "Section Two", "Section Three"] {
+        assert!(xml.contains(text), "heading '{text}' should be present");
+    }
+    let sect_count = xml.matches("<w:sectPr>").count() + xml.matches("<w:sectPr ").count();
+    assert!(
+        sect_count >= 3,
+        "should have at least 3 section properties, got {sect_count}"
+    );
+    assert!(
+        xml.contains("w:w=\"11906\""),
+        "A4 width (11906 twips) should be present"
+    );
+}
+
+#[test]
+fn issue_long_crossref_label_bookmarks() {
+    let xml = fixture_doc_xml("issue_long_crossref_label");
+    assert!(
+        xml.contains("very long heading"),
+        "long heading text should be present"
+    );
+    assert!(
+        xml.contains("Short heading"),
+        "short heading text should be present"
+    );
+    let bookmark_count = xml.matches("w:bookmarkStart").count();
+    assert!(
+        bookmark_count >= 2,
+        "should have at least 2 bookmarks, got {bookmark_count}"
+    );
+    assert!(
+        !xml.contains("w:name=\"very-long-heading-label-name-exceeds-forty\""),
+        "bookmark name >40 chars should be truncated"
+    );
+    assert!(
+        xml.contains("w:name=\"very-long-heading-label-name-exceeds-for\""),
+        "truncated bookmark should be exactly 40 chars"
+    );
+}
+
+#[test]
+fn issue_final_section_landscape_sections() {
+    let xml = fixture_doc_xml("issue_final_section_landscape");
+    assert!(
+        xml.contains("Portrait Section"),
+        "portrait heading should be present"
+    );
+    assert!(
+        xml.contains("Landscape Section"),
+        "landscape heading should be present"
+    );
+    assert!(xml.contains("<w:tbl>"), "table should be present");
+    let sect_count = xml.matches("<w:sectPr>").count() + xml.matches("<w:sectPr ").count();
+    assert!(
+        sect_count >= 2,
+        "should have at least 2 section properties, got {sect_count}"
+    );
+}
+
+#[test]
+fn issue_crossref_field_code_bookmarks() {
+    let xml = fixture_doc_xml("issue_crossref_field_code");
+    assert!(
+        xml.matches("w:bookmarkStart").count() >= 3,
+        "labeled elements should produce bookmarks"
+    );
+    assert!(
+        xml.contains("<m:oMath>"),
+        "display equations should be present"
+    );
+}
+
+#[test]
+fn issue_bookmark_inside_paragraph() {
+    let xml = fixture_doc_xml("issue_bookmark_inside_paragraph");
+    assert!(
+        xml.contains("w:bookmarkStart"),
+        "should have bookmarkStart for <intro> label"
+    );
+    assert!(xml.contains("w:bookmarkEnd"), "should have bookmarkEnd");
+    assert!(xml.contains("Introduction"), "heading text present");
+    assert!(xml.contains("Methods"), "second heading present");
+    assert!(
+        xml.contains("intro"),
+        "bookmark name should reference intro label"
+    );
+}
+
+#[test]
+fn issue_column_break() {
+    let xml = fixture_doc_xml("issue_column_break");
+    assert!(xml.contains("First column"), "first column content present");
+    assert!(
+        xml.contains("Second column"),
+        "second column content present"
+    );
+    // #colbreak() must become a real column break, not be dropped.
+    assert!(
+        xml.contains(r#"<w:br w:type="column"/>"#),
+        "colbreak should emit <w:br w:type=\"column\"/>, got: {xml}"
+    );
+    // It sits after the first column's content and before the second's.
+    let br = xml.find(r#"<w:br w:type="column"/>"#).unwrap();
+    let first = xml.find("More first column text").unwrap();
+    let second = xml.find("Second column content").unwrap();
+    assert!(
+        first < br && br < second,
+        "column break should fall between the first and second column content"
     );
 }

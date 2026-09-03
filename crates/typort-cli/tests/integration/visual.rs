@@ -1,5 +1,6 @@
 //! Visual-regression tests: render docx via LibreOffice/pdftoppm/ImageMagick and RMSE-compare against Typst's own PDF.
 
+use crate::common::{fixture_document, fixture_path};
 use std::path::Path;
 
 /// Compile a .typ to PDF via Typst's native renderer (ground truth).
@@ -12,9 +13,8 @@ fn typst_to_pdf(typ_path: &Path) -> Vec<u8> {
 }
 
 /// Convert .typ → .docx → PDF (via LibreOffice), return PDF bytes.
-fn typort_to_pdf_via_docx(typ_path: &Path, label: &str) -> Option<Vec<u8>> {
-    let world = typort_core::TyportWorld::new(typ_path).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
+fn typort_to_pdf_via_docx(fixture: &str, label: &str) -> Option<Vec<u8>> {
+    let doc = fixture_document(fixture);
     let tmp_dir = std::env::temp_dir().join("typort_visual_test");
     std::fs::create_dir_all(&tmp_dir).ok()?;
     let docx_path = tmp_dir.join(format!("{label}.docx"));
@@ -87,9 +87,9 @@ fn compare_images(a: &Path, b: &Path) -> Option<f64> {
 #[test]
 #[ignore = "needs libreoffice + pdftoppm + ImageMagick; run with --ignored"]
 fn visual_regression_hello() {
-    let path = Path::new("../../tests/fixtures/hello.typ");
-    let ground_truth = typst_to_pdf(path);
-    let docx_pdf = typort_to_pdf_via_docx(path, "hello")
+    let path = fixture_path("hello");
+    let ground_truth = typst_to_pdf(&path);
+    let docx_pdf = typort_to_pdf_via_docx("hello", "hello")
         .expect("libreoffice required: install it or do not opt into the --ignored visual tests");
     let gt_png =
         pdf_page_to_png(&ground_truth, 1, "gt_hello").expect("pdftoppm required for ground truth");
@@ -106,9 +106,9 @@ fn visual_regression_hello() {
 #[test]
 #[ignore = "needs libreoffice + pdftoppm + ImageMagick; run with --ignored"]
 fn visual_regression_complex_paper() {
-    let path = Path::new("../../tests/fixtures/complex_paper.typ");
-    let ground_truth = typst_to_pdf(path);
-    let docx_pdf = typort_to_pdf_via_docx(path, "complex")
+    let path = fixture_path("complex_paper");
+    let ground_truth = typst_to_pdf(&path);
+    let docx_pdf = typort_to_pdf_via_docx("complex_paper", "complex")
         .expect("libreoffice required: install it or do not opt into the --ignored visual tests");
     let gt_png = pdf_page_to_png(&ground_truth, 1, "gt_complex")
         .expect("pdftoppm required for ground truth");

@@ -1,9 +1,10 @@
-use typort_ooxml::document::{Document, FootnoteFormat, InlineElement, Run};
+use typort_ooxml::document::{Document, FootnoteFormat, InlineElement, Paragraph};
 use typst::introspection::Tag;
 use typst_html::HtmlNode;
 use typst_layout::PagedDocument;
 
-use super::{has_attr_value, tag_name};
+use super::fmt::InlineFmt;
+use super::{InlineOptions, collect_inlines, has_attr_value, tag_name};
 
 /// Extract the footnote bodies from the HTML `doc-endnotes` section, add them to the
 /// document, and refine the footnote text size from the Paged render. The size is
@@ -104,66 +105,14 @@ fn extract_footnotes_from_ol(children: &[HtmlNode], footnotes: &mut Vec<Vec<Inli
         if let HtmlNode::Element(li) = child
             && tag_name(li) == "li"
         {
-            let mut inlines = Vec::new();
-            collect_footnote_inlines(&li.children, &mut inlines, false, false, false);
-            footnotes.push(inlines);
-        }
-    }
-}
-
-/// Collect inline elements from footnote content, preserving formatting
-/// and including math equations. Skips backlink anchors.
-pub(super) fn collect_footnote_inlines(
-    children: &[HtmlNode],
-    inlines: &mut Vec<InlineElement>,
-    bold: bool,
-    italic: bool,
-    monospace: bool,
-) {
-    for child in children {
-        match child {
-            HtmlNode::Text(text, _) => {
-                if !text.is_empty() {
-                    let mut run = Run::new(text.as_str());
-                    run.bold = bold;
-                    run.italic = italic;
-                    run.monospace = monospace;
-                    inlines.push(InlineElement::Text(run));
-                }
-            }
-            HtmlNode::Element(elem) => {
-                if has_attr_value(elem, "role", "doc-backlink") {
-                    continue;
-                }
-                let tag = tag_name(elem);
-                // Skip the native MathML `<math>` element: typst 0.15 emits it
-                // alongside the `equation` introspection tag (handled below, which
-                // drives the OMML). Descending would emit the equation a SECOND time
-                // as literal glyph text. Mirrors the body path's `<math>` skip.
-                if tag == "math" {
-                    continue;
-                }
-                let new_bold = bold || tag == "strong" || tag == "b";
-                let new_italic = italic || tag == "em" || tag == "i";
-                let new_monospace = monospace || tag == "code";
-                collect_footnote_inlines(
-                    &elem.children,
-                    inlines,
-                    new_bold,
-                    new_italic,
-                    new_monospace,
-                );
-            }
-            HtmlNode::Tag(Tag::Start(content, _)) => {
-                if content.elem().name() == "equation" {
-                    let omml = typort_math::equation_to_omml(content);
-                    inlines.push(InlineElement::Math {
-                        omml_xml: omml,
-                        equation_number: None,
-                    });
-                }
-            }
-            HtmlNode::Tag(_) | HtmlNode::Frame(_) => {}
+            let mut para = Paragraph::new();
+            collect_inlines(
+                &li.children,
+                &mut para,
+                None,
+                InlineOptions::footnote(InlineFmt::default()),
+            );
+            footnotes.push(para.inlines);
         }
     }
 }

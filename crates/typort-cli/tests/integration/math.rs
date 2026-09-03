@@ -1,16 +1,14 @@
 //! Math (OMML) rendering tests.
 
 use crate::common;
-use crate::common::{fixture_doc_xml, paragraph_containing};
-use std::io::Cursor;
-use std::path::Path;
+use crate::common::{fixture_doc_xml, fixture_document, paragraph_containing};
 
 #[test]
 fn inline_math_spacing_cjk_tight_latin_spaced() {
     // Regression: the inline-equation merge must not insert a literal space between
     // CJK text and an equation (Typst renders 标量M tight); it must keep the space
     // for Latin text (Typst trims it, Word needs it back). See
-    // tests/fixtures/edge_cjk_inline_math_spacing.typ.
+    // the `edge_cjk_inline_math_spacing` fixture.
     //
     // The run-coalescing post-pass folds the (formerly standalone) space run into
     // the adjacent text run, so we assert the space is present *in the neighbouring
@@ -33,7 +31,7 @@ fn inline_math_spacing_cjk_tight_latin_spaced() {
 fn par_wrapped_inline_math_keeps_prose_with_math() {
     // Regression: prose inside an author par()[...] wrapper around inline math was
     // dropped (only the equations survived as an orphan math paragraph). See
-    // tests/fixtures/edge_par_wraps_inline_math.typ.
+    // the `edge_par_wraps_inline_math` fixture.
     let doc_xml = fixture_doc_xml("edge_par_wraps_inline_math");
 
     // The prose around the inline math must survive — especially the text AFTER
@@ -137,7 +135,7 @@ fn math_test_produces_omml() {
 fn math_styled_wrappers_and_dif_are_not_dropped() {
     // Regression: bold()/bb()/cal() and the upright differential `dif` used to
     // fall into convert_content's silent "unknown element" skip, producing empty
-    // <m:e> bases and vanishing glyphs. See tests/fixtures/math_styled_and_dif.typ.
+    // <m:e> bases and vanishing glyphs. See the `math_styled_and_dif` fixture.
     let doc_xml = fixture_doc_xml("math_styled_and_dif");
     let packed: String = doc_xml.chars().filter(|c| !c.is_whitespace()).collect();
 
@@ -208,9 +206,7 @@ fn numbered_equation_has_right_aligned_number() {
 fn numbered_equation_document_model_has_numbers() {
     use typort_ooxml::document::{BlockElement, InlineElement};
 
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/numbered_eq.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
+    let doc = fixture_document("numbered_eq");
 
     // Find paragraphs with numbered equations
     let numbered_eqs: Vec<&str> = doc
@@ -823,34 +819,202 @@ fn equation_label_cross_reference_produces_ref_field() {
 }
 
 #[test]
-fn edge_math_in_footnote_preserved() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/edge_math_in_footnote.typ"))
-            .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let fn_xml = std::io::read_to_string(reader.by_name("word/footnotes.xml").unwrap()).unwrap();
-
+fn issue_context_equation_no_duplicate() {
+    let xml = fixture_doc_xml("issue_context_equation");
     assert!(
-        fn_xml.contains("m:oMath"),
-        "footnotes.xml should contain m:oMath elements for math in footnotes"
+        xml.contains("The value is"),
+        "context block text should be present"
+    );
+    assert!(
+        xml.contains("<m:oMath>"),
+        "inline equation should be present as OMML"
+    );
+    let p_count = xml.matches("<w:p>").count() + xml.matches("<w:p ").count();
+    assert_eq!(
+        p_count, 2,
+        "should have exactly 2 paragraphs (context content + normal text), got {p_count}"
     );
 }
 
 #[test]
-fn edge_super_sub_in_heading_preserved() {
-    let doc_xml = fixture_doc_xml("edge_super_sub_in_heading");
-
+fn issue_inline_math_spacing_preserved() {
+    let xml = fixture_doc_xml("issue_inline_math_spacing");
     assert!(
-        doc_xml.contains("w:vertAlign w:val=\"subscript\""),
-        "heading with H₂O should have subscript vertAlign"
+        xml.contains("<m:oMath>"),
+        "inline math should produce OMML elements"
+    );
+    assert!(xml.contains("Let"), "text 'Let' should be present");
+    assert!(
+        xml.contains("be a variable"),
+        "text 'be a variable' should be present"
+    );
+    let p_count = xml.matches("<w:p>").count() + xml.matches("<w:p ").count();
+    assert_eq!(
+        p_count, 3,
+        "should have exactly 3 paragraphs (one per sentence), got {p_count}"
+    );
+}
+
+#[test]
+fn issue_mat_delimiter_omml() {
+    let xml = fixture_doc_xml("issue_mat_delimiter");
+    assert!(
+        xml.contains("<m:begChr m:val=\"[\""),
+        "matrix with delim '[' should have begChr='['"
     );
     assert!(
-        doc_xml.contains("w:vertAlign w:val=\"superscript\""),
-        "heading with x² should have superscript vertAlign"
+        xml.contains("<m:endChr m:val=\"]\""),
+        "matrix with delim '[' should have endChr=']'"
+    );
+    assert!(
+        xml.contains("<m:m>"),
+        "matrices should produce m:m elements"
+    );
+}
+
+#[test]
+fn issue_subscript_scope_omml() {
+    let xml = fixture_doc_xml("issue_subscript_scope");
+    assert!(
+        xml.contains("<m:sSub>") || xml.contains("<m:sSup>"),
+        "subscript/superscript math should produce m:sSub/m:sSup"
+    );
+    let math_count = xml.matches("<m:oMathPara>").count();
+    assert!(
+        math_count >= 4,
+        "should have 4 display math equations, got {math_count}"
+    );
+}
+
+#[test]
+fn edge_augmented_matrix_omml() {
+    let xml = fixture_doc_xml("edge_augmented_matrix");
+    assert!(
+        xml.matches("<m:m>").count() >= 4,
+        "should have at least 4 matrices"
+    );
+    assert!(
+        xml.contains("<m:oMathPara>"),
+        "matrices should be in display math"
+    );
+    assert!(
+        xml.contains("cases") || xml.contains("<m:eqArr>") || xml.contains("<m:d>"),
+        "cases construct should produce m:d or m:eqArr"
+    );
+}
+
+#[test]
+fn issue_complex_math_chain_accents() {
+    let xml = fixture_doc_xml("issue_complex_math_chain");
+    assert!(
+        xml.matches("<m:acc>").count() >= 2,
+        "dot accent should produce m:acc elements"
+    );
+    assert!(
+        xml.contains("<m:sSubSup>") || xml.contains("<m:sSub>"),
+        "subscripts should produce m:sSubSup or m:sSub elements"
+    );
+    assert!(
+        xml.contains("<m:oMathPara>"),
+        "display math should be present"
+    );
+}
+
+#[test]
+fn issue_math_trailing_punct_equations() {
+    let xml = fixture_doc_xml("issue_math_trailing_punct");
+    assert!(
+        xml.contains("obtain"),
+        "text before equation should be present"
+    );
+    let math_count = xml.matches("<m:oMathPara>").count();
+    assert!(
+        math_count >= 2,
+        "should have at least 2 display math blocks, got {math_count}"
+    );
+}
+
+#[test]
+fn issue_symbol_subscript_omml() {
+    let xml = fixture_doc_xml("issue_symbol_subscript");
+    assert!(
+        xml.contains("<m:sSub>"),
+        "subscript on symbol should produce m:sSub"
+    );
+    assert!(
+        xml.contains("<m:sSup>"),
+        "superscript on symbol should produce m:sSup"
+    );
+    let math_count = xml.matches("<m:oMathPara>").count();
+    assert!(
+        math_count >= 3,
+        "should have at least 3 display math blocks, got {math_count}"
+    );
+}
+
+#[test]
+fn issue_let_math_vars_content() {
+    let xml = fixture_doc_xml("issue_let_math_vars");
+    assert!(
+        xml.contains("<m:oMath>"),
+        "interpolated math should produce OMML"
+    );
+}
+
+#[test]
+fn issue_math_grouping_attach_omml() {
+    let xml = fixture_doc_xml("issue_math_grouping_attach");
+    assert!(
+        xml.contains("<m:sSubSup>"),
+        "combined sub+sup should produce m:sSubSup"
+    );
+    let math_count = xml.matches("<m:oMathPara>").count();
+    assert!(
+        math_count >= 4,
+        "should have at least 4 display math blocks, got {math_count}"
+    );
+}
+
+#[test]
+fn issue_math_dot_punctuation_equations() {
+    let xml = fixture_doc_xml("issue_math_dot_punctuation");
+    let math_count = xml.matches("<m:oMathPara>").count();
+    assert!(
+        math_count >= 4,
+        "should have at least 4 display math blocks, got {math_count}"
+    );
+}
+
+#[test]
+fn issue_section_equation_numbering_refs() {
+    let xml = fixture_doc_xml("issue_section_equation_numbering");
+    assert!(xml.contains("Introduction"), "heading should be present");
+    assert!(xml.contains("Methods"), "second heading should be present");
+    assert!(
+        xml.matches("<m:oMathPara>").count() >= 3,
+        "should have at least 3 display equations"
+    );
+    assert!(
+        xml.matches("w:bookmarkStart").count() >= 3,
+        "labeled equations should produce bookmarks"
+    );
+}
+
+#[test]
+fn issue_math_accent_subsup_chain() {
+    let xml = fixture_doc_xml("issue_math_accent_subsup_chain");
+    let acc_count = xml.matches("m:acc").count();
+    assert!(
+        acc_count >= 4,
+        "should have accent elements for dot/hat/tilde/arrow, got {acc_count}"
+    );
+    let math_para = xml.matches("oMathPara").count();
+    assert!(
+        math_para >= 4,
+        "should have display math paragraphs, got {math_para}"
+    );
+    assert!(
+        xml.contains("m:sSubSup") || xml.contains("m:sSub"),
+        "should have sub/superscript elements"
     );
 }

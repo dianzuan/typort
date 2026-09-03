@@ -71,18 +71,29 @@ anyone "simplify" it back to a dual-compilation description. Full detail in
   former `clippy.toml` `too-many-arguments-threshold` override was removed once
   that debt was repaid — new shared state goes into one of these structs, not a
   new positional parameter.
-- **File size:** several files are large (`convert/mod.rs` at 3000+ lines,
-  `ooxml/writer.rs` at 2000+ lines). Don't grow them reflexively — when adding a
-  new element converter, prefer a new module/file over appending. Tests are
-  already split this way: `crates/typort-cli/tests/integration/` is one file per
-  test area (see the Testing section below) — add a new area module rather than
-  growing an existing one.
+- **File size:** don't grow files reflexively. The HTML walk is split by
+  responsibility under `convert/` (`block`, `inline_walk`, `headings`, `tables`,
+  `lists`, `source`, `smallcaps`, `postprocess`, and `dom`); paged-style
+  extraction is split under `convert/page/` (`units`, `style`, `source_ast`,
+  `hanging_indent`, `reachable`, `sections`, `margin`, `run_style`, and
+  `language`); recovery is split under `convert/recovery/` (`lines`,
+  `deduplication`, `insertion`, `horizontal_rules`, and `table_rules`), with
+  shared walk/recovery text normalisation in `convert/text_norm.rs`; and the
+  OOXML writer is split by emitted part under `typort-ooxml/src/writer/`. Each
+  `mod.rs` is a re-exporting facade. Put a new converter, paged-style
+  responsibility, or writer part in its matching module rather than growing an
+  entry module. Tests are already split this way:
+  `crates/typort-cli/tests/integration/` is one file per test area (see the Testing
+  section below) — add a new area module rather than growing an existing one.
 
 ## Testing
 
 - Tests are **fixture-driven**: a `.typ` file under `tests/fixtures/` is converted
-  and asserted on. Add a fixture for new features.
-- **Any change to `convert/recovery.rs` or the `convert/page.rs` heuristics must
+  and asserted on. Add a fixture for new features. Integration tests are split into
+  `math`, `tables`, `structure`, `headings`, `formatting`, `images`, `recovery`,
+  `lists`, `footnotes`, `misc`, `bibliography`, `fonts_cjk`, `golden`, and `visual`
+  area modules, with fixture conversion shared through `tests/common`.
+- **Any change under `convert/recovery/` or to the `convert/page/` heuristics must
   ship with a fixture-based regression test** for the specific case — that code is
   the most fragile part of the system (geometry → semantics inference with magic
   thresholds; see ARCHITECTURE.md "fragile seam").
@@ -154,11 +165,25 @@ the *approach* is reused, not re-introduced:
    in `apply_paragraph_formatting`; it is driven by the semantic
    `doc-bibliography` role during the HTML walk (a hand-written `= 参考文献`
    heading is just text to Typst, so typort treats it as text).
-2. Caption skipping in `convert/recovery.rs` no longer matches `表 ` / `图 ` /
-   `Table ` / `Figure `; captions are deduplicated by the semantic text the
-   figure path already emitted.
+2. Caption skipping in `convert/recovery/deduplication.rs` no longer matches `表 ` /
+   `图 ` / `Table ` / `Figure `; captions are deduplicated by the semantic text
+   the figure path already emitted.
 3. Document language is derived from `#set text(lang:, region:)`
    (`apply_language_override`), not guessed from CJK-glyph presence.
 
 If you find a remaining `if text.contains("<some word>")` driving layout, it is
 a regression of this rule — fix it the same way.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues for `dianzuan/typort` (via the `gh` CLI). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root (created lazily by `/domain-modeling`). See `docs/agents/domain.md`.

@@ -23,5 +23,4 @@ typst.workspace = true
 # typst 0.15; the visual-regression test compiles to it directly.
 typst-layout.workspace = true
 typst-pdf.workspace = true
-typort-presets.workspace = true
 time.workspace = true

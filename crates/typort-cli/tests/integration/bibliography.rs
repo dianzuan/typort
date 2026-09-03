@@ -1,8 +1,8 @@
 //! Bibliography and citation tests.
 
-use crate::common::{fixture_doc_xml, paragraph_containing};
-use std::io::Cursor;
-use std::path::Path;
+use crate::common::{
+    fixture_doc_xml, fixture_document, fixture_package, fixture_styles_xml, paragraph_containing,
+};
 
 #[test]
 fn bibliography_citations_are_markers_not_field_refs() {
@@ -60,14 +60,7 @@ fn bibliography_style_is_defined() {
     // The reference field-code paragraph carries the "Bibliography" style; it must
     // be defined in styles.xml, not left as a dangling reference relying on Word's
     // built-in (which WPS/LibreOffice may not have).
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/bibliography_basic.typ"))
-            .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let styles = std::io::read_to_string(reader.by_name("word/styles.xml").unwrap()).unwrap();
+    let styles = fixture_styles_xml("bibliography_basic");
     assert!(
         styles.contains(r#"w:styleId="Bibliography""#),
         "styles.xml should define the Bibliography style"
@@ -89,18 +82,14 @@ fn bibliography_produces_bibliography_sdt() {
 
 #[test]
 fn bibliography_has_custom_xml_sources() {
-    let path = "../../tests/fixtures/bibliography_basic.typ";
-    let world = typort_core::TyportWorld::new(std::path::Path::new(path)).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, std::io::Cursor::new(&mut buf)).unwrap();
-
-    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(&buf)).unwrap();
+    let package = fixture_package("bibliography_basic");
     assert!(
-        archive.by_name("customXml/item1.xml").is_ok(),
+        package
+            .part_names()
+            .any(|name| name == "customXml/item1.xml"),
         "expected customXml/item1.xml in ZIP"
     );
-    let xml = std::io::read_to_string(archive.by_name("customXml/item1.xml").unwrap()).unwrap();
+    let xml = package.part_text("customXml/item1.xml");
     assert!(xml.contains("b:Sources"), "expected b:Sources root");
     assert!(xml.contains("smith2020"), "expected smith2020 tag");
     assert!(xml.contains("knuth1997"), "expected knuth1997 tag");
@@ -117,14 +106,8 @@ fn bibliography_has_custom_xml_sources() {
 
 #[test]
 fn bibliography_custom_xml_has_author_metadata() {
-    let path = "../../tests/fixtures/bibliography_basic.typ";
-    let world = typort_core::TyportWorld::new(std::path::Path::new(path)).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, std::io::Cursor::new(&mut buf)).unwrap();
-
-    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(&buf)).unwrap();
-    let xml = std::io::read_to_string(archive.by_name("customXml/item1.xml").unwrap()).unwrap();
+    let package = fixture_package("bibliography_basic");
+    let xml = package.part_text("customXml/item1.xml");
     assert!(
         xml.contains("<b:Last>Smith</b:Last>"),
         "expected Smith author"
@@ -140,9 +123,7 @@ fn bibliography_custom_xml_has_author_metadata() {
 
 #[test]
 fn bibliography_citation_sources_count() {
-    let path = "../../tests/fixtures/bibliography_basic.typ";
-    let world = typort_core::TyportWorld::new(std::path::Path::new(path)).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
+    let doc = fixture_document("bibliography_basic");
     assert_eq!(
         doc.citation_sources.len(),
         3,
@@ -201,9 +182,7 @@ fn bibliography_body_text_preserved() {
 
 #[test]
 fn multiple_bibliographies_collect_sources_from_all() {
-    let path = "../../tests/fixtures/bibliography_multiple.typ";
-    let world = typort_core::TyportWorld::new(std::path::Path::new(path)).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
+    let doc = fixture_document("bibliography_multiple");
     let tags: Vec<&str> = doc
         .citation_sources
         .iter()
@@ -246,12 +225,10 @@ fn duplicate_citation_key_across_bibliographies_keeps_first_occurrence() {
     // overwrites). That silently let a later bibliography's entry clobber an
     // earlier one's metadata for the same key. The fix keeps the first
     // (earliest-in-document) occurrence via `merge_library_keep_first`. See
-    // tests/fixtures/bibliography_duplicate_key.typ, which cites `dup2020` in
+    // the `bibliography_duplicate_key` fixture, which cites `dup2020` in
     // both "Part One" (bibliography A, title "First Title") and "Part Two"
     // (bibliography B, title "Second Title").
-    let path = "../../tests/fixtures/bibliography_duplicate_key.typ";
-    let world = typort_core::TyportWorld::new(std::path::Path::new(path)).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
+    let doc = fixture_document("bibliography_duplicate_key");
     let dup_sources: Vec<_> = doc
         .citation_sources
         .iter()
@@ -282,7 +259,7 @@ fn citations_link_to_their_bibliography_entry() {
     // reference entry: each bib entry gets a bookmark, each in-text citation an
     // internal hyperlink (w:anchor) pointing at it. Typst's HTML already carries the
     // pairing (citation href="#loc-N" <-> entry id="loc-N"). See
-    // tests/fixtures/bibliography_basic.typ.
+    // the `bibliography_basic` fixture.
     let doc_xml = fixture_doc_xml("bibliography_basic");
     let vals = |pre: &str| -> Vec<String> {
         doc_xml

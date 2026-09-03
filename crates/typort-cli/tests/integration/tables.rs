@@ -1,13 +1,14 @@
 //! Table structure, cell merging, and math-in-table tests.
 
-use crate::common::{fixture_doc_xml, paragraph_containing};
-use std::io::Cursor;
-use std::path::Path;
+use crate::common::{
+    fixture_doc_xml, fixture_document, fixture_package, fixture_package_from_document,
+    paragraph_containing,
+};
 
 #[test]
 fn three_line_table_is_not_a_boxed_grid() {
     // Regression: a three-line table was emitted as a full grid. See
-    // tests/fixtures/edge_three_line_table.typ.
+    // the `edge_three_line_table` fixture.
     let doc_xml = fixture_doc_xml("edge_three_line_table");
     let tbl_start = doc_xml.find("<w:tbl>").expect("table present");
     let tbl_end = doc_xml[tbl_start..]
@@ -46,7 +47,7 @@ fn table_cell_inline_math_is_spliced_not_dropped() {
     // Regression: inline equations inside table cells are `equation` Tag siblings
     // between the cell's <p> text fragments. convert_cell_paragraphs only consumed
     // the <p>s, dropping the math and stacking mixed text+math cells into separate
-    // paragraphs. See tests/fixtures/table_cell_math.typ.
+    // paragraphs. See the `table_cell_math` fixture.
     let doc_xml = fixture_doc_xml("table_cell_math");
 
     // The only math in the fixture lives inside the table, so its OMML must show
@@ -171,11 +172,8 @@ fn merged_cell_emits_grid_span_and_vmerge() {
     };
     doc.add_table(table);
 
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let package = fixture_package_from_document(&doc);
+    let doc_xml = package.part_text("word/document.xml");
 
     // Verify gridSpan is emitted
     assert!(
@@ -196,22 +194,15 @@ fn merged_cell_emits_grid_span_and_vmerge() {
 
 #[test]
 fn footnote_in_table_cell_has_reference() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/footnote_in_table.typ"))
-            .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
+    let package = fixture_package("footnote_in_table");
+    let doc_xml = package.part_text("word/document.xml");
 
     assert!(
         doc_xml.contains("w:footnoteReference"),
         "footnote inside table cell should produce w:footnoteReference"
     );
 
-    let fn_xml = std::io::read_to_string(reader.by_name("word/footnotes.xml").unwrap()).unwrap();
+    let fn_xml = package.part_text("word/footnotes.xml");
     assert!(
         fn_xml.contains("inside a table cell"),
         "footnotes.xml should contain the footnote text from the table cell"
@@ -238,9 +229,7 @@ fn rowspan_produces_vmerge_continue_cells() {
 fn rowspan_all_rows_have_equal_cell_count() {
     use typort_ooxml::document::BlockElement;
 
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/rowspan_test.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
+    let doc = fixture_document("rowspan_test");
 
     // Find the table in the document model
     let table = doc.body.elements.iter().find_map(|e| {
@@ -274,10 +263,7 @@ fn rowspan_all_rows_have_equal_cell_count() {
 fn multi_paragraph_cell_has_multiple_paragraphs() {
     use typort_ooxml::document::BlockElement;
 
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/multi_para_cell.typ"))
-            .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
+    let doc = fixture_document("multi_para_cell");
 
     // Find the table in the document model
     let table = doc.body.elements.iter().find_map(|e| {
@@ -381,10 +367,7 @@ fn nested_table_produces_nested_w_tbl() {
 fn nested_table_document_model_has_cell_content() {
     use typort_ooxml::document::{BlockElement, CellContent};
 
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/nested_table_test.typ"))
-            .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
+    let doc = fixture_document("nested_table_test");
 
     // Find the table in the document model
     let table = doc.body.elements.iter().find_map(|e| {
@@ -421,7 +404,7 @@ fn fr_column_tracks_produce_proportional_widths() {
     // Regression: `columns: (1fr, 2fr, 3fr)` must yield a 1:2:3 width split, not
     // three equal columns. The writer falls back to equal distribution unless
     // cell.width_pct is populated from the Typst column track sizes.
-    // See tests/fixtures/edge_table_fr_columns.typ.
+    // See the `edge_table_fr_columns` fixture.
     let doc_xml = fixture_doc_xml("edge_table_fr_columns");
     let tbl_start = doc_xml.find("<w:tbl>").expect("table present");
     let tbl_end = doc_xml[tbl_start..]
@@ -474,7 +457,7 @@ fn table_cell_alignment_from_typst_reaches_word() {
     // Faithful (non-hardcoded) table conversion: the cell alignment the author set
     // in Typst must reach Word, read from the semantic TableElem (the HTML export
     // drops it). Vertical alignment -> <w:vAlign> in tcPr; horizontal -> <w:jc> in
-    // the cell paragraph (Pandoc-style). See tests/fixtures/edge_table_cell_alignment.typ.
+    // the cell paragraph (Pandoc-style). See the `edge_table_cell_alignment` fixture.
     let doc_xml = fixture_doc_xml("edge_table_cell_alignment");
     let tc_blocks: Vec<&str> = doc_xml
         .split("<w:tc>")
@@ -599,5 +582,231 @@ fn table_borders_decided_per_table() {
     assert!(
         !three_line.contains("<w:insideV w:val=\"single\""),
         "three-line table must not gain vertical borders"
+    );
+}
+
+#[test]
+fn edge_complex_table_merges() {
+    let xml = fixture_doc_xml("edge_complex_table");
+    assert!(
+        xml.contains("Header A-B"),
+        "colspan header should be present"
+    );
+    assert!(
+        xml.contains("Header C-D"),
+        "second colspan header should be present"
+    );
+    assert!(
+        xml.contains("Full width footer"),
+        "full-width footer should be present"
+    );
+    assert!(
+        xml.contains("w:gridSpan"),
+        "colspan cells should produce w:gridSpan"
+    );
+    assert!(
+        xml.contains("w:vMerge"),
+        "rowspan cells should produce w:vMerge"
+    );
+}
+
+#[test]
+fn issue_table_hline_border_structure() {
+    let xml = fixture_doc_xml("issue_table_hline_border");
+    assert!(xml.contains("Column A"), "header cell A should be present");
+    assert!(xml.contains("Column B"), "header cell B should be present");
+    assert!(xml.contains("Data 1"), "data cell should be present");
+    assert!(xml.contains("<w:tbl>"), "table should be present");
+}
+
+#[test]
+fn issue_nested_table_structure() {
+    let xml = fixture_doc_xml("issue_nested_table");
+    assert!(
+        xml.contains("Outer cell"),
+        "outer cell text should be present"
+    );
+    assert!(
+        xml.contains("Inner A"),
+        "inner table cell should be present"
+    );
+    let table_count = xml.matches("<w:tbl>").count();
+    assert!(
+        table_count >= 2,
+        "should have at least 2 tables (outer + inner), got {table_count}"
+    );
+}
+
+#[test]
+fn issue_table_cell_paragraph_style_content() {
+    let xml = fixture_doc_xml("issue_table_cell_paragraph_style");
+    assert!(
+        xml.contains("normal paragraph"),
+        "body paragraph should be present"
+    );
+    assert!(
+        xml.contains("Table cell content"),
+        "table cell should be present"
+    );
+    assert!(xml.contains("<w:tbl>"), "table should be present");
+    assert!(
+        xml.matches("w:numId").count() >= 2,
+        "list items should have numId"
+    );
+}
+
+#[test]
+fn issue_block_content_in_table_cells() {
+    let xml = fixture_doc_xml("issue_block_content_in_table");
+    assert!(xml.contains("Header 1"), "table header should be present");
+    assert!(
+        xml.contains("Regular text"),
+        "regular cell should be present"
+    );
+    assert!(
+        xml.contains("hello"),
+        "code block content should be present"
+    );
+    assert!(xml.contains("Item one"), "list in cell should be present");
+    assert!(xml.contains("<w:tbl>"), "table should be present");
+}
+
+#[test]
+fn issue_table_cell_spacing_structure() {
+    let xml = fixture_doc_xml("issue_table_cell_spacing");
+    assert!(xml.contains("Fruit"), "header cell should be present");
+    assert!(xml.contains("Bananas"), "data cell should be present");
+    assert!(
+        xml.contains("Built-in wrapper"),
+        "multi-paragraph cell should be present"
+    );
+    assert!(xml.contains("<w:tbl>"), "table should be present");
+}
+
+#[test]
+fn issue_table_compact_style_override_content() {
+    let xml = fixture_doc_xml("issue_table_compact_style_override");
+    assert!(xml.contains("<w:tbl>"), "table should be present");
+    assert!(
+        xml.contains("<w:b/>"),
+        "bold text in table should be preserved"
+    );
+}
+
+#[test]
+fn issue_table_header_border_override_tables() {
+    let xml = fixture_doc_xml("issue_table_header_border_override");
+    let table_count = xml.matches("<w:tbl>").count();
+    assert!(
+        table_count >= 3,
+        "should have at least 3 tables, got {table_count}"
+    );
+}
+
+#[test]
+fn issue_rtl_table_bidi() {
+    let xml = fixture_doc_xml("issue_rtl_table_bidi");
+    assert!(xml.contains("w:tbl"), "should contain a table");
+    assert!(
+        xml.contains("\u{627}\u{644}\u{639}\u{645}\u{648}\u{62f}"),
+        "Arabic text should be present"
+    );
+}
+
+#[test]
+fn issue_nested_table_alignment() {
+    let xml = fixture_doc_xml("issue_nested_table_alignment");
+    assert!(xml.contains("w:tbl"), "should contain at least one table");
+    assert!(xml.contains("Normal right cell"), "outer cell text present");
+}
+
+#[test]
+fn issue_table_colspan_borders() {
+    let xml = fixture_doc_xml("issue_table_colspan_borders");
+    assert!(xml.contains("AB"), "merged cell AB present");
+    assert!(xml.contains("FGH"), "merged cell FGH present");
+    let gridspan = xml.matches("gridSpan").count();
+    assert!(
+        gridspan >= 2,
+        "should have gridSpan for merged cells, got {gridspan}"
+    );
+    let tc_count = xml.matches("<w:tc>").count();
+    assert!(
+        tc_count >= 9,
+        "should have at least 9 table cells, got {tc_count}"
+    );
+}
+
+#[test]
+fn issue_table_caption_crossref() {
+    let xml = fixture_doc_xml("issue_table_caption_crossref");
+    assert!(xml.contains("Sample data"), "first table caption present");
+    assert!(
+        xml.contains("Another table"),
+        "second table caption present"
+    );
+    let bk_count = xml.matches("bookmarkStart").count();
+    assert!(
+        bk_count >= 2,
+        "should have bookmarks for labeled figures, got {bk_count}"
+    );
+}
+
+#[test]
+fn issue_table_multipage_borders() {
+    let xml = fixture_doc_xml("issue_table_multipage_borders");
+    assert!(xml.contains("<w:tbl>"), "should contain a table");
+    let tr_count = xml.matches("<w:tr>").count();
+    assert!(
+        tr_count >= 7,
+        "should have at least 7 table rows, got {tr_count}"
+    );
+    assert!(xml.contains("Header A"), "header row present");
+    assert!(xml.contains("Row 6"), "last data row present");
+}
+
+#[test]
+fn issue_table_cell_valign() {
+    let xml = fixture_doc_xml("issue_table_cell_valign");
+    assert!(xml.contains("Middle"), "middle-aligned cell text present");
+    assert!(xml.contains("Bottom"), "bottom-aligned cell text present");
+    assert!(xml.contains("<w:tbl>"), "should contain a table");
+}
+
+#[test]
+fn issue_table_cell_shading() {
+    let xml = fixture_doc_xml("issue_table_cell_shading");
+    assert!(xml.contains("Yellow cell"), "yellow cell text present");
+    assert!(xml.contains("Green cell"), "green cell text present");
+    assert!(xml.contains("<w:tbl>"), "should contain a table");
+    let tc_count = xml.matches("<w:tc>").count();
+    assert!(
+        tc_count >= 6,
+        "should have at least 6 table cells, got {tc_count}"
+    );
+}
+
+#[test]
+fn issue_table_dashed_borders() {
+    let xml = fixture_doc_xml("issue_table_dashed_borders");
+    let tbl_count = xml.matches("<w:tbl>").count();
+    assert!(tbl_count >= 2, "should have two tables, got {tbl_count}");
+    assert!(xml.contains("A"), "first table content present");
+    assert!(xml.contains("H"), "second table content present");
+}
+
+#[test]
+fn features_table_width_percentage() {
+    let doc_xml = fixture_doc_xml("complex_paper");
+
+    // Feature 6: Table uses percentage width (100%)
+    assert!(
+        doc_xml.contains("<w:tblW w:w=\"5000\" w:type=\"pct\"/>"),
+        "table should have 100% width via pct type"
+    );
+    // Feature 6: Cells have width defined
+    assert!(
+        doc_xml.contains("w:tcW"),
+        "table cells should have w:tcW width elements"
     );
 }

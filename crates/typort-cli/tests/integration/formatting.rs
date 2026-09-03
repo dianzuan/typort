@@ -1,53 +1,9 @@
-//! Inline formatting, footnote formatting, indentation, and run-coalescing tests.
+//! Inline formatting, indentation, and run-coalescing tests.
 
 use crate::common;
-use crate::common::{fixture_doc_xml, fixture_part, fixture_styles_xml, paragraph_containing};
-use std::io::Cursor;
-use std::path::Path;
-
-#[test]
-fn nested_list_has_multiple_levels() {
-    let doc_xml = fixture_doc_xml("nested_list");
-
-    assert!(
-        doc_xml.contains(r#"w:ilvl w:val="0""#),
-        "should have level 0 list items"
-    );
-    assert!(
-        doc_xml.contains(r#"w:ilvl w:val="1""#),
-        "should have level 1 (nested) list items"
-    );
-    assert!(
-        doc_xml.contains(r#"w:ilvl w:val="2""#),
-        "should have level 2 (doubly nested) list items"
-    );
-}
-
-#[test]
-fn nested_list_document_model_has_levels() {
-    use typort_ooxml::document::BlockElement;
-
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/nested_list.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let levels: Vec<u32> = doc
-        .body
-        .elements
-        .iter()
-        .filter_map(|e| {
-            if let BlockElement::Paragraph(p) = e {
-                p.list_info.as_ref().map(|li| li.level)
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    assert!(levels.contains(&0), "should have list items at level 0");
-    assert!(levels.contains(&1), "should have list items at level 1");
-    assert!(levels.contains(&2), "should have list items at level 2");
-}
+use crate::common::{
+    fixture_doc_xml, fixture_document, fixture_package, fixture_styles_xml, paragraph_containing,
+};
 
 #[test]
 fn inline_super_produces_text() {
@@ -142,51 +98,6 @@ fn inline_smallcaps_text_preserved() {
 }
 
 #[test]
-fn formatted_footnote_preserves_bold_and_italic() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/formatted_footnote.typ"))
-            .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    // Check the footnote content runs preserve formatting
-    assert!(
-        !doc.footnotes.is_empty(),
-        "should have at least one footnote"
-    );
-    let fn_content = &doc.footnotes[0].content;
-    let has_bold = fn_content
-        .iter()
-        .any(|i| matches!(i, typort_ooxml::document::InlineElement::Text(r) if r.bold));
-    let has_italic = fn_content
-        .iter()
-        .any(|i| matches!(i, typort_ooxml::document::InlineElement::Text(r) if r.italic));
-    assert!(has_bold, "footnote content should have a bold run");
-    assert!(has_italic, "footnote content should have an italic run");
-}
-
-#[test]
-fn formatted_footnote_xml_has_formatting_elements() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/formatted_footnote.typ"))
-            .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let fn_xml = std::io::read_to_string(reader.by_name("word/footnotes.xml").unwrap()).unwrap();
-
-    assert!(
-        fn_xml.contains("<w:b/>"),
-        "footnotes.xml should contain <w:b/> for bold formatting"
-    );
-    assert!(
-        fn_xml.contains("<w:i/>"),
-        "footnotes.xml should contain <w:i/> for italic formatting"
-    );
-}
-
-#[test]
 fn bold_link_preserves_formatting_in_hyperlink() {
     let doc_xml = fixture_doc_xml("bold_link");
 
@@ -211,9 +122,7 @@ fn bold_link_preserves_formatting_in_hyperlink() {
 fn bold_link_document_model_has_bold_runs() {
     use typort_ooxml::document::{BlockElement, InlineElement};
 
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/bold_link.typ")).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
+    let doc = fixture_document("bold_link");
 
     // Find the hyperlink inline element and check its runs are bold
     let has_bold_link = doc.body.elements.iter().any(|e| {
@@ -237,43 +146,6 @@ fn bold_link_document_model_has_bold_runs() {
 }
 
 #[test]
-fn edge_list_restart_separate_lists_get_unique_num_ids() {
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/edge_list_restart.typ"))
-            .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(reader.by_name("word/document.xml").unwrap()).unwrap();
-    let num_xml = std::io::read_to_string(reader.by_name("word/numbering.xml").unwrap()).unwrap();
-
-    let num_ids: Vec<&str> = doc_xml
-        .match_indices("w:numId w:val=\"")
-        .map(|(pos, _)| {
-            let start = pos + 15;
-            let end = doc_xml[start..].find('"').unwrap() + start;
-            &doc_xml[start..end]
-        })
-        .collect();
-    let unique: std::collections::HashSet<&&str> = num_ids.iter().collect();
-    assert!(
-        unique.len() >= 3,
-        "3 separate lists should have at least 3 unique numIds, got {:?}",
-        num_ids
-    );
-    for id in &unique {
-        let pattern = format!("w:numId=\"{}\"", id);
-        assert!(
-            num_xml.contains(&pattern),
-            "numbering.xml should define numId {id}"
-        );
-    }
-}
-
-#[test]
 fn edge_blockquote_has_left_indent() {
     let doc_xml = fixture_doc_xml("edge_blockquote");
 
@@ -288,38 +160,9 @@ fn edge_blockquote_has_left_indent() {
 }
 
 #[test]
-fn footnote_text_size_is_body_size_not_marker_size() {
-    // Regression for detect_footnote_size (page.rs): it took the global-minimum
-    // small size, which is the superscript reference/marker size (~6.5pt), and
-    // pinned FootnoteText to it. The fix measures the footnote BODY runs from the
-    // Paged render (located by the semantic footnote content), giving the real
-    // footnote text size (~9pt). See tests/fixtures/edge_footnote_size_not_marker.typ.
-    let styles = fixture_styles_xml("edge_footnote_size_not_marker");
-    let block = styles
-        .split(r#"w:styleId="FootnoteText""#)
-        .nth(1)
-        .expect("FootnoteText style present");
-    let block = block.split("</w:style>").next().unwrap();
-    let sz: u32 = block
-        .split(r#"<w:sz w:val=""#)
-        .nth(1)
-        .and_then(|s| s.split('"').next())
-        .and_then(|s| s.parse().ok())
-        .expect("FootnoteText sz present");
-    // Body is 10.5pt (sz 21); the footnote body renders ~9pt (sz 16-20); the
-    // superscript marker is ~6.5pt (sz 13). The footnote style must take the
-    // footnote-body size, not the marker size.
-    assert!(
-        (16..21).contains(&sz),
-        "FootnoteText size must be the footnote body size (~9pt, sz 16-20), not the \
-         superscript marker size (~6.5pt, sz 13); got sz={sz}"
-    );
-}
-
-#[test]
 fn lang_german_is_de_de_not_guessed() {
     // A German document (no CJK) must derive de-DE from #set text(lang: "de"),
-    // not fall back to the en-US/zh-CN guess. Guards against P1 regressions.
+    // not fall back to the en-US/zh-CN guess. Guards against language-specific guesses.
     let styles = fixture_styles_xml("style_lang_de");
     assert!(
         styles.contains(r#"w:val="de-DE""#),
@@ -366,12 +209,11 @@ macro_rules! smoke_test {
     ($name:ident, $fixture:expr) => {
         #[test]
         fn $name() {
-            let path = format!("../../tests/fixtures/{}.typ", $fixture);
-            let world = typort_core::TyportWorld::new(std::path::Path::new(&path)).unwrap();
-            let doc = typort_core::convert::convert(&world).unwrap();
-            let mut buf = Vec::new();
-            typort_ooxml::write_docx(&doc, std::io::Cursor::new(&mut buf)).unwrap();
-            assert!(buf.len() > 100, "docx output should be non-trivial");
+            let package = fixture_package($fixture);
+            assert!(
+                package.byte_len() > 100,
+                "docx output should be non-trivial"
+            );
         }
     };
 }
@@ -388,7 +230,6 @@ smoke_test!(smoke_style_custom_leading, "style_custom_leading");
 smoke_test!(smoke_style_wide_leading, "style_wide_leading");
 smoke_test!(smoke_style_no_spacing, "style_no_spacing");
 smoke_test!(smoke_style_heading_custom, "style_heading_custom");
-smoke_test!(smoke_style_footnotes, "style_footnotes");
 smoke_test!(smoke_style_code_blocks, "style_code_blocks");
 smoke_test!(smoke_style_columns, "style_columns");
 smoke_test!(smoke_style_links, "style_links");
@@ -411,7 +252,7 @@ fn run_coalescing_collapses_split_line() {
     // Regression: the HTML walk emits one <w:r> per Typst text/space node, so a
     // plain line is shattered into many runs. The coalescing post-pass merges
     // adjacent equally-formatted runs while preserving the bold boundary.
-    // See tests/fixtures/edge_run_coalescing.typ.
+    // See the `edge_run_coalescing` fixture.
     let doc_xml = fixture_doc_xml("edge_run_coalescing");
     let para = paragraph_containing(&doc_xml, "plain line");
 
@@ -438,7 +279,7 @@ fn run_coalescing_collapses_split_line() {
 fn hanging_indent_par_set_rule_is_honored() {
     // `#set par(hanging-indent: 2em)` is a declared value recovered from the
     // source AST: paragraphs after it get a hanging indent, the one before stays
-    // flush. No genre/keyword matching. See tests/fixtures/edge_hanging_indent_par.typ.
+    // flush. No genre/keyword matching. See the `edge_hanging_indent_par` fixture.
     let doc_xml = fixture_doc_xml("edge_hanging_indent_par");
     let before = paragraph_containing(&doc_xml, "before the rule");
     let after = paragraph_containing(&doc_xml, "after the rule should carry");
@@ -609,29 +450,11 @@ fn complex_paper_handwritten_refs_get_hanging_indent() {
 }
 
 #[test]
-fn hanging_indent_does_not_clobber_list_items() {
-    // A `#set par(hanging-indent: 2em)` rule must not override a list item's own
-    // indent. List items keep the list hanging indent (left 2em / hanging 1em =
-    // 440/220 at the 11pt default), never the bibliography 2em/2em (440/440).
-    // See tests/fixtures/edge_hanging_indent_list.typ.
-    let doc_xml = fixture_doc_xml("edge_hanging_indent_list");
-    let item = paragraph_containing(&doc_xml, "list item with");
-    assert!(
-        item.contains(r#"w:hanging="220""#),
-        "list item must keep its list hanging indent (220):\n{item}"
-    );
-    assert!(
-        !item.contains(r#"w:hanging="440""#),
-        "the hanging-indent rule must not clobber the list indent with 440:\n{item}"
-    );
-}
-
-#[test]
 fn first_line_indent_all_indents_paragraph_after_heading() {
     // `first-line-indent: (amount: 2em, all: true)` must indent the paragraph
     // that follows a heading (no firstLine="0" suppression), while the Normal
     // style carries the declared indent for it to inherit.
-    // See tests/fixtures/edge_first_line_indent_all.typ.
+    // See the `edge_first_line_indent_all` fixture.
     let doc_xml = fixture_doc_xml("edge_first_line_indent_all");
     let styles_xml = fixture_styles_xml("edge_first_line_indent_all");
     // Isolate the Normal style block (heading styles legitimately carry firstLine=0).
@@ -659,7 +482,7 @@ fn em_first_line_indent_emits_char_based_chars() {
     // char-based `w:firstLineChars="200"` BEFORE the absolute `w:firstLine`
     // fallback in the Normal style. Word prefers firstLineChars when both are
     // present, so character-width indents survive a font change.
-    // See tests/fixtures/issue_first_line_indent_chars.typ.
+    // See the `issue_first_line_indent_chars` fixture.
     let styles_xml = fixture_styles_xml("issue_first_line_indent_chars");
     let normal_start = styles_xml
         .find(r#"w:styleId="Normal""#)
@@ -681,7 +504,7 @@ fn superscript_marker_size_does_not_leak_to_body_reference() {
     // A `#super[1]` affiliation marker renders small; its size must not be
     // generalized (by same-text matching) onto a body "[1]" reference marker.
     // The reference paragraph is entirely body-sized, so it carries no <w:sz>
-    // override at all. See tests/fixtures/edge_super_marker_size.typ.
+    // override at all. See the `edge_super_marker_size` fixture.
     let doc_xml = fixture_doc_xml("edge_super_marker_size");
     let reference = paragraph_containing(&doc_xml, "first reference entry");
     assert!(
@@ -701,7 +524,7 @@ fn superscript_run_uses_vertalign_alone_not_a_shrunk_size() {
     // already shrinks the glyph and raises it by a fraction of the *effective* em, so
     // a pre-shrunk size collapses the raise and the mark sits mid-line instead of up
     // top (ECMA-376 §17.3.2.42). The run must emit vertAlign alone and inherit the
-    // body size. See tests/fixtures/edge_super_marker_size.typ.
+    // body size. See the `edge_super_marker_size` fixture.
     let doc_xml = fixture_doc_xml("edge_super_marker_size");
     for chunk in doc_xml.split("<w:r>").skip(1) {
         let run = chunk.split("</w:r>").next().unwrap_or("");
@@ -721,7 +544,7 @@ fn superscript_run_uses_vertalign_alone_not_a_shrunk_size() {
 fn forced_line_break_emits_w_br_not_glued_text() {
     // A `\` line break inside a paragraph must become a real <w:br/>, not be dropped
     // (which glues "...line" and "Second..." into "lineSecond"). See
-    // tests/fixtures/edge_line_break.typ.
+    // the `edge_line_break` fixture.
     let doc_xml = fixture_doc_xml("edge_line_break");
     assert!(
         doc_xml.contains("<w:br/>"),
@@ -730,28 +553,6 @@ fn forced_line_break_emits_w_br_not_glued_text() {
     assert!(
         !doc_xml.contains("lineSecond"),
         "words must not glue across the line break:\n{doc_xml}"
-    );
-}
-
-#[test]
-fn separate_ordered_lists_each_restart_at_one() {
-    // Two distinct ordered lists must each restart at 1 — the second must not
-    // continue (1,2,3 then 4,5,6). They share one abstract numbering format, so
-    // every <w:num> instance needs a level-0 startOverride or Word continues the
-    // shared counter across lists. See tests/fixtures/two_ordered_lists.typ.
-    let world =
-        typort_core::TyportWorld::new(Path::new("../../tests/fixtures/two_ordered_lists.typ"))
-            .unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    let numbering = std::io::read_to_string(reader.by_name("word/numbering.xml").unwrap()).unwrap();
-    let overrides = numbering.matches(r#"<w:startOverride w:val="1"/>"#).count();
-    assert!(
-        overrides >= 2,
-        "each ordered list's <w:num> must carry a level-0 startOverride so it restarts \
-         at 1 (two lists -> >= 2 overrides); found {overrides}:\n{numbering}"
     );
 }
 
@@ -783,34 +584,337 @@ fn consecutive_linebreaks_survive_coalescing() {
 }
 
 #[test]
-fn enum_custom_start_keeps_numbering() {
-    let numbering = fixture_part("enum_custom_start", "word/numbering.xml");
+fn issue_cjk_linebreak_no_spurious_spaces() {
+    let xml = fixture_doc_xml("issue_cjk_linebreak");
     assert!(
-        numbering.contains("<w:startOverride w:val=\"4\"/>"),
-        "#enum(start: 4) must carry startOverride 4, got:\n{numbering}"
+        xml.contains("这是一段中文文本，"),
+        "first CJK text segment should be present"
     );
     assert!(
-        numbering.contains("<w:startOverride w:val=\"1\"/>"),
-        "a plain enum must still restart at 1"
+        xml.contains("用来测试换行是否会"),
+        "second CJK text segment should be present"
+    );
+    // Verify no space-only text runs between consecutive CJK runs.
+    // Extract all text content in order and check no space sits between CJK chars.
+    let texts: Vec<&str> = xml
+        .split("<w:t xml:space=\"preserve\">")
+        .skip(1)
+        .filter_map(|s| s.split("</w:t>").next())
+        .collect();
+    for w in texts.windows(3) {
+        if w[1].trim().is_empty() {
+            let prev_last = w[0].chars().last().unwrap_or(' ');
+            let next_first = w[2].chars().next().unwrap_or(' ');
+            let prev_cjk = ('\u{4E00}'..='\u{9FFF}').contains(&prev_last)
+                || ('\u{3000}'..='\u{303F}').contains(&prev_last)
+                || ('\u{FF00}'..='\u{FFEF}').contains(&prev_last);
+            let next_cjk = ('\u{4E00}'..='\u{9FFF}').contains(&next_first)
+                || ('\u{3000}'..='\u{303F}').contains(&next_first)
+                || ('\u{FF00}'..='\u{FFEF}').contains(&next_first);
+            assert!(
+                !(prev_cjk && next_cjk),
+                "spurious space between CJK chars: '{}' [space] '{}'",
+                w[0],
+                w[2]
+            );
+        }
+    }
+}
+
+#[test]
+fn issue_smart_quotes_preserved() {
+    let xml = fixture_doc_xml("issue_smart_quotes");
+    assert!(
+        xml.contains("\u{201c}") || xml.contains("\u{201d}"),
+        "smart double quotes should be preserved"
+    );
+    assert!(
+        xml.contains("\u{2018}") || xml.contains("\u{2019}"),
+        "smart single quotes should be preserved"
+    );
+    assert!(
+        xml.contains("Hello, world!"),
+        "quoted text content should be present"
     );
 }
 
 #[test]
-fn list_inline_math_emits_omml() {
-    let doc_xml = fixture_doc_xml("list_inline_math");
+fn edge_colored_text_has_color_runs() {
+    let xml = fixture_doc_xml("edge_colored_text");
+    assert!(
+        xml.contains("red text"),
+        "red text content should be present"
+    );
+    assert!(
+        xml.contains("blue text"),
+        "blue text content should be present"
+    );
+    assert!(
+        xml.contains("Green text"),
+        "green text content should be present"
+    );
+    assert!(
+        xml.contains("w:val=\"FF4136\"") || xml.contains("w:val=\"ff4136\""),
+        "red color value should be present"
+    );
+    assert!(
+        xml.contains("w:val=\"0074D9\"") || xml.contains("w:val=\"0074d9\""),
+        "blue color value should be present"
+    );
+    assert!(
+        xml.contains("w:val=\"00AA00\"") || xml.contains("w:val=\"00aa00\""),
+        "green hex color value should be present"
+    );
+}
 
-    let bullet_item = paragraph_containing(&doc_xml, "item one with");
+#[test]
+fn edge_inline_formatting_all_decorations() {
+    let xml = fixture_doc_xml("edge_inline_formatting");
     assert!(
-        bullet_item.contains("<m:oMath>"),
-        "bullet item's inline equation must be OMML, got:\n{bullet_item}"
-    );
-    let enum_item = paragraph_containing(&doc_xml, "numbered with");
-    assert!(
-        enum_item.contains("<m:oMath>"),
-        "enum item's inline equation must be OMML, got:\n{enum_item}"
+        xml.contains("strikethrough"),
+        "strikethrough text should be present"
     );
     assert!(
-        !doc_xml.contains("\u{1D465}"),
-        "MathML glyphs must not leak as literal text"
+        xml.contains("underlined"),
+        "underlined text should be present"
     );
+    assert!(
+        xml.contains("Small Caps"),
+        "small caps text should be present"
+    );
+    assert!(
+        xml.contains("<w:strike/>"),
+        "strikethrough should produce w:strike"
+    );
+    assert!(xml.contains("<w:u "), "underline should produce w:u");
+    assert!(
+        xml.contains("<w:smallCaps/>"),
+        "smallcaps should produce w:smallCaps"
+    );
+    assert!(
+        xml.contains("w:vertAlign"),
+        "super/subscript should produce w:vertAlign"
+    );
+}
+
+#[test]
+fn edge_text_transforms_smallcaps_and_case() {
+    let xml = fixture_doc_xml("edge_text_transforms");
+    assert!(
+        xml.contains("<w:smallCaps/>"),
+        "smallcaps should produce w:smallCaps"
+    );
+    assert!(
+        xml.contains("Chapter Title"),
+        "smallcaps heading text should be present"
+    );
+    assert!(
+        xml.contains("Heading1"),
+        "heading with smallcaps should keep Heading1 style"
+    );
+}
+
+#[test]
+fn issue_smartquotes_locale_chars() {
+    let xml = fixture_doc_xml("issue_smartquotes_locale");
+    assert!(xml.contains("Citation"), "French text should be present");
+    assert!(xml.contains("Zitat"), "German text should be present");
+    assert!(
+        xml.contains("English quote"),
+        "English text should be present"
+    );
+    assert!(
+        xml.contains("\u{ab}") || xml.contains("\u{bb}"),
+        "French guillemets should be preserved"
+    );
+    assert!(
+        xml.contains("\u{201e}"),
+        "German low-9 quotation mark should be preserved"
+    );
+}
+
+#[test]
+fn issue_blockquote_attribution_text() {
+    let xml = fixture_doc_xml("issue_blockquote_attribution");
+    assert!(
+        xml.contains("To be, or not to be"),
+        "first quote should be present"
+    );
+    assert!(
+        xml.contains("All that glitters"),
+        "second quote should be present"
+    );
+    assert!(xml.contains("Imagination"), "third quote should be present");
+    assert!(
+        xml.contains("Shakespeare"),
+        "first attribution should be present"
+    );
+    assert!(
+        xml.contains("Einstein"),
+        "second attribution should be present"
+    );
+}
+
+#[test]
+fn issue_cjk_bold_punct_formatting() {
+    let xml = fixture_doc_xml("issue_cjk_bold_punct");
+    assert!(xml.contains("加粗"), "bold CJK text should be present");
+    assert!(xml.contains("斜体"), "italic text should be present");
+    assert!(xml.contains("<w:b/>"), "bold formatting should be present");
+    assert!(
+        xml.contains("<w:i/>"),
+        "italic formatting should be present"
+    );
+}
+
+#[test]
+fn issue_text_deco_inline_math_decorations() {
+    let xml = fixture_doc_xml("issue_text_deco_inline_math");
+    assert!(
+        xml.contains("underlined"),
+        "underline text should be present"
+    );
+    assert!(
+        xml.contains("highlighted"),
+        "highlight text should be present"
+    );
+    assert!(
+        xml.contains("struck-through"),
+        "strikethrough text should be present"
+    );
+    assert!(xml.contains("<w:u "), "underline should produce w:u");
+    assert!(
+        xml.contains("<w:strike"),
+        "strikethrough should produce w:strike"
+    );
+}
+
+#[test]
+fn issue_color_primitives_text() {
+    let xml = fixture_doc_xml("issue_color_primitives");
+    assert!(xml.contains("RGB colored"), "RGB text should be present");
+    assert!(
+        xml.contains("Lightened blue"),
+        "lightened color text should be present"
+    );
+    assert!(
+        xml.contains("Named color"),
+        "named color text should be present"
+    );
+    assert!(
+        xml.matches("<w:color").count() >= 3,
+        "colored text should produce w:color elements"
+    );
+}
+
+#[test]
+fn issue_cjk_url_encoding_links() {
+    let xml = fixture_doc_xml("issue_cjk_url_encoding");
+    assert!(
+        xml.matches("HYPERLINK").count() >= 2,
+        "hyperlinks should be present"
+    );
+}
+
+#[test]
+fn issue_html_whitespace_in_styled_spans_text() {
+    let xml = fixture_doc_xml("issue_html_whitespace_in_styled_spans");
+    assert!(
+        xml.contains("<w:u ") || xml.contains("<w:color"),
+        "styled spans should be present"
+    );
+}
+
+#[test]
+fn issue_text_fill_color() {
+    let xml = fixture_doc_xml("issue_text_fill_color");
+    let color_count = xml.matches("<w:color").count();
+    assert!(
+        color_count >= 3,
+        "should have multiple color tags for different fills, got {color_count}"
+    );
+    assert!(
+        xml.contains("This entire paragraph is red"),
+        "red paragraph present"
+    );
+    assert!(xml.contains("blue"), "blue text reference present");
+    assert!(xml.contains("Green text"), "green text present");
+}
+
+#[test]
+fn issue_space_between_styled_runs() {
+    let xml = fixture_doc_xml("issue_space_between_styled_runs");
+    assert!(xml.contains("bold"), "bold text present");
+    assert!(xml.contains("italic"), "italic text present");
+    let preserve_count = xml.matches("xml:space=\"preserve\"").count();
+    assert!(
+        preserve_count >= 5,
+        "should preserve spaces between styled runs, got {preserve_count}"
+    );
+}
+
+#[test]
+fn issue_text_tracking_spacing() {
+    let xml = fixture_doc_xml("issue_text_tracking_spacing");
+    assert!(xml.contains("Wide tracked text"), "tracked text present");
+    assert!(
+        xml.contains("Tight tracked text"),
+        "tight tracked text present"
+    );
+}
+
+#[test]
+fn issue_inline_box_fill() {
+    let xml = fixture_doc_xml("issue_inline_box_fill");
+    assert!(xml.contains("highlighted box"), "box content present");
+    assert!(xml.contains("yellow inline"), "yellow box content present");
+    assert!(xml.contains("native highlight"), "native highlight present");
+    assert!(
+        xml.contains("w:highlight"),
+        "native highlight produces w:highlight"
+    );
+}
+
+#[test]
+fn issue_cjk_super_sub_metrics() {
+    let xml = fixture_doc_xml("issue_cjk_super_sub_metrics");
+    let valign_count = xml.matches("vertAlign").count();
+    assert!(
+        valign_count >= 2,
+        "should have vertAlign for super/sub, got {valign_count}"
+    );
+    assert!(
+        xml.contains("\u{4E0A}\u{6807}"),
+        "Chinese superscript text present"
+    );
+}
+
+#[test]
+fn issue_link_show_rule_ref() {
+    let xml = fixture_doc_xml("issue_link_show_rule_ref");
+    assert!(
+        xml.contains("bookmarkStart"),
+        "should have bookmark for heading label"
+    );
+    assert!(xml.contains("HYPERLINK"), "should have hyperlink field");
+    assert!(xml.contains("Introduction"), "heading text present");
+}
+
+#[test]
+fn issue_smallcaps_text() {
+    let xml = fixture_doc_xml("issue_smallcaps_text");
+    let sc_count = xml.matches("smallCaps").count();
+    assert!(
+        sc_count >= 2,
+        "should have w:smallCaps for smallcaps text, got {sc_count}"
+    );
+    assert!(xml.contains("Small Caps"), "smallcaps text content present");
+}
+
+#[test]
+fn issue_highlight_space_preserved() {
+    let xml = fixture_doc_xml("issue_highlight_space");
+    assert!(xml.contains("Hello"), "highlight text present");
+    assert!(xml.contains("World"), "adjacent text present");
+    assert!(xml.contains("bold"), "bold text present");
 }

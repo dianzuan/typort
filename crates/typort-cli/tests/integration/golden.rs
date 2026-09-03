@@ -6,8 +6,8 @@
 // byte-identical across separate processes, so we snapshot it verbatim — no
 // pretty-printer, no new dependency.
 //
-// CURATION — CI-safety: the World loads system fonts (world.rs
-// `include_system_fonts(true)`). Declaring a CJK font in source pins the font
+// CURATION — CI-safety: the World loads system fonts. Declaring a CJK font in
+// source pins the font
 // NAME in the output (environment-independent), but it is NOT sufficient for a
 // byte-exact snapshot: properties DETECTED from rendering — bold weight, size —
 // still require that font to be INSTALLED on the runner. complex_paper declares

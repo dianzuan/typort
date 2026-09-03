@@ -1,6 +1,9 @@
 //! CJK font handling and detection tests.
 
-use crate::common::{fixture_doc_xml, paragraph_containing};
+use crate::common::{
+    fixture_doc_xml, fixture_document_with_world, fixture_package_from_document,
+    paragraph_containing,
+};
 
 #[test]
 fn issue_cjk_latin_font_mixing_content() {
@@ -12,14 +15,10 @@ fn issue_cjk_latin_font_mixing_content() {
 
 #[test]
 fn issue_cjk_font_east_asia() {
-    let path = "../../tests/fixtures/issue_cjk_font_east_asia.typ";
-    let world = typort_core::TyportWorld::new(std::path::Path::new(path)).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, std::io::Cursor::new(&mut buf)).unwrap();
-    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(archive.by_name("word/document.xml").unwrap()).unwrap();
-    let styles_xml = std::io::read_to_string(archive.by_name("word/styles.xml").unwrap()).unwrap();
+    let (_, doc) = fixture_document_with_world("issue_cjk_font_east_asia");
+    let package = fixture_package_from_document(&doc);
+    let doc_xml = package.part_text("word/document.xml");
+    let styles_xml = package.part_text("word/styles.xml");
     assert!(
         doc_xml.contains("eastAsia") || styles_xml.contains("eastAsia"),
         "should set w:rFonts eastAsia attribute for CJK (in document or styles)"
@@ -46,8 +45,7 @@ fn issue_cjk_font_east_asia() {
 fn issue_cjk_font_localized_name() {
     use typst::World as _;
 
-    let path = "../../tests/fixtures/issue_cjk_font_localized_name.typ";
-    let world = typort_core::TyportWorld::new(std::path::Path::new(path)).unwrap();
+    let (world, doc) = fixture_document_with_world("issue_cjk_font_localized_name");
     let installed = |family: &str| {
         world
             .book()
@@ -57,12 +55,9 @@ fn issue_cjk_font_localized_name() {
     };
     let (simsun, simhei, kaiti) = (installed("SimSun"), installed("SimHei"), installed("KaiTi"));
 
-    let doc = typort_core::convert::convert(&world).unwrap();
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, std::io::Cursor::new(&mut buf)).unwrap();
-    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(&buf)).unwrap();
-    let doc_xml = std::io::read_to_string(archive.by_name("word/document.xml").unwrap()).unwrap();
-    let styles_xml = std::io::read_to_string(archive.by_name("word/styles.xml").unwrap()).unwrap();
+    let package = fixture_package_from_document(&doc);
+    let doc_xml = package.part_text("word/document.xml");
+    let styles_xml = package.part_text("word/styles.xml");
 
     // Body default (styles.xml) — the bulk of the document inherits it.
     if simsun {
@@ -109,15 +104,11 @@ fn issue_cjk_font_localized_name() {
 fn issue_cjk_fallback_list_font() {
     use typst::World as _;
 
-    let path = "../../tests/fixtures/issue_cjk_fallback_list_font.typ";
-    let world = typort_core::TyportWorld::new(std::path::Path::new(path)).unwrap();
+    let (world, doc) = fixture_document_with_world("issue_cjk_fallback_list_font");
     let nsimsun_installed = world.book().select_family("nsimsun").next().is_some();
 
-    let doc = typort_core::convert::convert(&world).unwrap();
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, std::io::Cursor::new(&mut buf)).unwrap();
-    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(&buf)).unwrap();
-    let styles_xml = std::io::read_to_string(archive.by_name("word/styles.xml").unwrap()).unwrap();
+    let package = fixture_package_from_document(&doc);
+    let styles_xml = package.part_text("word/styles.xml");
 
     // Font-INDEPENDENT: the original bug localized the never-rendered fallback
     // to its weight name (`eastAsia="Noto Serif SC Light"`). That must never
@@ -171,7 +162,7 @@ fn no_math_fallback_font_on_plain_digit_or_whitespace() {
     // run style verbatim used to emit `w:rFonts w:ascii="...Math"` on that digit.
     // Detection now normalizes any FontFlags::MATH face (and any non-letter run
     // whose font differs from baseline) back to the baseline, and drops all
-    // overrides on whitespace-only runs. See tests/fixtures/edge_math_fallback_digit.typ.
+    // overrides on whitespace-only runs. See the `edge_math_fallback_digit` fixture.
     let xml = fixture_doc_xml("edge_math_fallback_digit");
 
     // (a) No run carries a *Math* face on its rFonts (the OpenType math family
@@ -212,7 +203,7 @@ fn no_math_fallback_font_on_plain_digit_or_whitespace() {
 #[test]
 fn variable_font_weight_bold_detection() {
     // Variable fonts (typst 0.15) report continuous weights; the paged-side bold
-    // detection (weight >= 700, convert/page.rs) must see the instantiated
+    // detection (weight >= 700, convert/page/run_style.rs) must see the instantiated
     // instance's weight, not the file default. Fonts vendored in tests/fonts.
     let fonts = std::path::PathBuf::from("../../tests/fonts");
     let doc_xml = crate::common::fixture_part_with_font_dirs(
@@ -244,7 +235,7 @@ fn variable_font_style_italic_detection() {
     // a separate italic face. `info().variant.style` (the file-default named
     // instance) stays Normal for such fonts even when `#text(style: "italic")`
     // resolves a nonzero axis coordinate at shape time — the paged-side italic
-    // detection (convert/page.rs `effective_style`) must read the resolved
+    // detection (convert/page/run_style.rs `effective_style`) must read the resolved
     // coordinate, not the file default. Font: tests/fonts/TyportSlantTest*,
     // a derivative of Karla with a synthetic `slnt` axis (no `ital` axis is
     // present in either font; `slnt` is what typst resolves for an italic
@@ -272,7 +263,7 @@ fn variable_font_style_italic_detection() {
 fn deliberate_digit_run_font_override_is_kept() {
     // A digits-only run the author explicitly set in a non-body font must keep
     // its w:rFonts — only a true OpenType MATH-table fallback is normalized away.
-    // See tests/fixtures/edge_digit_run_font.typ.
+    // See the `edge_digit_run_font` fixture.
     let xml = fixture_doc_xml("edge_digit_run_font");
     // The run "12345" must survive carrying its declared monospace face.
     let para = paragraph_containing(&xml, "12345");

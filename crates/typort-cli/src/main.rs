@@ -18,8 +18,8 @@ struct Cli {
     #[arg(short, long)]
     output: Option<PathBuf>,
 
-    /// Preset name: loads `presets/<name>.toml` from next to the executable or the
-    /// current directory (none are bundled; supply your own)
+    /// Preset name: loads `<name>.toml` from the standard preset search path
+    /// (none are bundled; supply your own)
     #[arg(long)]
     preset: Option<String>,
 }
@@ -46,11 +46,12 @@ fn main() {
 
     // Apply preset if specified
     if let Some(preset_name) = &cli.preset {
-        let preset = typort_presets::load_builtin_preset(preset_name).unwrap_or_else(|e| {
-            eprintln!("error: {e}");
-            process::exit(1);
-        });
-        apply_preset(&mut doc, &preset);
+        let preset =
+            typort_presets::load_preset_from_search_path(preset_name).unwrap_or_else(|e| {
+                eprintln!("error: {e}");
+                process::exit(1);
+            });
+        preset.apply(&mut doc);
     }
 
     let file = File::create(&output_path).unwrap_or_else(|e| {
@@ -64,29 +65,4 @@ fn main() {
     });
 
     println!("wrote {}", output_path.display());
-}
-
-fn apply_preset(doc: &mut typort_ooxml::Document, preset: &typort_presets::Preset) {
-    if let Some(page) = &preset.page {
-        if let Some(top) = page.margin_top_cm {
-            doc.page_settings.margin_top = typort_presets::cm_to_twips(top);
-        }
-        if let Some(bottom) = page.margin_bottom_cm {
-            doc.page_settings.margin_bottom = typort_presets::cm_to_twips(bottom);
-        }
-        if let Some(left) = page.margin_left_cm {
-            doc.page_settings.margin_left = typort_presets::cm_to_twips(left);
-        }
-        if let Some(right) = page.margin_right_cm {
-            doc.page_settings.margin_right = typort_presets::cm_to_twips(right);
-        }
-    }
-    if let Some(footnote) = &preset.footnote
-        && let Some(fmt) = &footnote.format
-    {
-        doc.style.footnote_format = match fmt.as_str() {
-            "circled" => typort_ooxml::FootnoteFormat::CircledNumber,
-            _ => typort_ooxml::FootnoteFormat::Decimal,
-        };
-    }
 }

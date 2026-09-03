@@ -50,11 +50,11 @@ has no semantic HTML representation:
 - **No styling values.** `<h1>` tells you "heading"; it does *not* tell you the
   font, the exact point size, the RGB color, or the alignment. Those exist only in
   the rendered frames. typort reverse-engineers them from Paged geometry
-  (`convert/page.rs`).
+  (`convert/page/style.rs` and `convert/page/run_style.rs`).
 - **Layout-only constructs vanish.** `#align(center)[...]`, `#place(...)`, some
   `#grid(...)` layouts, and `#line()` rules have no HTML element, so they are
   *absent from the DOM*. typort recovers them by diffing rendered text lines
-  against the model (`convert/recovery.rs`).
+  against the model (`convert/recovery/`).
 - **Page-level facts don't exist before pagination.** Page size, margins, columns,
   headers/footers (which live in the page-margin zones), page breaks, and page
   numbering only come into being once the document is laid out — i.e. only from
@@ -64,7 +64,7 @@ has no semantic HTML representation:
   pulls the original `EquationElem` Content tree through the **introspector** and
   converts it to OMML (`typort-math`); the HTML walk skips the `<math>` node so
   the equation's glyphs aren't re-emitted as duplicate literal text
-  (`convert/mod.rs`, `"math"` arm). MathML→OMML transliteration is a possible
+  (`convert/inline_walk.rs`, `"math"` arm). MathML→OMML transliteration is a possible
   future alternative, but the Content tree is the richer source today.
 
 ### Why Paged alone is not enough
@@ -79,7 +79,7 @@ footnotes, and cross-references.
 
 Heuristics from geometry are a *fallback*. When the author wrote
 `#set text(font: ("Times New Roman", "SimSun"))`, that declaration is more
-trustworthy than counting glyphs. `convert/page.rs::extract_source_style_overrides`
+trustworthy than counting glyphs. `convert/page/source_ast.rs::extract_source_style_overrides`
 re-parses the main source **and its imports** (template `lib.typ` files often hide
 `set` rules inside functions) and these values override the Paged-derived guesses.
 
@@ -102,21 +102,17 @@ for the exact order.
                                     │              │
                                     ▼              ▼
                     ┌─────────────────────────────────────────────┐
-                    │  convert():                                   │
-                    │   1-3  page setup + document style (Paged)    │
-                    │   3b   AST overrides (authoritative)          │
-                    │   4-7  walk HTML tags → emit BlockElements,   │
-                    │        querying introspector for detail;      │
-                    │        <img> content decoded from src data-   │
-                    │        URLs; figure rasters keyed by Location │
-                    │   9    headers/footers/page numbering (Paged) │
-                    │   10   recover layout-only content (Paged)    │
-                    │   11   title/author metadata; bibliography    │
-                    │   12   per-run styles + alignment (Paged);    │
-                    │        AST par(hanging-indent); heading-run   │
-                    │        prop strip                             │
-                    │   13-15 section breaks, rules, line-merging   │
-                    │   16   coalesce adjacent equal-format runs    │
+                    │  convert(): five named phases                 │
+                    │   1  compile HTML + Paged targets             │
+                    │   2  apply page + style, then AST overrides   │
+                    │   3  walk HTML body → emit BlockElements;     │
+                    │      decode <img> data URLs; attach figure    │
+                    │      rasters by Location                      │
+                    │   4  apply headers/footers/page numbering     │
+                    │   5  run recovery and post-processing passes │
+                    │      (metadata, bibliography, per-run styles,│
+                    │      source breaks/smallcaps/hanging indents, │
+                    │      sections, rules, merging, coalescing)    │
                     └───────────────┬─────────────────────────────┘
                                     ▼
                           typort_ooxml::Document   (the IR)
@@ -149,22 +145,57 @@ crates/
   typort-presets/  Journal/style preset loading
 ```
 
+`typort-ooxml/src/lib.rs` is the crate's public API index: it contains only module
+declarations and re-exports. Its writer tests live in `typort-ooxml/tests/`, where
+they exercise that public API as integration tests.
+
+### typort-ooxml writer internals
+
+| File | Responsibility |
+|------|----------------|
+| `writer/mod.rs` | Package entry point (`write_docx`), write context, and inventory of optional parts/relationships. |
+| `writer/package.rs` | ZIP/package plumbing, content types, relationships, settings, core properties, and shared XML helpers. |
+| `writer/document.rs` | Main document body and section properties. |
+| `writer/paragraph.rs`, `writer/run.rs`, `writer/table.rs` | WordprocessingML paragraphs, inline runs, and tables. |
+| `writer/numbering.rs`, `writer/footnotes.rs`, `writer/fields.rs` | Numbering definitions, footnote parts/references, and Word fields/bookmarks. |
+| `writer/math.rs`, `writer/image.rs`, `writer/citation.rs` | OMML passthrough, DrawingML images/media inventory, and citation/bibliography XML. |
+| `writer/header_footer.rs` | Header and footer parts, including automatic page numbering. |
+
 ### typort-core internals
 
 | File | Responsibility |
 |------|----------------|
 | `world.rs` | `TyportWorld`: implements Typst's `World` trait (source, system fonts, `@preview` package download, `Feature::Html`). |
-| `convert/mod.rs` | The pipeline + the HTML tag walker + most element converters. |
-| `convert/page.rs` | Reverse-engineers page settings and styles from Paged geometry; parses AST `set`-rule overrides (incl. `par(hanging-indent:)`); normalizes math-fallback fonts; strips redundant heading run props. |
-| `convert/recovery.rs` | Recovers layout-only content HTML dropped; horizontal rules; per-table border styling from each table's own paged tag bracket; same-line paragraph merging. |
-| `convert/coalesce.rs` | Final pass: merges adjacent runs with identical effective `rPr` and folds whitespace-only runs, undoing the per-text-node run shattering. |
+| `convert/mod.rs` | Entry orchestration: module declarations/re-exports, `WalkCtx`, equation state, and the five named pipeline phases. |
+| `convert/block.rs` | Block-level HTML tag walk and dispatch, paragraphs, equations, figures, code blocks, blockquotes, and term lists. |
+| `convert/inline_walk.rs` | HTML inline traversal: formatted spans, links, citations, footnotes, images, and inline equations. |
+| `convert/headings.rs` | Semantic heading conversion, numbering, smart quotes, and inline heading content. |
+| `convert/tables.rs` | HTML table conversion, cells and nested tables, plus rowspan post-processing. |
+| `convert/lists.rs` | Ordered and unordered HTML list conversion, including nested levels. |
+| `convert/source.rs` | Gathers and applies authoritative source-AST style and paragraph overrides. |
+| `convert/smallcaps.rs` | Recovers consumed `smallcaps` calls and aliases from the source AST. |
+| `convert/postprocess.rs` | Paragraph-indent cleanup and document metadata extraction. |
+| `convert/dom.rs` | Shared HTML DOM, tag, attribute, text, location, and alignment helpers. |
+| `convert/page/mod.rs` | Paged-style facade: declares responsibility modules and re-exports their caller-facing API. |
+| `convert/page/units.rs`, `convert/page/style.rs` | Word-unit conversion and document-style detection from rendered frames. |
+| `convert/page/source_ast.rs`, `convert/page/hanging_indent.rs`, `convert/page/reachable.rs` | Authoritative source-AST `set`-rule parsing (including scoped hanging indents) and reachable local-source collection. |
+| `convert/page/sections.rs`, `convert/page/margin.rs` | Section changes, page settings, body/margin zones, headers, footers, and page numbering from Paged geometry. |
+| `convert/page/run_style.rs`, `convert/page/language.rs` | Per-run rendered-style overrides, redundant heading-property suppression, BCP-47 helpers, and localized CJK font names. |
+| `convert/recovery/mod.rs` | Orchestrates recovery of layout-only content HTML dropped and re-exports the recovery passes. |
+| `convert/recovery/lines.rs` | Extracts positioned rendered lines and run/x-cluster data from paged frames. |
+| `convert/recovery/deduplication.rs` | Builds the emitted-text corpus and decides which rendered lines are already represented. |
+| `convert/recovery/insertion.rs` | Places genuinely missing rendered lines into the document model. |
+| `convert/recovery/horizontal_rules.rs` | Recovers source-declared horizontal rules and maps emitted elements to paged locations. |
+| `convert/recovery/table_rules.rs` | Derives each table's border style from its own paged tag bracket. |
+| `convert/text_norm.rs` | Shared walk/recovery normalisation for visual markers, CJK spacing/fragments, math italics, whitespace, and citation markers. |
+| `convert/coalesce.rs` | Final pass: merges same-line paragraphs, coalesces adjacent runs with identical effective `rPr`, and folds whitespace-only runs. |
 | `convert/table_width.rs` | Turns a `TableElem`'s declared column `TrackSizings` (fr/rel/auto) into per-cell `w:tcW` percentages. |
 | `convert/table_align.rs` | Faithful table-cell alignment from the semantic `TableElem`: horizontal → cell-paragraph `w:jc`, vertical → `w:vAlign`. |
 | `convert/breaks.rs` | Explicit `#pagebreak()`/`#colbreak()` recovery from the source AST (both are consumed at compile time), positioned by run spans, expanding local function calls, and following `#include` chains. |
 | `convert/bibliography.rs` | Citation data via the semantic `BibliographyElem` (+ re-parsing `.bib`/`.yml` with hayagriva). |
 | `convert/footnote.rs` | Footnote bodies from the HTML `doc-endnotes` section. |
 | `convert/image.rs` | Image content decoded from each `<img>`'s base64 src data-URL (typst-html 0.15 embeds the bytes in the DOM); Paged frames contribute display sizes (by content hash) and drawing-canvas rasters keyed by their figure's `Location`. |
-| `convert/inline.rs` | Inline formatting (bold/italic/…) → styled runs. |
+| `convert/inline.rs` | Typst Content-AST inline formatting (bold/italic/…) → styled runs. |
 
 ## The IR: `typort_ooxml::Document`
 
@@ -192,9 +223,10 @@ spacing/indent) so the writer does minimal conversion.
 `typort-ooxml::writer` emits the `.docx` XML parts directly via `quick-xml` — **no
 `docx-rs`, no intermediate format**. This is a deliberate choice: Word is strict
 about WML child-element ordering (`rPr`/`pPr` children must appear in schema
-order), and direct emission gives full control. The writer produces all parts
-(`document.xml`, `styles.xml`, `numbering.xml`, `settings.xml`, relationships,
-content-types, headers/footers, footnotes, media) and zips them.
+order), and direct emission gives full control. Its root owns package orchestration
+and shared write state; part-specific modules emit `document.xml`, `styles.xml`,
+`numbering.xml`, `settings.xml`, relationships, content types, headers/footers,
+footnotes, citations, math, and media before the entry point zips them.
 
 ## Math → OMML
 
@@ -223,29 +255,31 @@ classification (e.g. in `sum_i a_i = S`, the `= S` stays outside the n-ary).
 - No extensible arrows.
 - Word forces the Cambria Math font in math zones.
 
-## The fragile seam: `recovery.rs`
+## The fragile seam: `convert/recovery/`
 
 The honest part of this document. The recovery layer is where typort does, in
 miniature, the very PDF→Word inference it set out to avoid — because some content
 (`#align(center)`, `#place`, grids) reaches the model *only* as geometry.
 
-`recover_missing_content` extracts every rendered text line with its position,
-then **text-diffs** it against what already made it into the model, inserting
-genuinely-missing lines at the geometrically-correct slot. Its correctness depends
-on:
+`recovery/mod.rs::recover_missing_content` orchestrates this seam:
+`recovery/lines.rs` extracts every rendered text line with its position,
+`recovery/deduplication.rs` **text-diffs** it against what already made it into
+the model, and `recovery/insertion.rs` inserts genuinely-missing lines at the
+geometrically-correct slot. `recovery/horizontal_rules.rs` and
+`recovery/table_rules.rs` contain the two rule-shape paths. Correctness depends on:
 
-- **Text normalization matching** across two very different pipelines (strip CJK
-  spaces, strip math italics, strip visual markers, strip heading numbering).
-- **Magic thresholds**: minimum line lengths (2/5/6/8 chars), a math-character
-  ratio (`math*4 > total`), an ~85% page-fullness heuristic for implicit page
-  breaks, a 15%-of-page-center alignment threshold, a 2.0pt y-position tolerance,
-  a default 0.66 cap-height ratio, and a "first 3 pages" sampling window for body
-  style.
+- **Text normalization matching** across two very different pipelines. The shared
+  normalisers in `convert/text_norm.rs` strip CJK spaces, math italics, visual
+  markers, whitespace, citation markers, and identify CJK fragments.
+- **Geometry and text thresholds** collected as documented constants with their
+  owning responsibility under `convert/page/` and at the top of the responsible
+  `convert/recovery/*.rs` module. Those constants are the authoritative tuning
+  references for the paged-style and recovery heuristics.
 
 These heuristics are individually justified but collectively brittle: both false
 negatives (real content skipped) and false positives (content duplicated) are
 possible. Most of the project's known edge-case bugs live here. **Anyone touching
-this file should add a fixture-based regression test for the specific case.**
+this directory should add a fixture-based regression test for the specific case.**
 
 ## Language neutrality (how it stays universal)
 

@@ -1,37 +1,110 @@
 //! Shared fixture-conversion and XML-scanning helpers for the area modules in
 //! the `integration` test binary. This file does not itself match Cargo's test
 //! entry-point patterns; `tests/integration/main.rs` pulls it in explicitly.
-//!
-//! Not every consuming binary/module uses every helper here, which would
-//! otherwise warn under `dead_code` from that binary's point of view — each
-//! such helper carries its own item-level `#[allow(dead_code)]` below rather
-//! than a blanket file-level allow, so an actually-unused *new* helper still
-//! warns.
 
-use std::io::Cursor;
-use std::path::PathBuf;
+use std::io::{Cursor, Read};
+use std::path::{Path, PathBuf};
+
+/// The path to `tests/fixtures/<fixture>.typ`.
+pub fn fixture_path(fixture: &str) -> PathBuf {
+    PathBuf::from(format!("../../tests/fixtures/{fixture}.typ"))
+}
+
+/// Convert `tests/fixtures/<fixture>.typ` and return the public document model.
+pub fn fixture_document(fixture: &str) -> typort_ooxml::Document {
+    fixture_document_with_font_dirs(fixture, &[])
+}
+
+/// Convert a fixture and return both its world and public document model.
+pub fn fixture_document_with_world(
+    fixture: &str,
+) -> (typort_core::TyportWorld, typort_ooxml::Document) {
+    let world = typort_core::TyportWorld::new(&fixture_path(fixture)).unwrap();
+    let document = typort_core::convert::convert(&world).unwrap();
+    (world, document)
+}
+
+/// Convert `tests/fixtures/<fixture>.typ` with extra font directories loaded and
+/// return the public document model.
+pub fn fixture_document_with_font_dirs(
+    fixture: &str,
+    font_dirs: &[PathBuf],
+) -> typort_ooxml::Document {
+    let world =
+        typort_core::TyportWorld::with_font_dirs(&fixture_path(fixture), font_dirs).unwrap();
+    typort_core::convert::convert(&world).unwrap()
+}
+
+/// The parts produced by one fixture conversion.
+pub struct FixturePackage {
+    parts: Vec<(String, Vec<u8>)>,
+    byte_len: usize,
+}
+
+impl FixturePackage {
+    /// Return the serialized package size in bytes.
+    pub fn byte_len(&self) -> usize {
+        self.byte_len
+    }
+
+    /// Return every part name in package order.
+    pub fn part_names(&self) -> impl Iterator<Item = &str> {
+        self.parts.iter().map(|(name, _)| name.as_str())
+    }
+
+    /// Return a package part as text.
+    pub fn part_text(&self, name: &str) -> &str {
+        let bytes = &self
+            .parts
+            .iter()
+            .find(|(part_name, _)| part_name == name)
+            .unwrap_or_else(|| panic!("package should contain {name:?}"))
+            .1;
+        std::str::from_utf8(bytes)
+            .unwrap_or_else(|error| panic!("{name:?} should be text: {error}"))
+    }
+}
+
+/// Convert `tests/fixtures/<fixture>.typ` and return all package parts.
+pub fn fixture_package(fixture: &str) -> FixturePackage {
+    fixture_package_from_document(&fixture_document(fixture))
+}
+
+/// Package a converted fixture document and return all parts.
+pub fn fixture_package_from_document(doc: &typort_ooxml::Document) -> FixturePackage {
+    let mut buf = Vec::new();
+    typort_ooxml::write_docx(doc, Cursor::new(&mut buf)).unwrap();
+
+    let byte_len = buf.len();
+    let mut archive = zip::ZipArchive::new(Cursor::new(buf)).unwrap();
+    let mut parts = Vec::with_capacity(archive.len());
+    for index in 0..archive.len() {
+        let mut part = archive.by_index(index).unwrap();
+        let mut bytes = Vec::new();
+        part.read_to_end(&mut bytes).unwrap();
+        parts.push((part.name().to_owned(), bytes));
+    }
+    FixturePackage { parts, byte_len }
+}
 
 /// Convert `tests/fixtures/<fixture>.typ` and return the named docx part.
 pub fn fixture_part(fixture: &str, part: &str) -> String {
-    fixture_part_with_font_dirs(fixture, part, &[])
+    fixture_package(fixture).part_text(part).to_owned()
 }
 
 /// Convert `tests/fixtures/<fixture>.typ` with extra font directories loaded
 /// (e.g. `tests/fonts` for a variable-font fixture) and return the named docx
-/// part. `fixture_part` delegates here with an empty `font_dirs` slice so
-/// there is one fixture-conversion pipeline, not two.
+/// part. Both this and `fixture_part` build on `fixture_document*` and
+/// `fixture_package_from_document`, so there is one conversion pipeline.
 pub fn fixture_part_with_font_dirs(fixture: &str, part: &str, font_dirs: &[PathBuf]) -> String {
-    let path = PathBuf::from(format!("../../tests/fixtures/{fixture}.typ"));
-    // `TyportWorld::new` is itself `with_font_dirs(path, &[])`, so one call
-    // covers both the plain and the extra-fonts case.
-    let world = typort_core::TyportWorld::with_font_dirs(&path, font_dirs).unwrap();
-    let doc = typort_core::convert::convert(&world).unwrap();
+    fixture_package_from_document(&fixture_document_with_font_dirs(fixture, font_dirs))
+        .part_text(part)
+        .to_owned()
+}
 
-    let mut buf = Vec::new();
-    typort_ooxml::write_docx(&doc, Cursor::new(&mut buf)).unwrap();
-
-    let mut reader = zip::ZipArchive::new(Cursor::new(&buf)).unwrap();
-    std::io::read_to_string(reader.by_name(part).unwrap()).unwrap()
+/// The directory containing a fixture-relative path.
+pub fn fixture_dir(path: impl AsRef<Path>) -> PathBuf {
+    PathBuf::from("../../tests/fixtures").join(path)
 }
 
 /// Convert `tests/fixtures/<fixture>.typ` and return `word/document.xml`.

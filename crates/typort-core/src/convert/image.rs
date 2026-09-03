@@ -21,7 +21,11 @@ pub(super) fn collect_image_sizes(paged: &PagedDocument) -> HashMap<u64, (u64, u
     sizes
 }
 
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "positive pt sizes rounded to whole pixels"
+)]
 fn collect_frame_image_sizes(frame: &Frame, sizes: &mut HashMap<u64, (u64, u64)>) {
     for (_, item) in frame.items() {
         match item {
@@ -225,7 +229,11 @@ pub(super) fn frame_has_curve(frame: &Frame) -> bool {
 
 /// Rasterize a single drawing frame to a PNG, sized at its on-page layout
 /// dimensions (so Word reproduces the figure's footprint).
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "positive pt sizes rounded to whole pixels / EMU"
+)]
 fn rasterize_frame(frame: &Frame) -> Option<ImageData> {
     use typst::foundations::{Content, Smart};
     use typst::layout::{Abs, Sides};

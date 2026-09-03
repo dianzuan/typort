@@ -4,6 +4,16 @@ pub enum ParagraphStyle {
     Heading(u8),
 }
 
+impl ParagraphStyle {
+    #[must_use]
+    pub fn ooxml_value(&self) -> String {
+        match self {
+            Self::Normal => "Normal".to_string(),
+            Self::Heading(level) => format!("Heading{level}"),
+        }
+    }
+}
+
 /// Paragraph alignment / justification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Alignment {
@@ -16,13 +26,19 @@ pub enum Alignment {
 impl Alignment {
     /// Return the OOXML `w:jc` value string for this alignment.
     #[must_use]
-    pub fn as_ooxml_str(&self) -> &'static str {
+    pub fn ooxml_value(&self) -> &'static str {
         match self {
             Alignment::Left => "left",
             Alignment::Center => "center",
             Alignment::Right => "right",
             Alignment::Justify => "both",
         }
+    }
+
+    #[deprecated(since = "0.2.1", note = "renamed to `ooxml_value`")]
+    #[must_use]
+    pub fn as_ooxml_str(&self) -> &'static str {
+        self.ooxml_value()
     }
 }
 
@@ -31,6 +47,24 @@ impl Alignment {
 pub enum ImageFormat {
     Png,
     Jpeg,
+}
+
+impl ImageFormat {
+    #[must_use]
+    pub fn extension(&self) -> &'static str {
+        match self {
+            Self::Png => "png",
+            Self::Jpeg => "jpg",
+        }
+    }
+
+    #[must_use]
+    pub fn content_type(&self) -> &'static str {
+        match self {
+            Self::Png => "image/png",
+            Self::Jpeg => "image/jpeg",
+        }
+    }
 }
 
 /// Embedded image data with dimensions in EMU (English Metric Units).
@@ -67,7 +101,7 @@ pub enum SourceType {
 
 impl SourceType {
     #[must_use]
-    pub fn as_ooxml_str(&self) -> &'static str {
+    pub fn ooxml_value(&self) -> &'static str {
         match self {
             Self::JournalArticle => "JournalArticle",
             Self::Book => "Book",
@@ -78,6 +112,12 @@ impl SourceType {
             Self::DocumentFromInternetSite => "DocumentFromInternetSite",
             Self::Misc => "Misc",
         }
+    }
+
+    #[deprecated(since = "0.2.1", note = "renamed to `ooxml_value`")]
+    #[must_use]
+    pub fn as_ooxml_str(&self) -> &'static str {
+        self.ooxml_value()
     }
 }
 
@@ -164,7 +204,10 @@ pub enum InlineElement {
 }
 
 #[derive(Debug, Clone)]
-#[allow(clippy::struct_excessive_bools)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "mirrors the independent w:rPr toggles"
+)]
 pub struct Run {
     pub text: String,
     pub bold: bool,
@@ -271,7 +314,7 @@ impl Run {
 
 /// The complete set of `Run` fields the writer serializes into `<w:rPr>`.
 ///
-/// Single source of truth shared by `writer::write_run` (has-rPr gate via
+/// Single source of truth shared by `writer::run::write_run` (has-rPr gate via
 /// `is_plain`) and run coalescing (merge-eligibility via `PartialEq`).
 /// Adding a styled field to `Run`? Add it HERE and to `format_key()`'s
 /// exhaustive destructure — the compiler will enforce this at `format_key()`
@@ -323,7 +366,10 @@ pub enum HangingIndent {
 }
 
 #[derive(Debug, Clone, Default)]
-#[allow(clippy::struct_excessive_bools)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "mirrors the independent w:pPr toggles"
+)]
 pub struct Paragraph {
     /// Inline elements including text runs and footnote references.
     pub inlines: Vec<InlineElement>,
@@ -594,12 +640,18 @@ pub enum VerticalAlign {
 impl VerticalAlign {
     /// The `w:vAlign` attribute value.
     #[must_use]
-    pub fn as_val(self) -> &'static str {
+    pub fn ooxml_value(self) -> &'static str {
         match self {
             VerticalAlign::Top => "top",
             VerticalAlign::Center => "center",
             VerticalAlign::Bottom => "bottom",
         }
+    }
+
+    #[deprecated(since = "0.2.1", note = "renamed to `ooxml_value`")]
+    #[must_use]
+    pub fn as_val(self) -> &'static str {
+        self.ooxml_value()
     }
 }
 
@@ -750,6 +802,18 @@ pub enum SectionBreakType {
     OddPage,
 }
 
+impl SectionBreakType {
+    #[must_use]
+    pub fn ooxml_value(&self) -> &'static str {
+        match self {
+            Self::NextPage => "nextPage",
+            Self::Continuous => "continuous",
+            Self::EvenPage => "evenPage",
+            Self::OddPage => "oddPage",
+        }
+    }
+}
+
 /// A section break that ends a section, optionally overriding page settings.
 #[derive(Debug, Clone)]
 pub struct SectionBreak {
@@ -830,6 +894,19 @@ pub enum PageNumberFormat {
     UpperRoman,
     LowerLetter,
     UpperLetter,
+}
+
+impl PageNumberFormat {
+    #[must_use]
+    pub fn ooxml_value(&self) -> &'static str {
+        match self {
+            Self::Decimal => "decimal",
+            Self::LowerRoman => "lowerRoman",
+            Self::UpperRoman => "upperRoman",
+            Self::LowerLetter => "lowerLetter",
+            Self::UpperLetter => "upperLetter",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
