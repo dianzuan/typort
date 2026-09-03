@@ -34,6 +34,12 @@ impl Alignment {
             Alignment::Justify => "both",
         }
     }
+
+    #[deprecated(since = "0.2.1", note = "renamed to `ooxml_value`")]
+    #[must_use]
+    pub fn as_ooxml_str(&self) -> &'static str {
+        self.ooxml_value()
+    }
 }
 
 /// Image format (PNG or JPEG).
@@ -106,6 +112,12 @@ impl SourceType {
             Self::DocumentFromInternetSite => "DocumentFromInternetSite",
             Self::Misc => "Misc",
         }
+    }
+
+    #[deprecated(since = "0.2.1", note = "renamed to `ooxml_value`")]
+    #[must_use]
+    pub fn as_ooxml_str(&self) -> &'static str {
+        self.ooxml_value()
     }
 }
 
@@ -634,6 +646,12 @@ impl VerticalAlign {
             VerticalAlign::Center => "center",
             VerticalAlign::Bottom => "bottom",
         }
+    }
+
+    #[deprecated(since = "0.2.1", note = "renamed to `ooxml_value`")]
+    #[must_use]
+    pub fn as_val(self) -> &'static str {
+        self.ooxml_value()
     }
 }
 

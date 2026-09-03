@@ -121,6 +121,15 @@ pub fn load_preset_from_search_path(name: &str) -> Result<Preset, String> {
     ))
 }
 
+/// Deprecated alias for [`load_preset_from_search_path`].
+///
+/// # Errors
+/// See [`load_preset_from_search_path`].
+#[deprecated(since = "0.2.1", note = "renamed to `load_preset_from_search_path`")]
+pub fn load_builtin_preset(name: &str) -> Result<Preset, String> {
+    load_preset_from_search_path(name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
